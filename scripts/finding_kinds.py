@@ -332,22 +332,60 @@ def since_of(body: dict[str, Any]) -> int | None:
     return int(found["number"])
 
 
+def marks_of(kinds: dict[str, Any], numbered: list[tuple[int, str]]) -> dict[str, int]:
+    """Род с отметкой → МЕСТО слияния отметки в истории; отметки нет в истории — `NotRun`.
+
+    МЕСТО, А НЕ НОМЕР. Номер изменения порядка слияния не держит: замер
+    23.10.2026 — 187 мест, где слитое позже несёт номер меньше (#1605 слито
+    раньше #1604). Отбор `n <= N` унёс бы в «до правила» изменение с меньшим
+    номером, слитое после отметки, — и сигнал «правило не держит» молча
+    пропустил бы его встречу (взгляд на #1611). Отметка, которой в истории нет,
+    — опечатка или изменение ещё не слито; место ей не подставляется (045).
+    """
+    place = {number: at for at, (number, _) in enumerate(numbered)}
+    found: dict[str, int] = {}
+    for name, body in kinds.items():
+        number = since_of(body)
+        if number is None:
+            continue
+        if number not in place:
+            raise NotRun(f"«{name}»: «{SINCE}» #{number} — среди слитых изменений его нет")
+        found[name] = place[number]
+    return found
+
+
+def undated(kinds: dict[str, Any], numbered: list[tuple[int, str]]) -> set[str]:
+    """Роды, чья отметка раньше первой строки `Род:` в истории: их «после» — нижняя граница.
+
+    Замороженный список `встречен` копился до строк `Род:` и дат не несёт: встречи
+    между такой отметкой и первой строкой лежат в нём неотличимо от встреч до
+    правила. Замер 23.10.2026: таких отметок 13 из 21 (взгляд на #1611). Число не
+    чинится — данных нет, — но и не выдаётся за точное (075).
+    """
+    first = next(
+        (at for at, (_, body) in enumerate(numbered) if met_in_history([body], kinds)),
+        len(numbered),
+    )
+    return {name for name, at in marks_of(kinds, numbered).items() if at < first}
+
+
 def after_rule(kinds: dict[str, Any], numbered: list[tuple[int, str]]) -> dict[str, list[str]]:
     """Род с отметкой «правило с #N» → встречи истории в слияниях ПОСЛЕ #N (#1607).
 
     ОДИН СЧЁТ, ДВА ОТРЕЗКА. Встречи считает тот же `met_in_history` по всей
-    истории и по её началу до #N включительно; «после» — разность. Отдельный
-    счёт по хвосту истории потерял бы сведение двойников с началом: цепочка,
-    чей отпечаток уже встречен до правила, засчиталась бы снова (022).
-    Замороженный список `встречен` — всё до истории, то есть до правила.
+    истории и по её началу до места #N включительно; «после» — разность.
+    Отдельный счёт по хвосту истории потерял бы сведение двойников с началом:
+    цепочка, чей отпечаток уже встречен до правила, засчиталась бы снова (022).
+    Замороженный список `встречен` целиком считается «до»; где это неверно —
+    называет `undated`.
     """
     whole = met_in_history([body for _, body in numbered], kinds)
-    marks = {name: number for name, body in kinds.items() if (number := since_of(body)) is not None}
-    # Начало истории считается по разу на номер, а не на род: отметок у родов
-    # меньше, чем родов, и каждый проход — разбор всей истории до номера.
+    marks = marks_of(kinds, numbered)
+    # Начало истории считается по разу на место, а не на род: отметок у родов
+    # меньше, чем родов, и каждый проход — разбор всей истории до места.
     starts = {
-        number: met_in_history([body for n, body in numbered if n <= number], kinds)
-        for number in set(marks.values())
+        at: met_in_history([body for _, body in numbered[: at + 1]], kinds)
+        for at in set(marks.values())
     }
     return {
         name: [one for one in whole.get(name, []) if one not in set(starts[number].get(name, []))]
@@ -686,6 +724,7 @@ def main(argv: list[str] | None = None) -> int:
         numbered = trunk_log.merged_numbered(ref=args.trunk)
         kinds, outside = with_history(frozen, [body for _, body in numbered])
         after = after_rule(frozen, numbered)
+        lower = undated(frozen, numbered)
         unseen = trunk_log.unseen(ref=args.trunk)
         archived, gap = in_archive(Path(args.archive)) if args.archive else ({}, "")
     except (NotRun, trunk_log.NotRun) as refusal:
@@ -716,7 +755,8 @@ def main(argv: list[str] | None = None) -> int:
         split = f" (взгляд {seen}, окно {caught})" if caught else ""
         kept = archived.get(name)
         stored = f"  архив: {kept[0]}, снято работой {kept[1]}, дублем {kept[2]}" if kept else ""
-        rule = f"  после правила {body[SINCE]}: {len(after[name])}" if name in after else ""
+        least = "не меньше " if name in lower else ""
+        rule = f"  после правила {body[SINCE]}: {least}{len(after[name])}" if name in after else ""
         print(f"  {times:>2}  {name}{split}  [{mark}]{rule}{stored}")
         if born:
             print(f"      породил: {'; '.join(born)}")

@@ -671,6 +671,13 @@ def no_trunk_history(monkeypatch: pytest.MonkeyPatch) -> None:
     число в проверке зависело бы от того, сколько строк `Род:` уже слито.
     """
     monkeypatch.setattr(module.trunk_log, "merged_bodies", lambda *_, **__: [])
+    # Слияния отметок словаря есть, строк `Род:` нет: отметка без своего
+    # слияния — отказ (`marks_of`), а встреч в подделке быть не должно.
+    marked = sorted(
+        {number for body in module.read().values() if (number := module.since_of(body))}
+    )
+    history = [(number, f"Тема (#{number})") for number in marked]
+    monkeypatch.setattr(module.trunk_log, "merged_numbered", lambda *_, **__: history)
     monkeypatch.setattr(module.trunk_log, "unseen", lambda *_, **__: 0)
 
 
@@ -899,6 +906,42 @@ def test_a_twin_met_before_the_rule_is_not_met_again_after() -> None:
         (2, "Разобрано: aaaaaaa\nРод: род"),
     ]
     assert module.after_rule(kinds, numbered) == {"род": []}
+
+
+def test_the_rule_splits_by_merge_order_not_by_number() -> None:
+    """#3 слито ПОСЛЕ отметки #4 — встреча «после правила», хоть номер меньше (взгляд на #1611)."""
+    kinds = {"род": {"признак": "x", "встречен": [], module.SINCE: "#4"}}
+    numbered = [
+        (4, "Разобрано: aaaaaaa\nРод: род"),
+        (3, "Разобрано: bbbbbbb\nРод: род"),
+    ]
+    assert module.after_rule(kinds, numbered) == {"род": ["bbbbbbb"]}
+
+
+def test_a_mark_outside_the_history_is_a_refusal() -> None:
+    """Отметка #N, которого нет среди слитых, — отказ, а не место наугад (045)."""
+    kinds = {"род": {"признак": "x", "встречен": [], module.SINCE: "#9"}}
+    with pytest.raises(module.NotRun, match="среди слитых"):
+        module.after_rule(kinds, [(1, "Разобрано: aaaaaaa\nРод: род")])
+
+
+def test_a_mark_before_the_first_kind_line_is_a_lower_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Отметка раньше первой строки `Род:` — «после» печатается «не меньше»: встречи без дат."""
+    marks = {
+        "ранний": {"признак": "x", "встречен": ["1111111"], "закрыт": "нет", module.SINCE: "#1"},
+        "поздний": {"признак": "y", "встречен": [], "закрыт": "нет", module.SINCE: "#2"},
+    }
+    numbered = [(1, "Тема без снятий"), (2, "Разобрано: aaaaaaa\nРод: поздний")]
+    assert module.undated(marks, numbered) == {"ранний"}
+    path = tmp_path / "kinds.json"
+    path.write_text(json.dumps({"kinds": marks}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(module.trunk_log, "merged_numbered", lambda *_, **__: numbered)
+    assert module.main(["--kinds", str(path)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "после правила #1: не меньше 0" in out
+    assert "после правила #2: 0" in out
 
 
 @pytest.mark.parametrize("said", ["692", "#", "#69a", "с #692"])
