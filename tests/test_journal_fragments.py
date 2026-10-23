@@ -1281,11 +1281,44 @@ def test_tail_fault_names_what_the_end_lacks(body: str, section: object, why: st
     assert (why in said) if why else said == "", said
 
 
-def test_a_broken_section_reaches_release_readers_as_their_outcome(
+def test_history_is_read_whatever_the_section_says(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Битый раздел `journal:` — `NotRun` сборки: его ловят выпуск и оповещение (039)."""
-    (tmp_path / ".pipeline.yml").write_text("journal:\n  tail: '('\n", encoding="utf-8")
+    """Выпущенное читается без суда конца: раздел не делает историю неразбираемой (#1590)."""
+    released = tmp_path / module.RELEASED / "1.0.0"
+    released.mkdir(parents=True)
+    (released / "old.fixed.md").write_text("Прежняя форма.\n\n#12\n", encoding="utf-8")
+    (tmp_path / module.FRAGMENTS / "new.fixed.md").write_text("Новое.\n\n#13\n", encoding="utf-8")
+    (tmp_path / ".pipeline.yml").write_text(
+        "journal:\n  tail: '^> правило'\n  link: body\n", encoding="utf-8"
+    )
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(module.NotRun, match="не компилируется"):
+    assert [one.slug for one in module.read_fragments(module.RELEASED / "1.0.0")] == ["old"]
+    # Копящееся — новое: его конец судит форма проекта.
+    with pytest.raises(module.NotRun, match="не подходит под tail"):
+        module.read_fragments(module.FRAGMENTS)
+
+
+def test_a_bare_task_line_is_a_link_in_the_body() -> None:
+    """`link: body` без своего `tail`: голая последняя строка `#12` — тоже связь (#1590)."""
+    form = journal.form_of({"link": "body"})
+    assert module.tail_fault("Текст.\n\n#12", form) == ""
+    assert module.tail_fault("Текст без связи.\n\n#12 текст", form)
+
+
+def test_a_section_without_tail_speaks_of_our_form() -> None:
+    """Раздел без `tail` — наша форма и по значению: отказ называет её, а не чужой tail."""
+    assert module.tail_fault("Текст без ссылки", journal.form_of({})) == (
+        "ссылка на задачу не последней строкой"
+    )
+
+
+def test_project_form_reads_the_section_and_names_its_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`project_form`: раздела нет — наша форма; битый раздел — `NotRun` сборки (039)."""
+    monkeypatch.chdir(tmp_path)
+    assert module.project_form().tail == journal.DEFAULT_FORM.tail
+    (tmp_path / ".pipeline.yml").write_text("journal: [\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="не прочитан"):
         module.project_form()

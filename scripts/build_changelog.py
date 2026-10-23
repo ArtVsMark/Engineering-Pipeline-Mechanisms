@@ -173,7 +173,10 @@ def read_fragments(directory: Path) -> list[Fragment]:
     """Читает ВСЕ фрагменты каталога: предмет выпуска, а не изменения."""
     if not directory.is_dir():
         return []
-    return parse_fragments(sorted(directory.glob("*.md")))
+    # Выпущенное — история, его конец не судится; копящееся — новое, и его
+    # судит форма проекта (#1172, взгляд на #1590).
+    released = directory.as_posix().startswith(RELEASED.as_posix())
+    return parse_fragments(sorted(directory.glob("*.md")), None if released else project_form())
 
 
 def tail_fault(body: str, form: journal.FragmentForm) -> str:
@@ -186,13 +189,16 @@ def tail_fault(body: str, form: journal.FragmentForm) -> str:
     """
     last = body.splitlines()[-1].strip()
     if not form.tail.match(last):
-        if form is journal.DEFAULT_FORM:
+        if form.tail == journal.DEFAULT_FORM.tail:
             return "ссылка на задачу не последней строкой"
         return f"последняя строка не подходит под tail раздела {journal.SECTION}"
     if form.link == journal.LINK_TAIL:
         if not TASK_RE.search(last):
             return "связь с задачей не в последней строке (link: tail)"
-    elif not changerefs.links_in(body):
+    # Голая строка `#12` — тоже связь (взгляд на #1590): при `link: body` без
+    # своего `tail` хвост остаётся нашим, а `links_in` знает связь только с
+    # глаголом, и фрагмент «текст / #12» отвергался бы за отсутствие связи.
+    elif not (changerefs.links_in(body) or LINK_LINE_RE.match(last)):
         return "нет связи с задачей в тексте (link: body)"
     return ""
 
@@ -200,10 +206,10 @@ def tail_fault(body: str, form: journal.FragmentForm) -> str:
 def project_form() -> journal.FragmentForm:
     """Форма фрагмента проекта; отказ разбора раздела — `NotRun` этого модуля.
 
-    Отказ переводится здесь, на границе: читатели сборки — выпуск
-    (`release.py`) и оповещение о мажоре (`breaking_notice.py`) — ловят
-    `build_changelog.NotRun`, а `journal.NotRun` прошёл бы мимо них трассой с
-    кодом 1, неотличимой от «нашёл» (039).
+    Отказ переводится здесь, на границе: копящиеся фрагменты читает и выпуск
+    (`release.py` через сборку журнала), а он ловит `build_changelog.NotRun`.
+    `journal.NotRun` прошёл бы мимо него трассой с кодом 1, неотличимой от
+    «нашёл» (039).
     """
     try:
         return pipeline_checks.fragment_form()
@@ -221,8 +227,15 @@ def parse_fragments(paths: list[Path], form: journal.FragmentForm | None = None)
     Разбор один на оба читателя — выпуск и гейт изменения. Двумя копиями он
     разошёлся бы молча: один принял бы фрагмент, который второй отвергает
     ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
+
+    КОНЕЦ СУДИТСЯ ТОЛЬКО У НОВОГО (`form`, взгляд на #1590). Без формы — это
+    чтение истории (`read_fragments` над `released/`), и конец не судится
+    вовсе: фрагмент, выпущенный при прежнем `tail`, иначе стал бы
+    неразбираемым после первого объявления раздела или его правки, и журнал
+    перестал бы собираться. Тот же принцип, что у формы тела (#1172): выпущенное
+    — источник журнала, его задним числом не правят. Новое — копящееся в
+    `changelog.d/` и тронутое изменением — судится формой проекта.
     """
-    form = form if form is not None else project_form()
     fragments: list[Fragment] = []
     unnamed: list[str] = []
     for path in paths:
@@ -238,7 +251,7 @@ def parse_fragments(paths: list[Path], form: journal.FragmentForm | None = None)
         if not body:
             unnamed.append(f"{path.name} (пустой)")
             continue
-        if why := tail_fault(body, form):
+        if form is not None and (why := tail_fault(body, form)):
             unnamed.append(f"{path.name} ({why})")
             continue
         # Причина у `internal` проверяется ЗДЕСЬ, а не у гейта изменения: разбор
@@ -258,9 +271,9 @@ def parse_fragments(paths: list[Path], form: journal.FragmentForm | None = None)
             + "\n\nИмя: <слаг-по-смыслу>.<род>.md, род — "
             + " · ".join(KINDS)
             + (
-                "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
-                if form is journal.DEFAULT_FORM
-                else f"\nФорма конца — раздел {journal.SECTION} в {PIPELINE}"
+                f"\nФорма конца — раздел {journal.SECTION} в {PIPELINE}"
+                if form is not None and form.tail != journal.DEFAULT_FORM.tail
+                else "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
             )
             + "\nУ рода `internal` ПЕРВАЯ строка — причина: "
             + "«> **Потребителю безразлично:** …» (154)"
