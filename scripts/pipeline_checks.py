@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import gitcall
+import journal
 import paths
 import yaml
 
@@ -540,9 +541,34 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
                 )
             checks.update(more)
 
+    # Раздел наполнения фрагментов (#1570) судится здесь же: ответ по проверкам
+    # и форма фрагмента — один файл, и битый образец увидит шаг `pipeline`
+    # раньше, чем на нём упадёт шаг журнала. Разбор один — `journal.form_of`.
+    try:
+        journal.form_of(raw.get(journal.SECTION))
+    except journal.NotRun as exc:
+        problems.append(str(exc))
+
     if problems:
         raise BadPolicy("ответ по проверкам не проходит проверку:\n  " + "\n  ".join(problems))
     return checks
+
+
+def fragment_form(path: Path = DEFAULT_PATH) -> journal.FragmentForm:
+    """Форма фрагмента журнала из ответа проекта; файла или раздела нет — наша (#1570).
+
+    Читается здесь, а не в `journal`: YAML ответа разбирает один модуль, и
+    второй разборщик того же файла разошёлся бы с ним молча (090). Отказ
+    чтения и битый раздел — `journal.NotRun` с причиной: шаг журнала объявляет
+    его третьим исходом.
+    """
+    if not path.is_file():
+        return journal.DEFAULT_FORM
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise journal.NotRun(f"{path} не прочитан: {exc}") from exc
+    return journal.form_of(raw.get(journal.SECTION) if isinstance(raw, dict) else None)
 
 
 def _read_section(
