@@ -29,6 +29,7 @@ import argparse
 import hashlib
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -166,11 +167,16 @@ ENV_MAX_AGE: Final = 24 * 3600
 #: `Род:` и слова закрытия по коммитам ветки — то есть по тому, что лежит здесь.
 #: Отложенный целиком, он отпускал толчок, который краснел через минуту:
 #: 05.10.2026 «Разобрано: 026f8a8» уехало без «Род:», и #1124 переносили.
+#:
+#: ФОРМА ВЫЗОВА — ТА ЖЕ, ЧТО У ОБЩЕГО ШАГА (`$MECHANISMS`, #1553): у своего
+#: дерева это его же корень, у потребителя — выкачка механизмов по тегу, а
+#: дерево проверяемое — его. Прямое `python scripts/` у потребителя указывало бы
+#: на скрипты, которых в его дереве нет.
 BEFORE_PUSH: Final = (
-    Step("ветка откроет изменение", "python scripts/agent_pr.py --dry-run"),
+    Step("ветка откроет изменение", f"{FROM_CHECKOUT}agent_pr.py --dry-run"),
     Step(
         "текст коммитов годится для общей ветки",
-        f"python scripts/check_pr_meta.py --local origin/{paths.TRUNK}",
+        f"{FROM_CHECKOUT}check_pr_meta.py --local origin/{paths.TRUNK}",
     ),
 )
 
@@ -195,7 +201,13 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «всё зелено»."""
 
 
-def _jobs_of(job: dict[str, Any], caller: Path) -> list[list[dict[str, Any]]]:
+#: Вызов общего шага поставщика: `<владелец>/<репозиторий>/<путь прогона>@<ссылка>`.
+SUPPLIER_CALL: Final = re.compile(r"^[^/\s]+/[^/\s]+/(?P<path>\.github/workflows/[^@\s]+)@\S+$")
+
+
+def _jobs_of(
+    job: dict[str, Any], caller: Path, supplier: Path | None = None
+) -> list[list[dict[str, Any]]]:
     """Шаги джоба — свои либо шаги прогона, который он зовёт, ПО ДЖОБАМ.
 
     Вызванный прогон отдаёт свои джобы порознь, а не одним списком: строка
@@ -212,8 +224,16 @@ def _jobs_of(job: dict[str, Any], caller: Path) -> list[list[dict[str, Any]]]:
     if not said:
         return [list(job.get("steps") or [])]
     if not said.startswith(OUR_CALL):
-        UNRUNNABLE[said] = "вызов чужого прогона: его шагов в дереве нет"
-        return []
+        # ВЫЗОВ ПОСТАВЩИКА РАСКРЫВАЕТСЯ ПО ЕГО ВЫКАЧКЕ (#1553). У потребителя шаги
+        # лежат в механизмах, и загрузчик окна кладёт их выкачку по тегу из этих
+        # же `uses:` — прогон читается оттуда. Без выкачки, как прежде, вызов
+        # назван невыполнимым. ГРАНИЦА НАЗВАНА (046): ссылку вызова предполётная
+        # не сверяет — какой тег выкачан, решает загрузчик.
+        found = SUPPLIER_CALL.match(said)
+        if supplier is None or found is None:
+            UNRUNNABLE[said] = "вызов чужого прогона: его шагов в дереве нет"
+            return []
+        return _called_jobs(supplier / found["path"], said)
     # КОРЕНЬ ВЫВОДИТСЯ ИЗ ОБЪЯВЛЕННОГО ПУТИ, А НЕ ПОДЪЁМОМ ПО ДЕРЕВУ: подъём
     # угадывал бы глубину, на которой лежат прогоны, и соврал бы молча, изменись
     # она. Запрет держит `tests/test_settings_anchor.py`, он же это и назвал —
@@ -226,15 +246,23 @@ def _jobs_of(job: dict[str, Any], caller: Path) -> list[list[dict[str, Any]]]:
             "корень дерева из него не выводится (075)"
         )
     where = Path(said_caller[: -len(tail)] or ".") / said[len(OUR_CALL) :].split("@")[0]
+    return _called_jobs(where, said)
+
+
+def _called_jobs(where: Path, said: str) -> list[list[dict[str, Any]]]:
+    """Шаги вызванного прогона по джобам; прогона нет или он не разбирается — отказ."""
     if not where.is_file():
         raise NotRun(f"вызов «{said}» указывает на прогон, которого в дереве нет (075)")
-    called = yaml.safe_load(where.read_text(encoding="utf-8"))
+    try:
+        called = yaml.safe_load(where.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise NotRun(f"{where}: вызываемый прогон не прочитан: {exc}") from exc
     if not isinstance(called, dict):
         raise NotRun(f"{where}: вызываемый прогон не разбирается")
     return [list((inner or {}).get("steps") or []) for inner in (called.get("jobs") or {}).values()]
 
 
-def steps(path: Path = CI) -> list[Step]:
+def steps(path: Path = CI, supplier: Path | None = None) -> list[Step]:
     """Команды прогона, выполнимые без площадки, — в порядке объявления.
 
     Разбор идёт по ДЕРЕВУ, а не по строкам, и это не вкус. Команда шага живёт в
@@ -272,7 +300,7 @@ def steps(path: Path = CI) -> list[Step]:
     jobs = [
         inner
         for job in (document.get("jobs") or {}).values()
-        for inner in _jobs_of(job or {}, path)
+        for inner in _jobs_of(job or {}, path, supplier)
     ]
     for job_steps in jobs:
         # Строка установки — ПОСЛЕДНЯЯ перед шагом в его джобе: так её видит
@@ -542,8 +570,8 @@ def as_on_the_platform(step: Step, root: Path) -> str:
     return "\n".join(lines)
 
 
-def run(step: Step, root: Path) -> tuple[int, str]:
-    """Запускает команду шага и отдаёт код с выводом."""
+def run(step: Step, root: Path, supplier: Path | None = None) -> tuple[int, str]:
+    """Запускает команду шага и отдаёт код с выводом; код конвейера — `supplier` или дерево."""
     try:
         command = as_on_the_platform(step, root)
     except NotRun as exc:
@@ -561,10 +589,10 @@ def run(step: Step, root: Path) -> tuple[int, str]:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            # КОД КОНВЕЙЕРА ЛОКАЛЬНО — ЭТО ДЕРЕВО. На площадке общий шаг берёт его
-            # своим checkout на коммите вызова (#990); здесь проверяется дерево, в
-            # котором лежит и код.
-            env={**environment(), MECHANISMS: str(root.resolve())},
+            # КОД КОНВЕЙЕРА ЛОКАЛЬНО — ЭТО ДЕРЕВО ИЛИ ВЫКАЧКА. На площадке общий
+            # шаг берёт его своим checkout на коммите вызова (#990); у своего
+            # дерева код лежит в нём же, у потребителя — в выкачке по тегу (#1553).
+            env={**environment(), MECHANISMS: str((supplier or root).resolve())},
             timeout=STEP_TIMEOUT,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -867,6 +895,12 @@ def main(argv: list[str] | None = None) -> int:
     """Точка входа: прогоняет проверки дерева и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
+    parser.add_argument(
+        "--mechanisms",
+        type=Path,
+        default=None,
+        help="выкачка механизмов по тегу — у потребителя: оттуда шаги и код (#1553)",
+    )
     parser.add_argument("--list", action="store_true", help="только показать, что будет запущено")
     parser.add_argument(
         "--all", action="store_true", help="полный набор тестов, без выбора по задетому (#1597)"
@@ -910,7 +944,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # Проверки ветки идут ПЕРВЫМИ: их предмет — то, откроется ли изменение
         # вообще, и красное здесь делает остальное бессмысленным.
-        found = [*BEFORE_PUSH, *steps(args.root / CI)]
+        found = [*BEFORE_PUSH, *steps(args.root / CI, args.mechanisms)]
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
@@ -925,7 +959,7 @@ def main(argv: list[str] | None = None) -> int:
 
     red: list[Step] = []
     for step in found:
-        code, output = run(step, args.root)
+        code, output = run(step, args.root, args.mechanisms)
         print(f"{'✓' if code == 0 else '✗'} {step.name}: {step.command}")
         if code != 0:
             red.append(step)
