@@ -201,11 +201,13 @@ class NotRun(RuntimeError):
 
 
 #: Вызов общего шага поставщика: `<владелец>/<репозиторий>/<путь прогона>@<ссылка>`.
-SUPPLIER_CALL: Final = re.compile(r"^[^/\s]+/[^/\s]+/(?P<path>\.github/workflows/[^@\s]+)@\S+$")
+SUPPLIER_CALL: Final = re.compile(
+    r"^(?P<repo>[^/\s]+/[^/\s]+)/(?P<path>\.github/workflows/[^@\s]+)@\S+$"
+)
 
 
 def _jobs_of(
-    job: dict[str, Any], caller: Path, supplier: Path | None = None
+    job: dict[str, Any], caller: Path, supplier: Path | None = None, supplier_repo: str = ""
 ) -> list[list[dict[str, Any]]]:
     """Шаги джоба — свои либо шаги прогона, который он зовёт, ПО ДЖОБАМ.
 
@@ -228,8 +230,12 @@ def _jobs_of(
         # же `uses:` — прогон читается оттуда. Без выкачки, как прежде, вызов
         # назван невыполнимым. ГРАНИЦА НАЗВАНА (046): ссылку вызова предполётная
         # не сверяет — какой тег выкачан, решает загрузчик.
+        # Раскрывается вызов ТОГО поставщика, чья выкачка названа (`supplier_repo`):
+        # потребитель вправе звать и чужие переиспользуемые прогоны, и такой вызов
+        # по-прежнему невыполнимый с причиной, а не отказ всей предполётной
+        # (взгляд на #1618).
         found = SUPPLIER_CALL.match(said)
-        if supplier is None or found is None:
+        if supplier is None or found is None or found["repo"].lower() != supplier_repo.lower():
             UNRUNNABLE[said] = "вызов чужого прогона: его шагов в дереве нет"
             return []
         return _called_jobs(supplier / found["path"], said)
@@ -261,7 +267,7 @@ def _called_jobs(where: Path, said: str) -> list[list[dict[str, Any]]]:
     return [list((inner or {}).get("steps") or []) for inner in (called.get("jobs") or {}).values()]
 
 
-def steps(path: Path = CI, supplier: Path | None = None) -> list[Step]:
+def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = "") -> list[Step]:
     """Команды прогона, выполнимые без площадки, — в порядке объявления.
 
     Разбор идёт по ДЕРЕВУ, а не по строкам, и это не вкус. Команда шага живёт в
@@ -299,7 +305,7 @@ def steps(path: Path = CI, supplier: Path | None = None) -> list[Step]:
     jobs = [
         inner
         for job in (document.get("jobs") or {}).values()
-        for inner in _jobs_of(job or {}, path, supplier)
+        for inner in _jobs_of(job or {}, path, supplier, supplier_repo)
     ]
     for job_steps in jobs:
         # Строка установки — ПОСЛЕДНЯЯ перед шагом в его джобе: так её видит
@@ -900,6 +906,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="выкачка механизмов по тегу — у потребителя: оттуда шаги и код (#1553)",
     )
+    parser.add_argument(
+        "--supplier",
+        default="",
+        help="`<владелец>/<репо>` выкачки: раскрываются только его вызовы (#1553)",
+    )
     parser.add_argument("--list", action="store_true", help="только показать, что будет запущено")
     parser.add_argument(
         "--all", action="store_true", help="полный набор тестов, без выбора по задетому (#1597)"
@@ -943,7 +954,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # Проверки ветки идут ПЕРВЫМИ: их предмет — то, откроется ли изменение
         # вообще, и красное здесь делает остальное бессмысленным.
-        found = [*BEFORE_PUSH, *steps(args.root / CI, args.mechanisms)]
+        found = [*BEFORE_PUSH, *steps(args.root / CI, args.mechanisms, args.supplier)]
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN

@@ -26,12 +26,15 @@ root=$(git rev-parse --show-toplevel) || refuse "не дерево git"
 cd "$root"
 
 # Запись вызова — с кавычками или без: `uses: o/m/…@v1` и `uses: "o/m/…@v1"`.
-calls=$(grep -rhoE "uses:[[:space:]]*[\"']?[^[:space:]/\"']+/[^[:space:]/]+/\.github/workflows/[^@[:space:]]+@[^[:space:]\"']+" \
-  .github/workflows 2>/dev/null \
+# Берутся только ОБЩИЕ ШАГИ механизмов (`step-*.yml`) и только незакомментированные
+# строки: чужой переиспользуемый прогон и старый `# uses:` поставщиком не
+# считаются (взгляд на #1618).
+calls=$(grep -rhE "^[[:space:]]*uses:" .github/workflows 2>/dev/null \
+  | grep -oE "uses:[[:space:]]*[\"']?[^[:space:]/\"']+/[^[:space:]/]+/\.github/workflows/step-[^@[:space:]]+@[^[:space:]\"']+" \
   | sed -E "s/^uses:[[:space:]]*[\"']?([^/]+\/[^/]+)\/.*@(.*)$/\1 \2/" | sort -u || true)
 [ -n "$calls" ] || refuse "в .github/workflows нет вызова общих шагов механизмов — тег взять неоткуда"
 [ "$(printf '%s\n' "$calls" | wc -l)" -eq 1 ] \
-  || refuse "прогоны зовут механизмы по разным ссылкам — сведите их к одному тегу: $(printf '%s; ' $calls)"
+  || refuse "прогоны зовут механизмы по разным ссылкам — сведите их к одному тегу: $(printf '%s' "$calls" | tr '\n' ';' | sed 's/;/; /g')"
 supplier=${calls% *}
 tag=${calls#* }
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
@@ -48,4 +51,4 @@ if [ ! -f "$cache/scripts/preflight.py" ]; then
 fi
 
 export PYTHONPATH="$cache/packages/transport${PYTHONPATH:+:$PYTHONPATH}"
-exec "${PYTHON:-python3}" "$cache/scripts/preflight.py" --root "$root" --mechanisms "$cache" "$@"
+exec "${PYTHON:-python3}" "$cache/scripts/preflight.py" --root "$root" --mechanisms "$cache" --supplier "$supplier" "$@"

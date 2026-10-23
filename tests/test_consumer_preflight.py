@@ -85,8 +85,38 @@ def test_the_loader_runs_the_supplier_preflight_at_the_tag(tmp_path: Path) -> No
     done = load(tree, tmp_path, "--list")
     assert done.returncode == 0, done.stderr
     cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
-    assert f"доводы: --root {tree.resolve()} --mechanisms {cache} --list" in done.stdout
+    assert (
+        f"доводы: --root {tree.resolve()} --mechanisms {cache} --supplier o/m --list" in done.stdout
+    )
     assert f"транспорт: {cache}/packages/transport" in done.stdout
+
+
+def test_foreign_and_commented_calls_are_not_the_supplier(tmp_path: Path) -> None:
+    """Чужой переиспользуемый прогон и старый `# uses:` поставщиком не считаются (#1618)."""
+    supplier(tmp_path)
+    tree = consumer(
+        tmp_path,
+        "o/m/.github/workflows/step-lint.yml@v1.2.3",
+        "someone/else/.github/workflows/deploy.yml@v2",
+    )
+    (tree / ".github" / "workflows" / "old.yml").write_text(
+        "jobs:\n  j:\n    # uses: o/m/.github/workflows/step-lint.yml@v1.0.0\n",
+        encoding="utf-8",
+    )
+    done = load(tree, tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert "--supplier o/m" in done.stdout
+
+
+def test_two_tags_are_named_as_pairs(tmp_path: Path) -> None:
+    """Причина отказа называет пары «поставщик тег», а не слова вперемешку (#1618)."""
+    supplier(tmp_path)
+    tree = consumer(
+        tmp_path,
+        "o/m/.github/workflows/step-a.yml@v1.2.3",
+        "o/m/.github/workflows/step-b.yml@v1.3.0",
+    )
+    assert "o/m v1.2.3; o/m v1.3.0" in load(tree, tmp_path).stderr
 
 
 def test_a_second_run_takes_the_cache(tmp_path: Path) -> None:

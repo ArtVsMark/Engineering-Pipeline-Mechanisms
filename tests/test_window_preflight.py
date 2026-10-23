@@ -570,7 +570,7 @@ def test_a_red_verdict_never_reaches_the_push(monkeypatch: pytest.MonkeyPatch) -
     """
     pushed: list[object] = []
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("красный", "false")])
     monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (1, "красное"))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
@@ -586,7 +586,7 @@ def test_a_green_verdict_pushes_in_the_same_run(monkeypatch: pytest.MonkeyPatch)
     """Зелёный вердикт толкает ТЕМ ЖЕ заходом: проверка и действие — один акт."""
     pushed: list[object] = []
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
     monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
@@ -606,7 +606,7 @@ def test_without_the_flag_nothing_is_pushed(monkeypatch: pytest.MonkeyPatch) -> 
     """
     pushed: list[object] = []
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
     monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
@@ -648,7 +648,7 @@ def test_an_environment_gap_runs_nothing_at_all(
         return 0, ""
 
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
     monkeypatch.setattr(preflight, "run", noted)
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
@@ -1339,7 +1339,7 @@ def test_the_source_is_the_first_line_of_the_report(
     """Строка об источнике идёт первой: остальное имеет смысл только после неё (216)."""
     monkeypatch.setattr(preflight, "code_origin", lambda root: "/elsewhere/ghrest.py")
     monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
-    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
     monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
@@ -1400,8 +1400,22 @@ def consumer_tree(tmp_path: Path) -> tuple[Path, Path]:
 def test_a_supplier_call_is_opened_from_the_checkout(tmp_path: Path) -> None:
     """Вызов `<владелец>/<репо>/…@тег` раскрывается по выкачке поставщика (#1553)."""
     tree, supplier = consumer_tree(tmp_path)
-    found = preflight.steps(tree / preflight.CI, supplier)
+    found = preflight.steps(tree / preflight.CI, supplier, "o/m")
     assert [(one.name, one.command) for one in found] == [("линтер", "ruff check")]
+
+
+def test_a_call_of_another_owner_stays_unrunnable(tmp_path: Path) -> None:
+    """Чужой переиспользуемый прогон рядом с поставщиком назван, а не роняет заход (#1618)."""
+    tree, supplier = consumer_tree(tmp_path)
+    flow = tree / ".github" / "workflows" / "ci.yml"
+    flow.write_text(
+        flow.read_text(encoding="utf-8")
+        + "  other:\n    uses: someone/else/.github/workflows/deploy.yml@v2\n",
+        encoding="utf-8",
+    )
+    found = preflight.steps(flow, supplier, "o/m")
+    assert [one.name for one in found] == ["линтер"]
+    assert "someone/else/.github/workflows/deploy.yml@v2" in preflight.UNRUNNABLE
 
 
 def test_without_the_checkout_the_supplier_call_is_named(tmp_path: Path) -> None:
@@ -1417,7 +1431,7 @@ def test_a_call_missing_from_the_checkout_is_a_refusal(tmp_path: Path) -> None:
     tree, supplier = consumer_tree(tmp_path)
     (supplier / ".github" / "workflows" / "step-lint.yml").unlink()
     with pytest.raises(preflight.NotRun, match=r"step-lint\.yml"):
-        preflight.steps(tree / preflight.CI, supplier)
+        preflight.steps(tree / preflight.CI, supplier, "o/m")
 
 
 def test_the_code_of_the_steps_is_the_checkout(tmp_path: Path) -> None:
