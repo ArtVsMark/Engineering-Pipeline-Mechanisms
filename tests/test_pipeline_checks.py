@@ -1202,3 +1202,26 @@ def test_a_climb_out_of_the_mechanism_dirs_is_not_looked_up_at_the_supplier(
     assert not policy.resolves("scripts/../docs/runbook.md", tree, supplier)
     assert not policy.resolves("scripts/../docs/*.md", tree, supplier)
     assert policy.resolves("scripts/main_red.py", tree, supplier)
+
+
+@pytest.mark.parametrize(
+    ("section", "passes"),
+    [
+        ("journal:\n  tail: '^> правило'\n  link: body\n", True),
+        ("journal:\n  tail: '(незакрытая'\n", False),
+        ("journal:\n  link: anywhere\n", False),
+    ],
+    ids=["форма-каталога", "битый-образец", "неизвестный-link"],
+)
+def test_the_journal_section_is_judged_with_the_answer(
+    tmp_path: Path, section: str, passes: bool
+) -> None:
+    """Раздел формы фрагмента судится сверкой ответа — раньше, чем шагом журнала (#1570)."""
+    path = answered(tmp_path / "tree")
+    path.write_text(path.read_text(encoding="utf-8") + section, encoding="utf-8")
+    supplier = supplier_at(tmp_path / "mechanisms", "0.1.0")
+    if passes:
+        policy.load(path, supplier=supplier)
+    else:
+        with pytest.raises(policy.BadPolicy, match="раздел journal"):
+            policy.load(path, supplier=supplier)

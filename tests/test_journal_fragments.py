@@ -1187,3 +1187,138 @@ def test_what_breaks_a_paragraph(line: str, verdict: bool) -> None:
 def test_the_indent_counts_tabs_to_four(line: str, width: int) -> None:
     """Отступ считается по CommonMark: табуляция — до позиции, кратной четырём."""
     assert module.indent(line) == width
+
+
+#: Раздел `journal:` каталога (#1570): конец — вердикт о правиле, связь — в тексте.
+CATALOGUE_FORM: Final = {
+    "tail": r"^> (правило \d{3} — |правилом не становится, потому что )\S",
+    "link": "body",
+}
+
+
+def fragment(tmp_path: Path, text: str, name: str = "x.fixed.md") -> Path:
+    """Фрагмент во временном каталоге — вход разбора, а не дерево."""
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_catalogue_fragment_passes_under_its_own_form(tmp_path: Path) -> None:
+    """Форма каталога: связь в тексте, последней строкой — вердикт о правиле (#1570)."""
+    form = module.journal.form_of(CATALOGUE_FORM)
+    good = fragment(tmp_path, "Сборщик чинит ссылку. Part of #930\n\n> правило 157 — перечитано\n")
+    assert len(module.parse_fragments([good], form)) == 1
+    # Наша форма тот же фрагмент отвергает: умолчание не тронуто.
+    with pytest.raises(module.NotRun, match="ссылка на задачу не последней строкой"):
+        module.parse_fragments([good], module.journal.DEFAULT_FORM)
+
+
+def test_a_catalogue_fragment_without_a_task_is_rejected(tmp_path: Path) -> None:
+    """Связь с задачей обязательна и при `link: body` — устройство общее."""
+    form = module.journal.form_of(CATALOGUE_FORM)
+    bad = fragment(tmp_path, "Сборщик чинит ссылку.\n\n> правило 157 — перечитано\n")
+    with pytest.raises(module.NotRun, match="нет связи с задачей в тексте"):
+        module.parse_fragments([bad], form)
+
+
+def test_the_tail_line_is_not_counted_in_the_body_under_any_form(tmp_path: Path) -> None:
+    """Предел тела считает строки без последней — и у формы потребителя."""
+    form = module.journal.form_of(CATALOGUE_FORM)
+    body = "Part of #930\n" + "\n".join(f"строка {n}" for n in range(module.FRAGMENT_LINES - 1))
+    one = module.Fragment("fixed", "x", f"{body}\n> правило 157 — да")
+    assert module.shape_fault(one, form) == ""
+
+
+@pytest.mark.parametrize(
+    ("section", "why"),
+    [
+        ({"tail": "(незакрытая"}, "не компилируется"),
+        ({"link": "anywhere"}, "ожидалось одно из"),
+        ({"tails": "x"}, "незнакомые ключи"),
+        ("строка", "ожидалось отображение"),
+    ],
+    ids=["битый-образец", "неизвестный-link", "незнакомый-ключ", "не-отображение"],
+)
+def test_a_broken_section_is_refused_with_its_reason(section: object, why: str) -> None:
+    """Битый раздел — отказ с причиной, а не тихое умолчание (045)."""
+    with pytest.raises(module.journal.NotRun, match=why):
+        module.journal.form_of(section)
+
+
+def test_no_section_is_our_form(tmp_path: Path) -> None:
+    """Раздела нет — наша форма: у нас и у остальных потребителей ничего не меняется."""
+    reader = module.pipeline_checks
+    assert module.journal.form_of(None) is module.journal.DEFAULT_FORM
+    assert reader.fragment_form(tmp_path / "нет.yml") is reader.journal.DEFAULT_FORM
+    answer = tmp_path / ".pipeline.yml"
+    answer.write_text("schema: 4\njournal:\n  link: body\n", encoding="utf-8")
+    form = reader.fragment_form(answer)
+    assert form == reader.journal.FragmentForm(reader.journal.LINK_LINE_RE, "body")
+
+
+@pytest.mark.parametrize(
+    ("body", "section", "why"),
+    [
+        ("текст\n#12", None, ""),
+        ("текст\nне ссылка", None, "ссылка на задачу не последней строкой"),
+        ("Part of #9\n> правило 157 — да", CATALOGUE_FORM, ""),
+        ("Part of #9\nне вердикт", CATALOGUE_FORM, "не подходит под tail"),
+        ("без связи\n> правило 157 — да", CATALOGUE_FORM, "нет связи с задачей в тексте"),
+        ("текст\n> правило 157 — да", {"tail": "^> правило", "link": "tail"}, "не в последней"),
+    ],
+    ids=[
+        "наша",
+        "наша-без-ссылки",
+        "каталог",
+        "каталог-без-вердикта",
+        "каталог-без-связи",
+        "tail-без-номера",
+    ],
+)
+def test_tail_fault_names_what_the_end_lacks(body: str, section: object, why: str) -> None:
+    """`tail_fault`: каждая форма конца и каждый её отказ — названы (#1570)."""
+    said = module.tail_fault(body, module.journal.form_of(section))
+    assert (why in said) if why else said == "", said
+
+
+def test_history_is_read_whatever_the_section_says(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Выпущенное читается без суда конца: раздел не делает историю неразбираемой (#1590)."""
+    released = tmp_path / module.RELEASED / "1.0.0"
+    released.mkdir(parents=True)
+    (released / "old.fixed.md").write_text("Прежняя форма.\n\n#12\n", encoding="utf-8")
+    (tmp_path / module.FRAGMENTS / "new.fixed.md").write_text("Новое.\n\n#13\n", encoding="utf-8")
+    (tmp_path / ".pipeline.yml").write_text(
+        "journal:\n  tail: '^> правило'\n  link: body\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    assert [one.slug for one in module.read_fragments(module.RELEASED / "1.0.0")] == ["old"]
+    # Копящееся — новое: его конец судит форма проекта.
+    with pytest.raises(module.NotRun, match="не подходит под tail"):
+        module.read_fragments(module.FRAGMENTS)
+
+
+def test_a_bare_task_line_is_a_link_in_the_body() -> None:
+    """`link: body` без своего `tail`: голая последняя строка `#12` — тоже связь (#1590)."""
+    form = journal.form_of({"link": "body"})
+    assert module.tail_fault("Текст.\n\n#12", form) == ""
+    assert module.tail_fault("Текст без связи.\n\n#12 текст", form)
+
+
+def test_a_section_without_tail_speaks_of_our_form() -> None:
+    """Раздел без `tail` — наша форма и по значению: отказ называет её, а не чужой tail."""
+    assert module.tail_fault("Текст без ссылки", journal.form_of({})) == (
+        "ссылка на задачу не последней строкой"
+    )
+
+
+def test_project_form_reads_the_section_and_names_its_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`project_form`: раздела нет — наша форма; битый раздел — `NotRun` сборки (039)."""
+    monkeypatch.chdir(tmp_path)
+    assert module.project_form().tail == journal.DEFAULT_FORM.tail
+    (tmp_path / ".pipeline.yml").write_text("journal: [\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="не прочитан"):
+        module.project_form()

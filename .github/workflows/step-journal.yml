@@ -122,7 +122,9 @@ jobs:
         with:
           python-version: "3.14"
       # Общий низ конвейера ставится пакетом (024).
-      - run: python -m pip install --quiet $MECHANISMS/packages/transport
+      # Разборщик YAML — ради раздела `journal:` в `.pipeline.yml`: форму
+      # фрагмента задаёт потребитель (#1570).
+      - run: python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport
       # БАЗА ПОДТЯГИВАЕТСЯ ОТДЕЛЬНЫМ ШАГОМ, а не внутри блока проверки. Свой
       # прогон перед толчком берёт команды блоками целиком и блок с `git fetch`
       # запустить не может: локально это не проверка, а правка чужого дерева.
