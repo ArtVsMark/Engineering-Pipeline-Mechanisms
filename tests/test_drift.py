@@ -2903,3 +2903,69 @@ def test_rejected_evidence_names_the_reason() -> None:
     found = module.proposals_answered(answer(said, EVIDENCE_KEY), EVIDENCE, "o/r")
     assert len(found) == 1 and found[0].source == "proposal-rejected"
     assert "замер не о кандидате" in found[0].said
+
+
+# --- одно чтение на два вопроса: запоминается и отказ (`efbc37a`, `830d88f`) ---
+
+
+def test_read_once_remembers_the_refusal_too() -> None:
+    """Исход чтения один на всех: и ответ, и отказ — второй вопрос в сеть не идёт."""
+    cache: dict[str, Any] = {}
+    reads: list[str] = []
+
+    def refuse() -> Any:
+        reads.append("x")
+        raise module.ghrest.TransportError("таймаут")
+
+    for _ in range(2):
+        with pytest.raises(module.ghrest.TransportError, match="таймаут"):
+            module.read_once(cache, "export", refuse)
+    assert reads == ["x"]
+    assert module.read_once(cache, "ok", lambda: 7) == 7
+    assert module.read_once(cache, "ok", lambda: 8) == 7
+
+
+def test_a_refused_protection_read_is_not_repeated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ чтения защиты — один на сверки и право обхода, а не два таймаута (`efbc37a`)."""
+    reads: list[str] = []
+
+    def read(repo: str, token: str) -> Any:
+        reads.append(token)
+        raise module.NotRun("площадка не ответила")
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(module, "protection_read", read)
+    keep = {"protection_moved", "bypass_moved", "protection_read"}
+    for name in SOURCE_FUNCTIONS - keep:
+        monkeypatch.setattr(module, name, lambda *a, **k: [])
+    monkeypatch.setattr(module, "fetch", lambda url: {})
+    _, silent = module.look("o/r", RUN_TOKEN, {"rules": {}}, {"settings": {}})
+    assert reads == [RUN_TOKEN]
+    assert {"защита общей ветки", "право обхода защиты"} <= set(silent)
+
+
+def test_a_refused_export_is_not_fetched_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ выгрузки — один исход и для «каталога», и для замен в сводке (`830d88f`)."""
+    asked: list[str] = []
+
+    def fetch(url: str) -> Any:
+        asked.append(url)
+        if url == module.EXPORT_URL:
+            raise module.ghrest.TransportError("502")
+        return {}
+
+    for name in SOURCE_FUNCTIONS:
+        monkeypatch.setattr(module, name, lambda *a, **k: [])
+    monkeypatch.setattr(module, "fetch", fetch)
+    _, silent = module.look("o/r", RUN_TOKEN, {"rules": {}}, {"settings": {}})
+    assert asked.count(module.EXPORT_URL) == 1
+    assert "каталог" in silent and "сводка семьи" not in silent
+
+
+def test_a_stable_build_is_understood_once() -> None:
+    """`stable` читается одним пониманием: `"stable": 1` не стабилен ни для кого (`d1e7ad7`)."""
+    odd = {**build("3.15.0", ("linux", "26.04", "x64")), "stable": 1}
+    assert module.stable_build({"stable": True}) and not module.stable_build(odd)
+    assert module.minors([odd]) == ([], ["3.15"])
+    assert not module.published([odd], "3.15", "26.04", stable_only=True)
+    assert module.published([odd], "3.15", "26.04")

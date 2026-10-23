@@ -32,6 +32,7 @@ import gitcall
 import items
 import labels
 import paths
+import scope
 import squash_body
 
 #: Отказ по слову закрытия вне строки связи — константой: на него ссылаются
@@ -317,6 +318,27 @@ def judge_local(base: str) -> int:
     return EXIT_OK
 
 
+def scope_problems(on_pr: set[str], declared: set[str], files: list[str]) -> list[str]:
+    """Метка сценария не уже ответа классификатора (#1599).
+
+    Уже — значит проверок меньше, чем вывели пути: тесты, которые граф обязан
+    был гнать, не гнались бы по слову метки. Шире — слово владельца, и оно
+    проходит. Метки нет — гейт молчит: ставит её `agent_pr`, а выбор тестов
+    без метки идёт по ответу классификатора, то есть не уже его. Метки не
+    объявлены в составе — у потребителя сценариев нет, и судить нечего.
+    """
+    kind, _ = scope.scenario(set(files))
+    if scope.label_of(kind) not in declared:
+        return []
+    present = scope.widest(on_pr)
+    if present is None or scope.ORDER.index(present) >= scope.ORDER.index(kind):
+        return []
+    return [
+        f"сценарий {scope.label_of(present)} уже ответа классификатора "
+        f"{scope.label_of(kind)} — метка только расширяет проверки, а не сужает"
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает исход и возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -424,6 +446,8 @@ def main(argv: list[str] | None = None) -> int:
             + ", ".join(missing)
             + " — зона выведена из путей состава, а не угадана"
         )
+
+    problems += scope_problems(on_pr, {label.name for label in declared}, files)
 
     # СВЯЗЬ И ЗАКРЫТЫЕ ПУНКТЫ ЧИТАЮТСЯ И ИЗ КОММИТОВ (#929). Тело изменения
     # дописывает `agent-pr` токеном прогона — после толчка и без нового захода

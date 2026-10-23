@@ -70,6 +70,12 @@ NO_SWEEP: Final = (
     "обход семьи не передан (--uptake): молча подключённые НЕ ВИДНЫ — сверка идёт "
     "только по объявившимся и потому неполна (045)"
 )
+#: Итог обхода, прочитавшего семью не всю. Не ссылается на «список выше»
+#: (находка `76dc127`, род `22c2408` у `NO_SWEEP`): без токена списка проектов
+#: выше нет, а строка обязана читаться сама.
+UNSWEPT: Final = (
+    "обход семьи не прочитал проектов: {} — подключены ли они, не видно, и сверка неполна"
+)
 #: Итог захода без токена площадки: ответы лежат в деревьях потребителей.
 NO_TOKEN: Final = (
     "ответы потребителей НЕ ПРОЧИТАНЫ: токена площадки нет, а лежат они в их деревьях."
@@ -107,7 +113,14 @@ def registry(root: Path) -> list[dict[str, Any]]:
         missing = [field for field in REQUIRED if not str(one.get(field, "")).strip()]
         if missing:
             raise NotRun(f"{path}: запись {one} не называет {', '.join(missing)}")
-    return [dict(one) for one in rows]
+    # Повторы — без регистра, как у обхода семьи (находка `cfbc3d0`, правило
+    # 195): `Owner/Repo` и `owner/repo` — один проект, и прочитанный дважды он
+    # давал лишнюю единицу в «не прочитано ответов: N из M». Первая запись
+    # остаётся.
+    unique: dict[str, dict[str, Any]] = {}
+    for one in rows:
+        unique.setdefault(str(one["repo"]).casefold(), dict(one))
+    return list(unique.values())
 
 
 def swept(path: Path) -> tuple[list[str], list[str]]:
@@ -200,7 +213,7 @@ def gaps_of(*, swept_given: bool, unswept: int, unread: int, total: int, token: 
     if unread:
         said.append(f"не прочитано ответов: {unread} из {total}")
     if unswept:
-        said.append(f"обход семьи не прочитал проектов: {unswept} — список выше неполон")
+        said.append(UNSWEPT.format(unswept))
     if not swept_given:
         said.append(NO_SWEEP)
     return said
@@ -239,7 +252,10 @@ def main(argv: list[str] | None = None) -> int:
     swept_given = args.uptake is not None
     if not rows:
         if not swept_given or unswept:
-            print(f"{NOBODY} среди тех, кого видно, — молча подключённые видны не все (045)")
+            # Почему видно не всех, говорит `gaps_of` — одним путём и один раз
+            # (находка `1c3cce0`): прежде эта строка и `NO_SWEEP` отвечали на
+            # один вопрос дважды.
+            print(f"{NOBODY} среди тех, кого видно")
             return finish(
                 gaps_of(
                     swept_given=swept_given, unswept=len(unswept), unread=0, total=0, token=True

@@ -57,6 +57,7 @@ from typing import Any, Final
 import gitcall
 import journal
 import paths
+import scope_areas
 import yaml
 
 DEFAULT_PATH: Final = paths.PIPELINE
@@ -566,6 +567,12 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
         journal.form_of(raw.get(journal.SECTION))
     except journal.NotRun as exc:
         problems.append(str(exc))
+    # Области потребителя для выбора тестов (#1600) — тот же файл и тот же
+    # заход: битый раздел видит шаг `pipeline`, а не первый прогон тестов.
+    try:
+        scope_areas.areas_of(raw.get(scope_areas.SECTION))
+    except scope_areas.BadAreas as exc:
+        problems.append(str(exc))
 
     if problems:
         raise BadPolicy("ответ по проверкам не проходит проверку:\n  " + "\n  ".join(problems))
@@ -587,6 +594,21 @@ def fragment_form(path: Path = DEFAULT_PATH) -> journal.FragmentForm:
     except (BadPolicy, yaml.YAMLError) as exc:
         raise journal.NotRun(f"{path} не прочитан: {exc}") from exc
     return journal.form_of(raw.get(journal.SECTION) if isinstance(raw, dict) else None)
+
+
+def areas_for_tests(path: Path = DEFAULT_PATH) -> tuple[scope_areas.Area, ...]:
+    """Области выбора тестов из ответа проекта; файла или раздела нет — областей нет (#1600).
+
+    Читается здесь, как и форма фрагмента: YAML ответа разбирает один модуль
+    (090). Отказ чтения и битый раздел — `scope_areas.BadAreas` с причиной.
+    """
+    if not path.is_file():
+        return ()
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise scope_areas.BadAreas(f"{path} не прочитан: {exc}") from exc
+    return scope_areas.areas_of(raw.get(scope_areas.SECTION) if isinstance(raw, dict) else None)
 
 
 def _read_section(

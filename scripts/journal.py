@@ -99,7 +99,9 @@ def form_of(section: Any) -> FragmentForm:
         return DEFAULT_FORM
     if not isinstance(section, dict):
         raise NotRun(f"раздел {SECTION}: ожидалось отображение, пришло {type(section).__name__}")
-    unknown = sorted(set(section) - {"tail", "link"})
+    # Ключ YAML бывает и не строкой (`{1: x}`): сравнение и печать — строкой,
+    # иначе `sorted` и `join` роняли разбор TypeError мимо NotRun (взгляд на #1590).
+    unknown = sorted(str(key) for key in set(section) - {"tail", "link"})
     if unknown:
         raise NotRun(
             f"раздел {SECTION}: незнакомые ключи {', '.join(unknown)} — читаются tail и link"

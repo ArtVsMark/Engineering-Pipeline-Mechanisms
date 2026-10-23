@@ -598,11 +598,12 @@ def gateway_refusal(monkeypatch: pytest.MonkeyPatch, created: bool) -> list[tupl
 def test_a_change_created_behind_a_gateway_refusal_is_finished(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Создано, но ответ не дошёл: зоны и согласие доставлены, исход — успех."""
+    """Создано, но ответ не дошёл: зоны, сценарий и согласие доставлены, исход — успех."""
     seen = gateway_refusal(monkeypatch, created=True)
     assert module.main(["--repo", "о/р", "--branch", "agent/x"]) == module.EXIT_OK
     labelled = [path for method, path in seen if method == "POST" and path.endswith("/labels")]
-    assert labelled == ["repos/о/р/issues/9/labels"] * 2, seen
+    # Три постановки: зона, сценарий `scope/*` (#1599), согласие.
+    assert labelled == ["repos/о/р/issues/9/labels"] * 3, seen
     assert sum(method == "POST" and path.endswith("/pulls") for method, path in seen) == 1
 
 

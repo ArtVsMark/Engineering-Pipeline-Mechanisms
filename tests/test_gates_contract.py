@@ -8,7 +8,7 @@
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import yaml
 
@@ -288,6 +288,22 @@ def reads_the_change(job: dict[str, Any]) -> bool:
     return bool(CHANGE_CONTEXT.search(text))
 
 
+#: Джобы, которые читают изменение И идут на общей ветке — законно, с причиной.
+#: Читают контекст изменения только на событии изменения и ветвятся по нему.
+BOTH_WORLDS: Final = {
+    "test-matrix": "на изменении гонит выбор классификатора, на общей ветке — полный набор (#1598)",
+}
+
+
+def test_jobs_of_both_worlds_branch_on_the_event() -> None:
+    """Джоб обоих миров идёт на общей ветке и ветвится по событию, а не молчит на ней."""
+    jobs = load_gates()["jobs"]
+    for name in BOTH_WORLDS:
+        assert name in jobs, f"{name}: объявлен, а джоба нет — объявление пережило джоб"
+        assert not runs_only_on_a_change(str(jobs[name].get("if", ""))), name
+        assert "GITHUB_EVENT_NAME" in yaml.safe_dump(jobs[name], allow_unicode=True), name
+
+
 def test_change_only_jobs_do_not_run_on_the_shared_branch() -> None:
     """Шаги, чей предмет — изменение, на общей ветке не идут.
 
@@ -310,7 +326,9 @@ def test_change_only_jobs_do_not_run_on_the_shared_branch() -> None:
     читает контекст изменения сам или в вызванном прогоне (`reads_the_change`).
     """
     jobs = load_gates()["jobs"]
-    of_a_change = sorted(name for name, job in jobs.items() if reads_the_change(job))
+    of_a_change = sorted(
+        name for name, job in jobs.items() if reads_the_change(job) and name not in BOTH_WORLDS
+    )
     assert of_a_change, "ни один джоб не читает изменение — предмет проверки не найден (075)"
     wrong = [
         f"{name}: «{jobs[name].get('if', '')}»"

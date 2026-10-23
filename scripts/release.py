@@ -73,7 +73,13 @@ EXIT_BROKEN: Final = 2
 
 
 class NotRun(RuntimeError):
-    """Шаг не отработал: третий исход, а не «выпускать нечего»."""
+    """Шаг не отработал: третий исход, а не «выпускать нечего».
+
+    ``found`` — отказы, собранные `refusals` до обрыва: исход остаётся «не
+    отработал», но собранное не теряется.
+    """
+
+    found: tuple[str, ...] = ()
 
 
 def git(*args: str) -> str:
@@ -299,8 +305,31 @@ def refusals(
 
     Списком потому, что выпуск делают редко и по одной причине за раз чинить
     его дороже: человек должен увидеть сразу всё, что мешает.
+
+    ОБРЫВ НЕ УНОСИТ СОБРАННОГО (взгляд). `NotRun` из середины сбора — исход
+    «не отработал», но отказы, найденные до него, едут с ним в ``found`` и
+    печатаются в `main`: иначе человек чинил бы по одному за прогон.
     """
     problems: list[str] = []
+    try:
+        return gather(
+            problems, wanted, acceptance=acceptance, state=state, breaking=breaking, push=push
+        )
+    except NotRun as exc:
+        exc.found = tuple(problems)
+        raise
+
+
+def gather(
+    problems: list[str],
+    wanted: str,
+    *,
+    acceptance: str,
+    state: str,
+    breaking: bool,
+    push: str,
+) -> list[str]:
+    """Тело `refusals`: дописывает отказы в ``problems`` по мере сбора и отдаёт его."""
     if VERSION_RE.match(wanted) is None:
         return [f"версия «{wanted}» не вида МАЖОР.МИНОР.ПАТЧ"]
 
@@ -769,6 +798,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
+        if exc.found:
+            print(f"\nсобрано до обрыва — выпускать нельзя и по этим ({len(exc.found)}):")
+            for problem in exc.found:
+                print(f"  {problem}")
         return EXIT_BROKEN
 
     if problems:

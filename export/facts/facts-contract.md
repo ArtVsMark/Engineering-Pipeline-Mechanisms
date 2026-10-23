@@ -126,7 +126,11 @@ python check_facts.py --file .github/badges/facts.json --repo владелец/�
 ### Шаг для CI издателя
 
 **Вставляется в прогон, публикующий `facts.json`, перед публикацией.**
-Проверка берётся со страницы выпуска по тегу. Красный шаг — файл не уезжает в
+Проверка берётся из дерева механизмов по тегу, а не с файлов страницы
+выпуска: файлы страницы заменяются, не трогая тега, и запущенный код сменился
+бы молча, а дерево тега — нет. Граница: тег переставляется толчком с правом
+записи, и от этого шаг не защищает — держит обещание «тег не переставляется».
+Красный шаг — файл не уезжает в
 ветку `badges`, советы `⚠` видны в логе. Подъём договора у издателя — одна
 правка: тег здесь и строка `schema` в файле.
 
@@ -139,9 +143,9 @@ python check_facts.py --file .github/badges/facts.json --repo владелец/�
     set -euo pipefail
     dir="$RUNNER_TEMP/facts-contract"
     mkdir -p "$dir"
-    for f in check_facts.py facts.schema.json facts.version; do
-      curl -fsSL -o "$dir/$f" \
-        "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/releases/download/$FACTS_CONTRACT/$f"
+    for f in scripts/check_facts.py export/facts/facts.schema.json export/facts/facts.version; do
+      curl -fsSL -o "$dir/${f##*/}" \
+        "https://raw.githubusercontent.com/ArtVsMark/Engineering-Pipeline-Mechanisms/$FACTS_CONTRACT/$f"
     done
     python "$dir/check_facts.py" --file .github/badges/facts.json --repo "$GITHUB_REPOSITORY"
 ```

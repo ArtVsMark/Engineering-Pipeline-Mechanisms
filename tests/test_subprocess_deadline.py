@@ -337,6 +337,32 @@ def test_an_unparsed_file_warns_without_enforce(
     assert "::warning file=scripts/legacy.py::файл не разобран" in out, out
     assert "не разобрано файлов: 2" in out, out
     assert gate.main(["--root", str(consumer), "--enforce"]) == gate.EXIT_BROKEN
+    # Неразобранный не прячет находки по разобранным (находка `ada8c4e`).
+    assert "::error file=scripts/gate.py,line=2::без timeout=" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"# -*- coding: latin-1 -*-\nimport subprocess\nsubprocess.run(['\xe9'])\n",
+        b"\xef\xbb\xbfimport subprocess\nsubprocess.run(['git'])\n",
+    ],
+    ids=["объявленная-кодировка", "utf-8-с-BOM"],
+)
+def test_a_declared_encoding_is_parsed_not_foreign(
+    consumer: Path, raw: bytes, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PEP 263 и BOM — законный Python: файл разбирается и судится (находки `a2800cb`, `92c21ec`).
+
+    Сосед — файл без объявления в latin-1: он по-прежнему «не разобран»
+    (`test_an_unparsed_file_warns_without_enforce`).
+    """
+    (consumer / "scripts" / "declared.py").write_bytes(raw)
+    assert gate.main(["--root", str(consumer), "--enforce"]) == gate.EXIT_FOUND
+    out = capsys.readouterr().out
+    assert "не разобран" not in out, out
+    assert "::error file=scripts/declared.py,line=" in out, out
+    assert undeadlined(raw) == [f"{raw.count(b'\n')}: без timeout="]
 
 
 def test_nothing_parsed_is_inapplicable_not_clean(
@@ -458,3 +484,92 @@ def test_exported_names_and_yields_name_their_subject() -> None:
     nested = ast.parse("def f():\n    def g():\n        yield 1\n").body[0]
     assert isinstance(own, ast.FunctionDef) and isinstance(nested, ast.FunctionDef)
     assert gate.yields(own) and not gate.yields(nested)
+
+
+@pytest.mark.parametrize(
+    ("source", "bad"),
+    [
+        (
+            "import subprocess\ntry:\n    g = (subprocess.run(['x'], timeout=5) for _ in 'a')\n"
+            "except subprocess.TimeoutExpired:\n    pass\nlist(g)\n",
+            True,
+        ),
+        (
+            "import subprocess\ntry:\n    g = [subprocess.run(['x'], timeout=5) for _ in 'a']\n"
+            "except subprocess.TimeoutExpired:\n    pass\n",
+            False,
+        ),
+    ],
+    ids=["выражение-генератор-в-try", "списковое-включение-в-try"],
+)
+def test_a_generator_expression_runs_outside_the_try(source: str, bad: bool) -> None:
+    """Выражение-генератор исполняется при обходе, а не в `try` (находка `c97d776`).
+
+    Сосед — списковое включение: оно исполняется сразу и засчитывается.
+    """
+    assert bool(undeadlined(source)) is bad
+
+
+HOOK = (
+    "import subprocess\n\ndef f():\n" + SPAWN_BODY + "\n"
+    "def main():\n    try:\n        f()\n    except subprocess.TimeoutExpired:\n"
+    "        return 2\n"
+)
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "import hook\nhook.f()\n",
+        "import hook as h\nh.f()\n",
+        "import scripts.hook\nscripts.hook.f()\n",
+        "from hook import f\nf()\n",
+        "from hook import f as g\ng()\n",
+        "from .hook import f\nf()\n",
+        "from scripts import hook\nhook.f()\n",
+        "from . import hook\nhook.f()\n",
+        "from scripts import hook as h\nh.f()\n",
+        "from hook import *\nf()\n",
+    ],
+    ids=[
+        "import-m",
+        "import-m-as-a",
+        "import-p.m",
+        "from-m-import-f",
+        "from-m-import-f-as-g",
+        "from-.m-import-f",
+        "from-p-import-m",
+        "from-.-import-m",
+        "from-p-import-m-as-a",
+        "from-m-import-*",
+    ],
+)
+def test_every_import_form_takes_the_name(other: str) -> None:
+    """Каждая форма импорта делает `f` внешним (находки `ede4ee7`, `9600e6c`, `6d792d1`)."""
+    trees = {"hook": ast.parse(HOOK), "other": ast.parse(other)}
+    taken = gate.exported_names(trees)["hook"]
+    assert "f" in taken
+    assert undeadlined(HOOK, taken) == ["4: TimeoutExpired не пойман"]
+    assert not undeadlined(HOOK), "без внешнего вызывающего поимка в main засчитана"
+
+
+def test_dotted_names_a_chain_over_a_name() -> None:
+    """`dotted` собирает `a.b.c`, а у выражения не над именем — пусто."""
+    assert gate.dotted(ast.parse("a.b.c", mode="eval").body) == "a.b.c"
+    assert gate.dotted(ast.parse("f().b", mode="eval").body) == ""
+
+
+def test_modules_with_one_name_share_the_taken_names(tmp_path: Path) -> None:
+    """Два `other.py` в разных местах не вытесняют друг друга (находка `4936ee9`)."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / ".claude" / "hooks").mkdir(parents=True)
+    (tmp_path / "scripts" / "hook.py").write_text(HOOK, encoding="utf-8")
+    (tmp_path / "scripts" / "other.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / ".claude" / "hooks" / "other.py").write_text(
+        "from hook import f\n\nf()\n", encoding="utf-8"
+    )
+    found, _, _ = gate.look(tmp_path, ["scripts", ".claude/hooks"])
+    assert [(name, what) for name, _, what in found] == [
+        ("scripts/hook.py", "TimeoutExpired не пойман")
+    ]

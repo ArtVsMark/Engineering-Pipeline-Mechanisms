@@ -28,11 +28,14 @@
 одного ожидания с дедлайном в той же области достаточно.
 
 ТЕЛО `try` — ТО, ЧТО ИСПОЛНЯЕТСЯ В НЁМ (находка `f7d1815`). Вызов внутри
-`def` или `lambda`, вложенных в тело, исполнится позже и вне этого `try`:
-такой вызов поимкой внешнего блока не считается. Предел назван: тело
-вложенного `class`, довод по умолчанию и декоратор вложенного `def`
-исполняются сразу, при определении, то есть в `try`, — их предикат тоже не
-засчитывает, и это строгость, а не дыра.
+`def`, `lambda` или выражения-генератора `(f() for _ in x)`, вложенных в
+тело, исполнится позже — при вызове или обходе — и вне этого `try`: такой
+вызов поимкой внешнего блока не считается (находка `c97d776`). Списковое,
+множественное и словарное включения исполняются сразу и судятся как тело.
+Предел назван: тело вложенного `class`, довод по умолчанию и декоратор
+вложенного `def`, первый итерируемый выражения-генератора исполняются сразу,
+при определении, то есть в `try`, — их предикат тоже не засчитывает, и это
+строгость, а не дыра.
 
 ПОИМКА У ВЫЗЫВАЮЩЕГО ЗАСЧИТЫВАЕТСЯ (решение владельца 23.10.2026, #1569).
 Хук каталога ловит истечение в `main()`, а не у вызова, и нарочно: там он
@@ -45,7 +48,15 @@
 снимает засчёт: вызывающий тогда неизвестен. Имя, которое берёт ДРУГОЙ
 просмотренный модуль (`from hook import f`, `hook.f`), засчёт тоже снимает:
 вызывающие есть вне файла, и судить по одним здешним значило бы зеленеть на
-непойманном (взгляд на #1589, `exported_names`). Генератор и `async def`
+непойманном (взгляд на #1589, `exported_names`). Формы импорта разобраны
+все (находки `ede4ee7`, `9600e6c`, `6d792d1`): `import m`, `import m as a`,
+`import p.m` (обращение `p.m.f`), `from m import f`, `from m import f as g`,
+`from .m import f`, `from p import m` и `from . import m` (модуль под именем),
+`from m import *` — модуль взят целиком, все его функции внешние. Модули с
+одним именем в разных местах (`scripts/x.py`, `.claude/hooks/x.py`) делят
+один перечень взятых имён: какой из них берёт импорт, разбор не знает, и
+засчёт снимается у обоих (находка `4936ee9`). Граница названа: импорт
+строкой (`importlib.import_module`, `__import__`) не виден. Генератор и `async def`
 не засчитываются вовсе: их тело исполняется при обходе или `await`, а не в
 месте вызова, и `try` вокруг `f()` их истечения не ловит. Граница названа:
 модуль вне просмотренных мест (набор тестов, чужое дерево), зовущий `f`, не
@@ -82,7 +93,10 @@ subprocess.run`), `os.system`, `os.popen`, `pty.spawn` и
 раннера, чужая кодировка — дерево, писанное без гейта, иначе краснело бы с
 первым подъёмом тега исходом «не отработал». Без `--enforce` такой файл
 называется аннотацией «не разобран» и счётом, а не молчит; с `--enforce` —
-«не отработал»: строгий проект свой код разбирать обязан.
+«не отработал»: строгий проект свой код разбирать обязан. Находки по
+разобранным файлам печатаются и тогда — неразобранный не прячет их до своей
+починки (находка `ada8c4e`). Объявленная кодировка (PEP 263) и BOM — не
+чужая кодировка: файл разбирается байтами, как его читает Python (`a2800cb`).
 
 Исходы (039): ``0`` чисто, предупреждено без `--enforce` или кода нет — причина
 напечатана · ``1`` найдено при `--enforce` · ``2`` не отработал (git отказал,
@@ -108,10 +122,16 @@ DEFAULT_PATHS: Final = ("scripts", ".claude/hooks")
 SPAWNS: Final = frozenset({"run", "check_output", "check_call", "call", "Popen"})
 #: Поимка, означающая «истёк дедлайн — свой исход».
 CATCHES: Final = frozenset({"TimeoutExpired", "SubprocessError", "Exception"})
-#: Узлы, внутрь которых предикат поимку объемлющего `try` не несёт: тело `def` и
-#: `lambda` исполняется позже и вне него, тело `class` — сразу, и его гейт судит
-#: строже, чем исполняется (предел назван в шапке).
-SCOPES: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+#: Узлы, внутрь которых предикат поимку объемлющего `try` не несёт: тело `def`,
+#: `lambda` и выражения-генератора исполняется позже и вне него, тело `class` —
+#: сразу, и его гейт судит строже, чем исполняется (предел назван в шапке).
+SCOPES: Final = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.GeneratorExp,
+    ast.ClassDef,
+)
 
 
 #: Глубина цепочки «пойман у вызывающего вызывающего». Предел — не догадка о
@@ -208,33 +228,54 @@ def yields(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     )
 
 
+def dotted(node: ast.expr) -> str:
+    """Имя `a.b.c` цепочки атрибутов над именем; иное выражение — пустая строка."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        head = dotted(node.value)
+        return f"{head}.{node.attr}" if head else ""
+    return ""
+
+
 def exported_names(trees: dict[str, ast.Module]) -> dict[str, frozenset[str]]:
     """Имя модуля → его имена, которые берут другие просмотренные модули (#1589).
 
-    Ключ — последнее звено имени модуля (`push_guard` у `.claude/hooks/push_guard.py`):
-    импорт в дереве механизмов идёт по нему. Берётся `from push_guard import f`
-    и `модуль.имя` после `import модуль` (с псевдонимом — по псевдониму).
+    Ключ входа — путь файла (или имя модуля), ключ ответа — последнее звено
+    имени (`push_guard` у `.claude/hooks/push_guard.py`): импорт в дереве
+    механизмов идёт по нему. Два файла с одним именем делят перечень (`4936ee9`).
+    Формы импорта — в шапке модуля; `*` отдаёт все функции верхнего уровня.
     """
-    found: dict[str, set[str]] = {stem: set() for stem in trees}
+    stems = {name: Path(name).stem for name in trees}
+    found: dict[str, set[str]] = {stem: set() for stem in stems.values()}
+    everything: dict[str, set[str]] = {stem: set() for stem in stems.values()}
+    for name, tree in trees.items():
+        everything[stems[name]] |= {
+            one.name
+            for one in tree.body
+            if isinstance(one, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
     for tree in trees.values():
         aliases: dict[str, str] = {}
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                stem = node.module.rsplit(".", 1)[-1]
-                if stem in found:
-                    found[stem] |= {alias.name for alias in node.names}
+            if isinstance(node, ast.ImportFrom):
+                stem = (node.module or "").rsplit(".", 1)[-1]
+                for alias in node.names:
+                    if alias.name == "*" and stem in found:
+                        found[stem] |= everything[stem]
+                    elif stem in found:
+                        found[stem].add(alias.name)
+                    if alias.name in found:
+                        # `from p import m`, `from . import m`: взят сам модуль.
+                        aliases[alias.asname or alias.name] = alias.name
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     stem = alias.name.rsplit(".", 1)[-1]
                     if stem in found:
                         aliases[alias.asname or alias.name] = stem
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Attribute)
-                and isinstance(node.value, ast.Name)
-                and node.value.id in aliases
-            ):
-                found[aliases[node.value.id]].add(node.attr)
+            if isinstance(node, ast.Attribute) and dotted(node.value) in aliases:
+                found[aliases[dotted(node.value)]].add(node.attr)
     return {stem: frozenset(names) for stem, names in found.items()}
 
 
@@ -311,10 +352,11 @@ def caught_by_callers(
     }
 
 
-def undeadlined(source: str, exported: frozenset[str] = frozenset()) -> list[str]:
+def undeadlined(source: str | bytes, exported: frozenset[str] = frozenset()) -> list[str]:
     """Вызовы процесса исходника без дедлайна или без поимки его истечения.
 
-    `exported` — имена модуля, которые берут другие модули (`exported_names`).
+    Байты разбираются по объявленной кодировке (PEP 263) и BOM, как их читает
+    Python. `exported` — имена модуля, которые берут другие модули (`exported_names`).
     """
     tree = ast.parse(source)
     imported = {
@@ -395,21 +437,23 @@ def look(
     names = code_of(root, [one for one in places if one not in missing])
     found: list[tuple[str, str, str]] = []
     unparsed: list[tuple[str, str]] = []
-    sources: dict[str, str] = {}
+    sources: dict[str, bytes] = {}
+    trees: dict[str, ast.Module] = {}
     for name in names:
         try:
             raw = (root / name).read_bytes()
         except OSError as exc:
             raise NotRun(f"{name} не прочитан: {exc}") from exc
         try:
-            sources[name] = raw.decode("utf-8")
-            ast.parse(sources[name])
-        except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError) as exc:
-            sources.pop(name, None)
+            # Байты, а не строка UTF-8: объявленную кодировку (PEP 263) и BOM
+            # разбор учитывает сам, как Python их исполняет (находка `a2800cb`).
+            trees[name] = ast.parse(raw)
+            sources[name] = raw
+        except (SyntaxError, ValueError, RecursionError) as exc:
             unparsed.append((name, report.cut(str(exc))))
     # Кто чьи имена берёт — по всем просмотренным модулям сразу (взгляд на #1589):
     # поимка у вызывающего засчитывается, только если вызывающих вне файла нет.
-    exported = exported_names({Path(name).stem: ast.parse(text) for name, text in sources.items()})
+    exported = exported_names(trees)
     for name, text in sources.items():
         bad = undeadlined(text, exported.get(Path(name).stem, frozenset()))
         for one in bad:
@@ -462,20 +506,27 @@ def main(argv: list[str] | None = None) -> int:
         )
     if unparsed:
         print(f"не разобрано файлов: {len(unparsed)} из {seen} — их вызовы не судились")
-        if args.enforce:
-            print("гейт не отработал: строгий проект свой код разбирать обязан", file=sys.stderr)
-            return EXIT_BROKEN
+    # Находки по разобранным печатаются и при неразобранном: строгий проект
+    # иначе не видел бы их, пока не починит неразобранный (находка `ada8c4e`).
+    verdict(found, seen, seen - len(unparsed), level=level)
+    if unparsed and args.enforce:
+        print("гейт не отработал: строгий проект свой код разбирать обязан", file=sys.stderr)
+        return EXIT_BROKEN
+    return EXIT_FOUND if found and args.enforce else EXIT_OK
+
+
+def verdict(found: list[tuple[str, str, str]], seen: int, judged: int, *, level: str) -> None:
+    """Печатает итог по `judged` разобранным из `seen` файлов и находки аннотациями."""
     # ЗНАМЕНАТЕЛЬ ОДИН — РАЗОБРАННЫЕ ФАЙЛЫ (взгляд на #1546): неразобранные
     # названы строкой выше, и «просмотрено» о них не говорит.
-    judged = seen - len(unparsed)
     if not judged:
         # Ни один файл не разобран — зелёного утверждения нет, есть неприменимость
         # с причиной (154): судить было нечего, а не «чисто».
         print(f"неприменимо: ни один из файлов {seen} не разобран — вызовов процесса судить негде")
-        return EXIT_OK
+        return
     if not found:
         print(f"дедлайн у каждого вызова процесса: разобрано файлов {judged}")
-        return EXIT_OK
+        return
     print(
         f"вызов процесса без дедлайна или без его поимки (100, 039): {len(found)} "
         f"в разобранных файлах {judged}"
@@ -491,7 +542,6 @@ def main(argv: list[str] | None = None) -> int:
         "Назовите timeout= и ловите subprocess.TimeoutExpired тем же исходом, что OSError: "
         "зависший процесс иначе держит гейт до предела площадки."
     )
-    return EXIT_FOUND if args.enforce else EXIT_OK
 
 
 if __name__ == "__main__":  # pragma: no cover

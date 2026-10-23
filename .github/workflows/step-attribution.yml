@@ -47,7 +47,35 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
+      # ПОСТОРОННИЙ АВТОР НЕ СУДИТСЯ НА АВТОРСТВО (#1599, эпик #1596). Гейт
+      # спрашивает, что коммиты ветки подписал владелец, а соавтор — агент:
+      # у изменения из чужой вилки автор — сам посторонний, и требовать с него
+      # подписи владельца значит краснеть на законном. Сливает его человек:
+      # согласие `automerge` ставит только `agent_pr` веткам этого репозитория.
+      # Посторонний — это вилка И связь не из доверенных; владелец, открывший
+      # из своей вилки, судится по-прежнему. Список доверенных — тот же, что у
+      # `step-claude.yml` (068).
+      - name: посторонний автор
+        id: who
+        env:
+          WHO: ${{ github.event.pull_request.author_association }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          external=no
+          if [ -n "${HEAD_REPO:-}" ] && [ "$HEAD_REPO" != "$REPO" ]; then
+            case "${WHO:-}" in
+              OWNER|MEMBER|COLLABORATOR) ;;
+              *) external=yes ;;
+            esac
+          fi
+          if [ "$external" = yes ]; then
+            echo "авторство не судится: автор «${WHO:-не назван}» из вилки $HEAD_REPO посторонний — сливает человек"
+          fi
+          echo "external=$external" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.who.outputs.external != 'yes'
         with:
           fetch-depth: 0
       # Гейт не переписан здесь: каталог отдаёт его действием, и подключение
@@ -64,6 +92,7 @@ jobs:
       # Это пояснение — одно на оба подключения гейта: `attribution-history.yml`
       # ссылается сюда.
       - name: сверить атрибуцию
+        if: steps.who.outputs.external != 'yes'
         uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v2.1.0
         with:
           authors: .github/authors.txt

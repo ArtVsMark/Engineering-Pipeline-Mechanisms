@@ -1322,3 +1322,29 @@ def test_project_form_reads_the_section_and_names_its_refusal(
     (tmp_path / ".pipeline.yml").write_text("journal: [\n", encoding="utf-8")
     with pytest.raises(module.NotRun, match="не прочитан"):
         module.project_form()
+
+
+def test_a_change_to_the_section_judges_every_pending_fragment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Тронут `.pipeline.yml` — судятся все копящиеся фрагменты, не только принесённые (#1590)."""
+    folder = tmp_path / "changelog.d"
+    folder.mkdir()
+    (folder / "old.fixed.md").write_text("Слито прежней формой.\n\n#12\n", encoding="utf-8")
+    (folder / "new.fixed.md").write_text(
+        "Новое, Refs #13.\n\n> правило 001 — да\n", encoding="utf-8"
+    )
+    (tmp_path / ".pipeline.yml").write_text(
+        "journal:\n  tail: '^> правило'\n  link: body\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "FRAGMENTS", Path("changelog.d"))
+    assert [one.slug for one in module.fragments_of(["changelog.d/new.fixed.md"])] == ["new"]
+    with pytest.raises(module.NotRun, match="не подходит под tail"):
+        module.fragments_of([".pipeline.yml", "changelog.d/new.fixed.md"])
+
+
+def test_a_section_key_not_a_string_is_a_refusal() -> None:
+    """Нестроковый ключ раздела — `NotRun` с названным ключом, а не TypeError (039)."""
+    with pytest.raises(journal.NotRun, match="незнакомые ключи 1"):
+        journal.form_of({1: "x", "tail": "^#"})
