@@ -31,6 +31,7 @@
 """
 
 import argparse
+import ast
 import codecs
 import re
 import sys
@@ -109,6 +110,59 @@ def as_ascii_compatible(data: bytes) -> bytes:
     return data
 
 
+#: Место строкового литерала в исходнике: строка и байт начала, строка и байт конца.
+Span = tuple[int, int, int, int]
+
+
+def code_literals(data: bytes) -> list[Span]:
+    """Места строковых литералов КОДА в исходнике Python — без докстрок (#1571).
+
+    В литерале кода стоят входы проверок: подставка вида `001-a.md` в каталоге
+    правил в самопроверке гейта или в тесте — не ссылка, и правильное имя
+    правила там сломало бы сам случай. Ссылки-обоснования живут в докстроках и
+    комментариях, и они судятся по-прежнему. Замер 22.10.2026 на нашем дереве:
+    в докстроках 974 ссылки, в комментариях 138, в литералах кода 15 — все
+    в `tests/`, входы тестов гейта и его соседей.
+
+    Смещения `ast` — байты UTF-8, тем же счётом, что у байтового поиска
+    (`links`). Исходник не разобрался — литералов не названо, и файл судится
+    целиком: сужение не даёт права пропускать то, чего не прочли (045).
+
+    ГРАНИЦА НАЗВАНА. Литерал, который выводится человеку
+    (`print("… rules/ru/157-….md")`), тоже не судится. Вне `tests/` таких у
+    нас ноль на 22.10.2026.
+    """
+    try:
+        tree = ast.parse(data)
+    except SyntaxError, ValueError:
+        return []
+    docs: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            first = node.body[0] if node.body else None
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                docs.add(id(first.value))
+    return [
+        (node.lineno, node.col_offset, node.end_lineno or node.lineno, node.end_col_offset or 0)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, (str, bytes))
+        and id(node) not in docs
+    ]
+
+
+def inside(spans: list[Span], line: int, column: int) -> bool:
+    """Стоит ли байт `column` строки `line` внутри одного из литералов."""
+    return any(
+        (line, column) >= (start_line, start_col) and (line, column) < (end_line, end_col)
+        for start_line, start_col, end_line, end_col in spans
+    )
+
+
 def links(root: Path) -> list[tuple[Path, int, str, str]]:
     """Ссылки на правила в отслеживаемых файлах: где, на какой номер и имя."""
     listed = gitcall.output(
@@ -136,8 +190,11 @@ def links(root: Path) -> list[tuple[Path, int, str, str]]:
         # файл с меткой порядка байтов перекодируется (`as_ascii_compatible`),
         # без метки — его не отличить от двоичного, и это предел (взгляд на #1302).
         data = as_ascii_compatible(data)
+        literals = code_literals(data) if path.suffix == ".py" else []
         for line_number, line in enumerate(data.splitlines(), 1):
             for match in LINK_RE.finditer(line):
+                if inside(literals, line_number, match.start()):
+                    continue
                 number, slug = match["number"].decode(), match["slug"].decode()
                 found.append((Path(name), line_number, number, slug))
     return found
