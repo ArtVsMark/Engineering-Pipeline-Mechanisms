@@ -33,6 +33,7 @@ def commit(root: Path, message: str) -> str:
 def tree(tmp_path: Path) -> Path:
     """База: `a` зовёт `c`, у `a` и `b` по тесту; ветка `agent/x` от базы."""
     root = tmp_path
+    root.mkdir(parents=True, exist_ok=True)
     git(root, "init", "-q", "-b", "main")
     write(root, "scripts/a.py", "import c\n")
     write(root, "scripts/b.py", "B = 1\n")
@@ -202,3 +203,55 @@ def test_the_preflight_hands_the_pushed_head_to_the_choice(
     monkeypatch.setattr(preflight.scope, "choose", choose)
     preflight.chosen_scope(tmp_path, everything=False)
     assert seen == ["abc"]
+
+
+def junit(tmp_path: Path, *failed: str) -> Path:
+    """Отчёт pytest: упавшие по `classname`, один зелёный рядом."""
+    cases = "".join(
+        f'<testcase classname="{one}" name="t"><failure message="x"/></testcase>' for one in failed
+    )
+    path = tmp_path / "tests.xml"
+    path.write_text(
+        f'<testsuites><testsuite>{cases}<testcase classname="tests.test_ok" name="t"/>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_failed_files_are_read_from_the_report(tmp_path: Path) -> None:
+    """Файл — из `classname`, с классом и без; зелёный не в счёт."""
+    report = junit(tmp_path, "tests.test_a", "tests.test_b.TestCase")
+    assert scope.failed_files(report) == {"tests/test_a.py", "tests/test_b.py"}
+
+
+def test_a_full_choice_misses_nothing() -> None:
+    """Выбор «все» ничего не пропускает; список — упавшее вне него."""
+    failed = {"tests/test_a.py", "tests/test_b.py"}
+    assert scope.missed(scope.Choice(scope.FULL, None, ""), failed) == []
+    assert scope.missed(scope.Choice(scope.CODE, ("tests/test_a.py",), ""), failed) == [
+        "tests/test_b.py"
+    ]
+
+
+def test_a_red_full_run_names_the_miss(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Слитая правка `a` от `HEAD^`; упал `b` — выбор его пропустил, и это названо находкой."""
+    root = tree(tmp_path / "дерево")
+    green_head(root)
+    argv = ["--root", str(root), "--base", "HEAD^", "--missed"]
+    assert scope.main([*argv, str(junit(tmp_path, "tests.test_b"))]) == scope.EXIT_OK
+    said = capsys.readouterr().out
+    assert "::error::выбор тестов пропустил tests/test_b.py" in said
+    assert "находка о графе" in said
+    assert scope.main([*argv, str(junit(tmp_path, "tests.test_a"))]) == scope.EXIT_OK
+    assert "выбор задел все упавшие" in capsys.readouterr().out
+
+
+def test_an_unreadable_report_is_the_third_outcome(tmp_path: Path) -> None:
+    """Отчёт не разбирается — «не отработал», а не «пропусков нет» (039)."""
+    root = tree(tmp_path / "дерево")
+    green_head(root)
+    bad = tmp_path / "bad.xml"
+    bad.write_text("<не xml", encoding="utf-8")
+    argv = ["--root", str(root), "--base", "HEAD^", "--missed", str(bad)]
+    assert scope.main(argv) == scope.EXIT_BROKEN

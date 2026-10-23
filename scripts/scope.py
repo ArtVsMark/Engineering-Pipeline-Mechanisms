@@ -52,6 +52,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ElementTree
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -533,6 +534,60 @@ def last_green(repo: str, number: int, token: str, root: Path) -> str:
     return ""
 
 
+def failed_files(report: Path) -> set[str]:
+    """Тест-файлы, упавшие в отчёте pytest `--junitxml`; отчёт не читается — `NotRun`.
+
+    Файл выводится из `classname` (`tests.test_x` или `tests.test_x.Класс`):
+    поле `file` pytest пишет не во всех формах отчёта.
+    """
+    try:
+        cases = ElementTree.parse(report).getroot().iter("testcase")
+    except (OSError, ElementTree.ParseError) as exc:
+        raise NotRun(f"отчёт тестов {report} не прочитан: {exc}") from exc
+    found: set[str] = set()
+    for case in cases:
+        if case.find("failure") is None and case.find("error") is None:
+            continue
+        parts = str(case.get("classname") or "").split(".")
+        for end, part in enumerate(parts):
+            if part.startswith("test_"):
+                found.add("/".join(parts[: end + 1]) + ".py")
+                break
+    return found
+
+
+def missed(choice: Choice, failed: set[str]) -> list[str]:
+    """Упавшие тест-файлы, которых выбор не назвал (#1598); полный выбор не пропускает."""
+    if choice.tests is None:
+        return []
+    return sorted(failed - set(choice.tests))
+
+
+def said_missed(root: Path, base: str, report: Path) -> int:
+    """Полный прогон общей ветки покраснел: назвать, что выбор изменения пропустил (#1598).
+
+    Слитый коммит судится от `base` (на общей ветке — `HEAD^`) тем же выбором,
+    что гнал изменение. Упавший тест вне выбора — НАХОДКА О ГРАФЕ, а не
+    мигание: ребра, которое его связало бы с правкой, граф не видит. Исход —
+    «назван»: краснеет прогон сам, этот шаг только говорит, почему изменение
+    было зелёным.
+    """
+    try:
+        failed = failed_files(report)
+        gaps = missed(choose(root, base), failed)
+    except NotRun as exc:
+        print(f"пропуск выбора не сверен: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    for one in gaps:
+        print(
+            f"::error::выбор тестов пропустил {one}: упал на полном прогоне, а изменению "
+            "его не назвал — находка о графе (навык what-the-graph-misses)"
+        )
+    if not gaps:
+        print(f"выбор задел все упавшие тест-файлы: {len(failed)}")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает сценарий; с `--tests` — выбранные тест-файлы построчно."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -548,7 +603,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--pr", type=int, default=0, help="номер изменения: зелёную голову спросить у площадки"
     )
+    parser.add_argument(
+        "--missed",
+        type=Path,
+        help="отчёт pytest --junitxml полного прогона: назвать упавшее, что выбор пропустил",
+    )
     args = parser.parse_args(argv)
+    if args.missed:
+        return said_missed(args.root, journal.base_from_env(args.base), args.missed)
     since = args.since
     if not since and args.pr:
         try:

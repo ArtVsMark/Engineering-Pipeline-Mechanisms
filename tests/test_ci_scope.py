@@ -27,9 +27,12 @@ def step_block() -> str:
 
 
 def run_block(
-    tmp_path: Path, event: str, said: str, code: int = 0
+    tmp_path: Path, event: str, said: str, code: int = 0, red: int = 0
 ) -> subprocess.CompletedProcess[str]:
-    """Исполняет блок: `scope.py` отвечает `said` с кодом `code`, pytest пишет доводы."""
+    """Исполняет блок: `scope.py` отвечает `said` с кодом `code`, pytest пишет доводы.
+
+    `red` — код выхода pytest; прочие вызовы python пишутся в `calls.txt`.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (tmp_path / "said.txt").write_text(said, encoding="utf-8")
@@ -39,11 +42,14 @@ def run_block(
         'if [ "$1" = scripts/scope.py ] && [ "${2:-}" = --tests ]; then\n'
         f'  cat "{tmp_path}/said.txt"; exit {code}\n'
         "fi\n"
+        f'echo "$@" >> "{tmp_path}/calls.txt"\n'
         "exit 0\n",
         encoding="utf-8",
     )
     pytest_bin = bin_dir / "pytest"
-    pytest_bin.write_text(f'#!/bin/bash\necho "$@" > "{tmp_path}/args.txt"\n', encoding="utf-8")
+    pytest_bin.write_text(
+        f'#!/bin/bash\necho "$@" > "{tmp_path}/args.txt"\nexit {red}\n', encoding="utf-8"
+    )
     for one in (python, pytest_bin):
         one.chmod(one.stat().st_mode | stat.S_IEXEC)
     env = {
@@ -51,6 +57,7 @@ def run_block(
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "GITHUB_EVENT_NAME": event,
         "RANDOM_SEED": "1",
+        "RUNNER_TEMP": str(tmp_path),
     }
     return subprocess.run(
         ["bash", "-c", step_block()],
@@ -90,11 +97,13 @@ def test_the_whole_set_runs_where_it_must(tmp_path: Path, event: str, said: str,
     """Общая ветка, ответ «всё» и отказ классификатора — полный набор, без файлов."""
     done = run_block(tmp_path, event, said, code)
     assert done.returncode == 0, done.stderr
+    report = [f"--junitxml={tmp_path}/tests.xml"] if event == "push" else []
     assert args_of(tmp_path) == [
         "--strict-markers",
         "-p",
         "no:cacheprovider",
         "--randomly-seed=1",
+        *report,
     ]
     if code:
         assert "полный набор" in done.stdout
@@ -134,3 +143,26 @@ def test_nothing_to_judge_is_counted_and_a_skip_is_not(tmp_path: Path) -> None:
     skipped = [{"name": "test-matrix", "status": "completed", "conclusion": "skipped"}]
     problems, _ = ci_complete.verdict(skipped, ["test-matrix"], "ci-complete")
     assert problems
+
+
+def calls_of(tmp_path: Path) -> str:
+    """Вызовы python блока, кроме выбора тестов."""
+    path = tmp_path / "calls.txt"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def test_a_red_full_run_names_what_the_choice_missed(tmp_path: Path) -> None:
+    """Общая ветка красна — зовётся `--missed` от `HEAD^`, а исход прогона остаётся красным."""
+    done = run_block(tmp_path, "push", "", red=1)
+    assert done.returncode == 1
+    assert f"scripts/scope.py --base HEAD^ --missed {tmp_path}/tests.xml" in calls_of(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("event", "red"), [("push", 0), ("pull_request", 1)], ids=["зелено", "изменение"]
+)
+def test_the_miss_is_asked_only_of_a_red_full_run(tmp_path: Path, event: str, red: int) -> None:
+    """Зелёная общая ветка и красное изменение `--missed` не зовут; исход — код pytest."""
+    done = run_block(tmp_path, event, "tests/test_a.py\n", red=red)
+    assert done.returncode == red
+    assert "--missed" not in calls_of(tmp_path)

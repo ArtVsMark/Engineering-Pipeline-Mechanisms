@@ -150,7 +150,20 @@ jobs:
             fi
             python scripts/scope.py --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}" || true
           fi
-          pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED} ${selected[@]+"${selected[@]}"}
+          # ПОЛНЫЙ ПРОГОН ОБЩЕЙ ВЕТКИ НАЗЫВАЕТ, ЧТО ВЫБОР ПРОПУСТИЛ (#1598). Слитое
+          # изменение гнало выбор, общая ветка — весь набор; упавший тест вне
+          # выбора — находка о графе, а не мигание. Исход прогона прежний: красен
+          # pytest, а `--missed` только говорит, почему изменение было зелёным.
+          report=()
+          if [ "${GITHUB_EVENT_NAME:-}" = "push" ]; then
+            report=("--junitxml=${RUNNER_TEMP:-/tmp}/tests.xml")
+          fi
+          rc=0
+          pytest --strict-markers -p no:cacheprovider ${RANDOM_SEED:+--randomly-seed=$RANDOM_SEED} ${report[@]+"${report[@]}"} ${selected[@]+"${selected[@]}"} || rc=$?
+          if [ "$rc" != 0 ] && [ "${#report[@]}" -gt 0 ]; then
+            python scripts/scope.py --base HEAD^ --missed "${RUNNER_TEMP:-/tmp}/tests.xml" || true
+          fi
+          exit "$rc"
 
   # АГРЕГАТ, А НЕ ВТОРОЙ ПРОГОН ТЕСТОВ. Он ничего не проверяет сам — он несёт
   # ОДНО имя, которое можно объявить обязательным, и краснеет ровно тогда, когда
