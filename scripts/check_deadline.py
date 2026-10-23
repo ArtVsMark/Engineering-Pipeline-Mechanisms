@@ -42,9 +42,14 @@
 хотя бы раз, и КАЖДЫЙ её вызов стоит в теле `try` с поимкой из `CATCHES` либо
 исполняется в функции, которая сама так засчитана (цепочка, предел глубины
 `CALLER_DEPTH`). Имя `f`, взятое значением — довод, словарь, присваивание, —
-снимает засчёт: вызывающий тогда неизвестен. Граница названа: вызов из ДРУГОГО
-модуля (`import hook; hook.f()`) не засчитывается — разбор идёт по одному
-файлу, и это строгость, а не дыра. Методы классов и вложенные функции тоже не
+снимает засчёт: вызывающий тогда неизвестен. Имя, которое берёт ДРУГОЙ
+просмотренный модуль (`from hook import f`, `hook.f`), засчёт тоже снимает:
+вызывающие есть вне файла, и судить по одним здешним значило бы зеленеть на
+непойманном (взгляд на #1589, `exported_names`). Генератор и `async def`
+не засчитываются вовсе: их тело исполняется при обходе или `await`, а не в
+месте вызова, и `try` вокруг `f()` их истечения не ловит. Граница названа:
+модуль вне просмотренных мест (набор тестов, чужое дерево), зовущий `f`, не
+виден, и засчёт по нему не снимается. Методы классов и вложенные функции не
 засчитываются: имя у них не верхнего уровня.
 
 МОДУЛЬ ПОД ДРУГИМ ИМЕНЕМ — ТОТ ЖЕ МОДУЛЬ (находка `bde3e93`): `import
@@ -194,11 +199,56 @@ def waits_with_deadline(tree: ast.AST, safe: set[int]) -> set[int]:
     return allowed
 
 
-def caught_by_callers(tree: ast.Module, safe: set[int]) -> set[int]:
+def yields(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Генератор ли функция: `yield` в её собственном теле, не во вложенных."""
+    return any(
+        isinstance(node, (ast.Yield, ast.YieldFrom))
+        for statement in function.body
+        for node in executed(statement)
+    )
+
+
+def exported_names(trees: dict[str, ast.Module]) -> dict[str, frozenset[str]]:
+    """Имя модуля → его имена, которые берут другие просмотренные модули (#1589).
+
+    Ключ — последнее звено имени модуля (`push_guard` у `.claude/hooks/push_guard.py`):
+    импорт в дереве механизмов идёт по нему. Берётся `from push_guard import f`
+    и `модуль.имя` после `import модуль` (с псевдонимом — по псевдониму).
+    """
+    found: dict[str, set[str]] = {stem: set() for stem in trees}
+    for tree in trees.values():
+        aliases: dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                stem = node.module.rsplit(".", 1)[-1]
+                if stem in found:
+                    found[stem] |= {alias.name for alias in node.names}
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    stem = alias.name.rsplit(".", 1)[-1]
+                    if stem in found:
+                        aliases[alias.asname or alias.name] = stem
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in aliases
+            ):
+                found[aliases[node.value.id]].add(node.attr)
+    return {stem: frozenset(names) for stem, names in found.items()}
+
+
+def caught_by_callers(
+    tree: ast.Module, safe: set[int], exported: frozenset[str] = frozenset()
+) -> set[int]:
     """Узлы функций верхнего уровня, чьё истечение ловит каждый их вызывающий (#1569).
 
     Отдаёт `id` каждого узла, исполняемого в теле такой функции: вызов процесса
     среди них засчитан пойманным. Условия и граница — в шапке модуля.
+
+    `exported` — имена этого модуля, которые берут ДРУГИЕ просмотренные модули
+    (`exported_names`): у такой функции вызывающие есть и вне файла, и засчёт
+    по одним здешним вызовам был бы дырой (взгляд на #1589).
     """
     top = {
         one.name: one
@@ -217,7 +267,11 @@ def caught_by_callers(tree: ast.Module, safe: set[int]) -> set[int]:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     sites: dict[str, list[ast.Call]] = {name: [] for name in top}
-    taken: set[str] = set()
+    # Генератор и сопрограмма исполняются не в месте вызова, а при обходе или
+    # `await` — `try` вокруг `f()` их истечения не ловит (взгляд на #1589).
+    taken: set[str] = {
+        name for name, one in top.items() if isinstance(one, ast.AsyncFunctionDef) or yields(one)
+    } | (exported & set(top))
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in sites:
@@ -257,8 +311,11 @@ def caught_by_callers(tree: ast.Module, safe: set[int]) -> set[int]:
     }
 
 
-def undeadlined(source: str) -> list[str]:
-    """Вызовы процесса исходника без дедлайна или без поимки его истечения."""
+def undeadlined(source: str, exported: frozenset[str] = frozenset()) -> list[str]:
+    """Вызовы процесса исходника без дедлайна или без поимки его истечения.
+
+    `exported` — имена модуля, которые берут другие модули (`exported_names`).
+    """
     tree = ast.parse(source)
     imported = {
         alias.asname or alias.name
@@ -276,7 +333,7 @@ def undeadlined(source: str) -> list[str]:
     )
     safe = guarded(tree)
     awaited = waits_with_deadline(tree, safe)
-    by_callers = caught_by_callers(tree, safe)
+    by_callers = caught_by_callers(tree, safe, exported)
     found: list[str] = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and is_spawn(node, imported, modules)):
@@ -338,16 +395,23 @@ def look(
     names = code_of(root, [one for one in places if one not in missing])
     found: list[tuple[str, str, str]] = []
     unparsed: list[tuple[str, str]] = []
+    sources: dict[str, str] = {}
     for name in names:
         try:
             raw = (root / name).read_bytes()
         except OSError as exc:
             raise NotRun(f"{name} не прочитан: {exc}") from exc
         try:
-            bad = undeadlined(raw.decode("utf-8"))
+            sources[name] = raw.decode("utf-8")
+            ast.parse(sources[name])
         except (UnicodeDecodeError, SyntaxError, ValueError, RecursionError) as exc:
+            sources.pop(name, None)
             unparsed.append((name, report.cut(str(exc))))
-            continue
+    # Кто чьи имена берёт — по всем просмотренным модулям сразу (взгляд на #1589):
+    # поимка у вызывающего засчитывается, только если вызывающих вне файла нет.
+    exported = exported_names({Path(name).stem: ast.parse(text) for name, text in sources.items()})
+    for name, text in sources.items():
+        bad = undeadlined(text, exported.get(Path(name).stem, frozenset()))
         for one in bad:
             line, what = one.split(": ", 1)
             found.append((name, line, what))
