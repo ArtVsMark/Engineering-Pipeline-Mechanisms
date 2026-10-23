@@ -223,3 +223,83 @@ def test_only_a_wide_file_is_recoded() -> None:
     assert module.as_ascii_compatible(plain) == plain
     wide = codecs.BOM_UTF16_LE + "rules/ru/045".encode("utf-16-le")
     assert module.as_ascii_compatible(wide) == b"rules/ru/045"
+
+
+#: Подставка в форме ссылки — нарочно битая: в литерале кода она вход проверки.
+FAKE = "rules/ru/" + "001-a.md"
+
+
+@pytest.mark.parametrize(
+    ("source", "judged"),
+    [
+        (f'"""Модуль.\n\n{FAKE}\n"""\n', True),
+        (f"x = 1  # {FAKE}\n", True),
+        (f'CASE = "{FAKE}"\n', False),
+        (f'def f():\n    """Функция."""\n    return f"путь {FAKE}"\n', False),
+        (f'CASE = "{FAKE}"  # {FAKE}\n', True),
+        (f"не python: ( {FAKE}\n", True),
+    ],
+    ids=["докстрока", "комментарий", "литерал", "f-строка", "литерал-и-комментарий", "не-разобран"],
+)
+def test_a_code_literal_is_an_input_not_a_link(tmp_path: Path, source: str, judged: bool) -> None:
+    """В `.py` судятся докстроки и комментарии, а литерал кода — вход проверки (#1571).
+
+    Подставки каталога (`001-a.md` в самопроверке гейта и в тестах) — литералы,
+    и правильное имя там сломало бы сам случай. Исходник, который не
+    разобрался, судится целиком: сужение не даёт права пропускать непрочитанное.
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+    (tmp_path / "case.py").write_text(source, encoding="utf-8")
+    assert bool(module.links(tmp_path)) is judged
+
+
+def test_a_literal_is_judged_outside_python(tmp_path: Path) -> None:
+    """Вне `.py` литералов нет: подставка в документе — ссылка и судится."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+    (tmp_path / "doc.md").write_text(f'`CASE = "{FAKE}"`\n', encoding="utf-8")
+    assert module.links(tmp_path) == [(Path("doc.md"), 1, "001", "a")]
+
+
+def test_code_literals_and_inside_name_the_places() -> None:
+    """`code_literals` называет литерал кода, но не докстроку; `inside` судит по символам."""
+    spans = module.code_literals('"""doc"""\nX = "abc"\n')
+    assert spans == [(2, 4, 2, 9)]
+    assert module.inside(spans, 2, 5)
+    assert not module.inside(spans, 2, 9)
+    assert not module.inside(spans, 1, 1)
+    assert module.code_literals("def (") is None
+
+
+def test_a_comment_between_concatenated_strings_is_judged(tmp_path: Path) -> None:
+    """Склеенные строки — две части, комментарий между ними судится (взгляд на #1588).
+
+    Ast отдаёт склейку одним узлом от первой части до последней, и ссылка в
+    комментарии между частями прежде молча выпадала из суда.
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+    source = f'CASE = (\n    "a"  # {FAKE}\n    "b"\n)\n'
+    (tmp_path / "case.py").write_text(source, encoding="utf-8")
+    assert module.links(tmp_path) == [(Path("case.py"), 2, "001", "a")]
+
+
+def test_a_declared_encoding_keeps_the_comment_after_a_literal(tmp_path: Path) -> None:
+    """Объявленная кодировка: ссылка в комментарии за не-ASCII литералом судится (#1588).
+
+    Смещения ast — байты UTF-8; у исходника в cp1251 они разошлись бы с байтами
+    файла, и конец места литерала съехал бы на комментарий.
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+    source = f'# coding: cp1251\nX = "правило"  # {FAKE}\n'
+    (tmp_path / "case.py").write_bytes(source.encode("cp1251"))
+    assert module.links(tmp_path) == [(Path("case.py"), 2, "001", "a")]
+
+
+def test_python_text_and_python_links_name_their_outcomes() -> None:
+    """`python_text` читает объявленную кодировку; `python_links` — None, когда судить целиком."""
+    assert module.python_text("# coding: cp1251\nX = 'ы'\n".encode("cp1251")) == (
+        "# coding: cp1251\nX = 'ы'\n"
+    )
+    assert module.python_text(b"# coding: no-such-codec\n") is None
+    assert module.python_links("x.py", b"def (") is None
+    said = module.python_links("x.py", f'X = "{FAKE}"  # {FAKE}\n'.encode())
+    assert said == [(Path("x.py"), 1, "001", "a")]
