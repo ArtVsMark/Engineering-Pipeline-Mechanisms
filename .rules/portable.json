@@ -158,6 +158,10 @@
       "answer": "ours",
       "why": "@skill-tree"
     },
+    ".claude/skills/bundle-the-work": {
+      "answer": "ours",
+      "why": "@skill-tree"
+    },
     ".claude/skills/build-a-gate": {
       "answer": "ours",
       "why": "@skill-tree"

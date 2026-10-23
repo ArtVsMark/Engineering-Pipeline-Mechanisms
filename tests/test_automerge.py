@@ -636,6 +636,30 @@ def test_a_silent_platform_in_the_refresh_question_is_a_refusal_not_a_crash(
     assert platform["merged"] == [3] and platform["synced"] == []
 
 
+def test_a_silent_platform_on_the_red_head_size_is_a_refusal_not_a_crash(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """`head_look` красной головы не ответил — причина головы, сосед ниже сливается.
+
+    Вопрос об объёме стоял вне ловли, которую #1548 поставила строкой ниже, и
+    один сбой площадки ронял весь заход вместе с соседями (взгляд на #1548).
+    """
+    lagging_red(platform, monkeypatch, synced=False)
+    platform["changes"] = [change(2, "automerge"), change(3, "automerge")]
+    real = module.head_look
+
+    def silent_for_red(repo: str, number: int, tok: str, **kwargs: Any) -> Any:
+        if number == 2:
+            raise module.ghrest.TransportError("502")
+        return real(repo, number, tok, **kwargs)
+
+    monkeypatch.setattr(module, "head_look", silent_for_red)
+    assert module.advance("o/r", "token", "main", dry_run=False) == module.EXIT_BROKEN
+    out = capsys.readouterr().out
+    assert "площадка не ответила об объёме" in out, out
+    assert platform["merged"] == [3] and platform["synced"] == []
+
+
 def test_only_one_red_head_is_refreshed_per_run(
     platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
 ) -> None:

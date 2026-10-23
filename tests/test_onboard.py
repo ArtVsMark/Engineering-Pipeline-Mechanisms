@@ -218,9 +218,9 @@ def test_a_step_with_its_own_caller_is_printed_as_that_caller(
     kit = module.own_kit(root / ".github" / "workflows" / "план.yml", "план", "О/Р", "v2.5.0")
     assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in kit
     assert "workflow_dispatch" in kit, "свои события вызывающего потерялись"
-    assert module.main(["--root", str(root), "--repo", "О/Р"]) == module.EXIT_OK
+    assert module.main(["--root", str(root), "--repo", "O/R"]) == module.EXIT_OK
     out = capsys.readouterr().out
-    assert "uses: О/Р/.github/workflows/step-план.yml@v2.5.0" in out
+    assert "uses: O/R/.github/workflows/step-план.yml@v2.5.0" in out
     assert "uses: ./.github/workflows/step-план.yml" not in out, "внутренний путь ушёл в заготовку"
     assert "  пример:\n    name: пример\n" in out, "шаг конвейера перестал быть джобом ci.yml"
     assert "  план:\n    name: план\n" not in out, "управляющий механизм напечатан джобом ci.yml"
@@ -247,7 +247,7 @@ def test_the_answer_of_a_mechanism_follows_its_flow_not_its_file(
         ["обход-всех / обход-всех"],
         True,
     )
-    assert module.main(["--root", str(root), "--repo", "О/Р"]) == module.EXIT_OK
+    assert module.main(["--root", str(root), "--repo", "O/R"]) == module.EXIT_OK
     checks, _, beyond = capsys.readouterr().out.partition(f"{policy.BEYOND}:")
     assert '"обход-всех / обход-всех"' in checks, "запись механизма на изменении ушла не туда"
     assert '"обход / обход"' not in checks + beyond, "имя записи собрано из имени файла"
@@ -1349,7 +1349,33 @@ def test_the_family_slot_takes_the_owner_of_the_called_repo() -> None:
     assert '"Other/*"' in laid and module.FAMILY_SLOT not in laid
 
 
-@pytest.mark.parametrize("repo", ["Mechanisms", "/Mechanisms", "Other/", ""])
+@pytest.mark.parametrize(
+    ("repo", "owner"),
+    [("my-org/Pipe.Mechanisms_2", "my-org"), ("O" * 39 + "/r", "O" * 39), ("a/b", "a")],
+)
+def test_a_repo_in_the_platform_shape_gives_its_owner(repo: str, owner: str) -> None:
+    """Законные формы `REPO_RE` проходят: сужение формы не отвергает живых имён."""
+    laid = module.data_kit(ROOT, repo)[Path(".github/dependabot.yml")]
+    assert f'"{owner}/*"' in laid
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "Mechanisms",
+        "/Mechanisms",
+        "Other/",
+        "",
+        # Соседние формы (195): лишняя косая, владелец не по форме площадки.
+        "a/b/c",
+        "my org/Mechanisms",
+        'Other"/Mechanisms',
+        "-Other/Mechanisms",
+        "Other-/Mechanisms",
+        "O" * 40 + "/Mechanisms",
+        "Other/Mech anisms",
+    ],
+)
 def test_a_repo_without_an_owner_is_refused(repo: str) -> None:
     """`--repo` не «владелец/имя» — отказ, а не слот с мусором вместо владельца (045)."""
     with pytest.raises(module.NotRun, match="владелец/имя"):
@@ -2078,3 +2104,58 @@ def test_signed_all_signs_every_kit_or_refuses_the_whole() -> None:
     assert all(module.is_signed(path, text) for path, text in signed.items()), signed
     with pytest.raises(module.NotRun, match="лицензии"):
         module.signed_all({**files, Path("c.toml"): "z\n"}, "o/r")
+
+
+def test_every_consumer_data_file_has_a_kit_or_a_reason() -> None:
+    """Данные, что шаги читают у потребителя: заготовка или названная причина (#1557).
+
+    Обе половины: путь из перечня без заготовки и без причины краснеет, и
+    причина у пути, которого в перечне больше нет, — тоже: объявление,
+    пережившее предмет, вводило бы в заблуждение (181).
+    """
+    names = module.steps(ROOT)
+    laid = {module.paths.PIPELINE, *module.rulebook_kit(ROOT), *module.data_kit(ROOT, "o/r")}
+    left = module.consumer_data(ROOT, names, laid)
+    assert left is not None, "перечень не выведен — гейт ничего не проверил (075)"
+    refused = {str(one) for one in module.KIT_REFUSED}
+    assert sorted(set(left) - refused) == [], "данные без заготовки и без причины"
+    assert sorted(refused - set(left)) == [], "причина у пути, которого в перечне нет"
+
+
+def test_the_labels_kit_carries_a_zone_for_every_path() -> None:
+    """Заготовка меток несёт зону на любой путь: без зоны гейт разметки краснел бы всегда."""
+    kit = yaml.safe_load((ROOT / module.DATA_KIT / module.paths.LABELS).read_text(encoding="utf-8"))
+    zones = [one for one in kit if str(one["name"]).startswith("area/")]
+    assert zones and any("**" in one.get("paths", []) for one in zones)
+
+
+#: Метки нашего состава, которых заготовка не несёт, — и почему: их ставят
+#: механизмы в НАШЕМ трекере о потребителях, у потребителя предмета нет.
+LABELS_OURS_ONLY: Final = frozenset({"consumer/jam", "consumer/gap", "consumer/mismatch"})
+
+
+def test_the_labels_kit_follows_our_labels() -> None:
+    """Каждая наша метка, кроме зон и названных своих, есть в заготовке (взгляд на #1613).
+
+    Метку механизма — `automerge`, `hold`, `source/*`, `scope/*` — ставит и
+    читает код, и у потребителя без неё механизм молча не сработает: новая
+    метка в `.github/labels.yml` обязана приехать и в заготовку (195).
+    """
+    ours = yaml.safe_load((ROOT / module.paths.LABELS).read_text(encoding="utf-8"))
+    kit = yaml.safe_load((ROOT / module.DATA_KIT / module.paths.LABELS).read_text(encoding="utf-8"))
+    want = {str(one["name"]) for one in ours if not str(one["name"]).startswith("area/")}
+    have = {str(one["name"]) for one in kit if not str(one["name"]).startswith("area/")}
+    assert sorted(want - have - LABELS_OURS_ONLY) == [], "метка механизма не приехала в заготовку"
+    assert sorted(have - want) == [], "в заготовке метка, которой у механизмов нет"
+    assert want >= LABELS_OURS_ONLY, "объявление своей метки пережило её"
+
+
+def test_the_kinds_kit_carries_no_meetings_of_ours() -> None:
+    """Заготовка словаря родов — имена и признаки, без наших встреч, механизмов и отметок."""
+    kit = json.loads(
+        (ROOT / module.DATA_KIT / module.paths.FINDING_KINDS).read_text(encoding="utf-8")
+    )
+    ours = json.loads((ROOT / module.paths.FINDING_KINDS).read_text(encoding="utf-8"))
+    assert set(kit["kinds"]) == set(ours["kinds"])
+    assert all(body["встречен"] == [] for body in kit["kinds"].values())
+    assert not any({"каталогу", "породил", "правило с"} & set(b) for b in kit["kinds"].values())

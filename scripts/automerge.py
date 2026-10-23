@@ -1551,8 +1551,18 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # владелец пойдёт искать поломку (045). Замер 13.09.2026 на #285:
             # голова была и пуста, и красна, и очередь назвала только красноту.
             # Цена — один запрос на КРАСНУЮ голову, а не на каждого кандидата.
-            red_look = head_look(repo, change.number, owner_token)
-            if red_look.changed == 0:
+            # Вопрос об объёме — тоже обращение к площадке, и он стоит под
+            # той же ловлей, что `red_kept` ниже (взгляд на #1548): без неё
+            # один сбой здесь ронял весь заход вместе с соседями ниже. Не
+            # ответила — объём неизвестен, голова идёт красной без подтяжки.
+            kept = ""
+            try:
+                red_look: Head | None = head_look(repo, change.number, owner_token)
+            except ghrest.TransportError as exc:
+                red_look = None
+                kept = f"площадка не ответила об объёме — {exc}"
+                refused.append(f"#{change.number}: {kept}")
+            if red_look is not None and red_look.changed == 0:
                 name_the_emptiness(
                     repo,
                     change,
@@ -1572,19 +1582,20 @@ def advance(repo: str, owner_token: str, base: str, *, dry_run: bool) -> int:
             # и не молчит: попадает в `refused`, и итог захода красный (045).
             # Отвечает площадка и на вопросы `red_kept` (база впереди, уже
             # подтянуто, идёт взгляд) — они под той же ловлей.
-            try:
-                kept = red_kept(
-                    repo,
-                    change,
-                    owner_token,
-                    main_red=bool(troubles),
-                    state=red_look.state,
-                    outranked=waiting_rank is not None and rank(change) > waiting_rank,
-                    spent=red_synced,
-                )
-            except ghrest.TransportError as exc:
-                kept = f"площадка не ответила, подтягивать ли — {exc}"
-                refused.append(f"#{change.number}: {kept}")
+            if red_look is not None:
+                try:
+                    kept = red_kept(
+                        repo,
+                        change,
+                        owner_token,
+                        main_red=bool(troubles),
+                        state=red_look.state,
+                        outranked=waiting_rank is not None and rank(change) > waiting_rank,
+                        spent=red_synced,
+                    )
+                except ghrest.TransportError as exc:
+                    kept = f"площадка не ответила, подтягивать ли — {exc}"
+                    refused.append(f"#{change.number}: {kept}")
             if not kept:
                 try:
                     sync_head(repo, change.number, owner_token, dry_run=dry_run)

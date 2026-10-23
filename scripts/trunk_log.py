@@ -144,6 +144,12 @@ def merge_dates(log: str) -> dict[int, str]:
     return out
 
 
+def merged_numbered(where: Path | None = None, ref: str = TRUNK_REF) -> list[tuple[int, str]]:
+    """Номер и тело уплотнённых коммитов `ref` от старых к новым; мелкий клон — отказ."""
+    whole(where)
+    return merged_messages(git_log(where, ref))
+
+
 def merged_bodies(where: Path | None = None, ref: str = TRUNK_REF) -> list[str]:
     """Тела уплотнённых коммитов `ref` от старых к новым; мелкий клон — отказ."""
     whole(where)

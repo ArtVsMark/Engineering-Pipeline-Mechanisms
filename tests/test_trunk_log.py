@@ -37,6 +37,15 @@ def test_merged_bodies_are_the_squashed_ones_oldest_first(tmp_path: Path) -> Non
     ]
 
 
+def test_merged_numbered_pairs_the_number_with_its_body(tmp_path: Path) -> None:
+    """Номер изменения из темы идёт с телом: по нему род находит отметку правила."""
+    root = repo(tmp_path)
+    assert module.merged_numbered(root, "HEAD") == [
+        (1, "Первое (#1)\n\nРазобрано: aaaaaaa\nРод: род"),
+        (2, "Второе (#2)\n\nбез снятий"),
+    ]
+
+
 def test_branch_bodies_are_every_commit_of_the_range(tmp_path: Path) -> None:
     """Коммиты изменения — все, с темой «(#N)» и без: из них соберут тело уплотнения."""
     root = repo(tmp_path)
