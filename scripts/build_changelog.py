@@ -34,11 +34,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import changerefs
 import journal
 import paths
+import pipeline_checks
 import version as project_version
 
 FRAGMENTS: Final = paths.FRAGMENTS
+#: Ответ проекта, где лежит раздел формы фрагмента (#1570). Константой: в
+#: `parse_fragments` имя `paths` занято доводом.
+PIPELINE: Final = paths.PIPELINE
 RELEASED: Final = paths.RELEASED
 OUTPUT: Final = paths.CHANGELOG
 #: Формат номера версии общий (214) и живёт уровнем выше (090).
@@ -171,13 +176,53 @@ def read_fragments(directory: Path) -> list[Fragment]:
     return parse_fragments(sorted(directory.glob("*.md")))
 
 
-def parse_fragments(paths: list[Path]) -> list[Fragment]:
+def tail_fault(body: str, form: journal.FragmentForm) -> str:
+    """Чем конец фрагмента не отвечает форме проекта; пусто — отвечает (#1570).
+
+    Последняя строка обязана подходить под `tail`. Связь с задачей — либо в
+    ней же (`link: tail`), либо где угодно в тексте общим разбором связей
+    (`link: body`): «Part of #930» в прозе читается тем же `changerefs`, что и
+    у гейта разметки, а не своим образцом (090).
+    """
+    last = body.splitlines()[-1].strip()
+    if not form.tail.match(last):
+        if form is journal.DEFAULT_FORM:
+            return "ссылка на задачу не последней строкой"
+        return f"последняя строка не подходит под tail раздела {journal.SECTION}"
+    if form.link == journal.LINK_TAIL:
+        if not TASK_RE.search(last):
+            return "связь с задачей не в последней строке (link: tail)"
+    elif not changerefs.links_in(body):
+        return "нет связи с задачей в тексте (link: body)"
+    return ""
+
+
+def project_form() -> journal.FragmentForm:
+    """Форма фрагмента проекта; отказ разбора раздела — `NotRun` этого модуля.
+
+    Отказ переводится здесь, на границе: читатели сборки — выпуск
+    (`release.py`) и оповещение о мажоре (`breaking_notice.py`) — ловят
+    `build_changelog.NotRun`, а `journal.NotRun` прошёл бы мимо них трассой с
+    кодом 1, неотличимой от «нашёл» (039).
+    """
+    try:
+        return pipeline_checks.fragment_form()
+    except journal.NotRun as exc:
+        raise NotRun(str(exc)) from exc
+
+
+#: Номер задачи в строке — для `link: tail` с образцом потребителя.
+TASK_RE: Final = re.compile(r"#\d+")
+
+
+def parse_fragments(paths: list[Path], form: journal.FragmentForm | None = None) -> list[Fragment]:
     """Разбирает названные файлы, отвергая неразбираемые имена и пустые.
 
     Разбор один на оба читателя — выпуск и гейт изменения. Двумя копиями он
     разошёлся бы молча: один принял бы фрагмент, который второй отвергает
     ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
     """
+    form = form if form is not None else project_form()
     fragments: list[Fragment] = []
     unnamed: list[str] = []
     for path in paths:
@@ -193,8 +238,8 @@ def parse_fragments(paths: list[Path]) -> list[Fragment]:
         if not body:
             unnamed.append(f"{path.name} (пустой)")
             continue
-        if not LINK_LINE_RE.match(body.splitlines()[-1].strip()):
-            unnamed.append(f"{path.name} (ссылка на задачу не последней строкой)")
+        if why := tail_fault(body, form):
+            unnamed.append(f"{path.name} ({why})")
             continue
         # Причина у `internal` проверяется ЗДЕСЬ, а не у гейта изменения: разбор
         # фрагментов один на обоих читателей, и вторая копия правила разошлась
@@ -212,7 +257,11 @@ def parse_fragments(paths: list[Path]) -> list[Fragment]:
             + "\n  ".join(unnamed)
             + "\n\nИмя: <слаг-по-смыслу>.<род>.md, род — "
             + " · ".join(KINDS)
-            + "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
+            + (
+                "\nПоследняя строка — ссылка на задачу: «#12» или «#12 #13»"
+                if form is journal.DEFAULT_FORM
+                else f"\nФорма конца — раздел {journal.SECTION} в {PIPELINE}"
+            )
             + "\nУ рода `internal` ПЕРВАЯ строка — причина: "
             + "«> **Потребителю безразлично:** …» (154)"
         )
@@ -231,11 +280,14 @@ def fragments_of(paths: list[str]) -> list[Fragment]:
         for name in paths
         if name.startswith(f"{FRAGMENTS}/") and name.endswith(".md") and name.count("/") == 1
     ]
-    fragments = parse_fragments(touched)
+    form = project_form()
+    fragments = parse_fragments(touched, form)
     # ФОРМА — ТОЛЬКО У НОВОГО (#1172). Выпущенное — источник журнала, и править
     # его задним числом запрещено: предел, применённый к нему, требовал бы ровно
     # этого. Поэтому форму судит гейт изменения, а не общий разбор.
-    faults = [f"{one.slug}.{one.kind}.md — {why}" for one in fragments if (why := shape_fault(one))]
+    faults = [
+        f"{one.slug}.{one.kind}.md — {why}" for one in fragments if (why := shape_fault(one, form))
+    ]
     if faults:
         raise NotRun(
             "фрагменты не той формы:\n  "
@@ -248,7 +300,7 @@ def fragments_of(paths: list[str]) -> list[Fragment]:
     return fragments
 
 
-def shape_fault(fragment: Fragment) -> str:
+def shape_fault(fragment: Fragment, form: journal.FragmentForm = journal.DEFAULT_FORM) -> str:
     """Чем фрагмент нарушает форму: забор не той формы, заголовок выше `###`, размер тела.
 
     Пусто — ничем. Форму забора судит `fenced`.
@@ -274,7 +326,7 @@ def shape_fault(fragment: Fragment) -> str:
             return f"заголовок выше `###`: «{one}»"
     heading = heading_at(raw)
     lines = [kept for index, one in enumerate(raw) if (kept := one.strip()) and index != heading]
-    body = lines[:-1] if lines and LINK_LINE_RE.match(lines[-1]) else lines
+    body = lines[:-1] if lines and form.tail.match(lines[-1]) else lines
     if len(body) > FRAGMENT_LINES:
         return f"тело {len(body)} строк, предел {FRAGMENT_LINES}"
     size = sum(len(one) for one in body)

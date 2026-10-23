@@ -13,8 +13,9 @@
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import gitcall
 import report
@@ -61,6 +62,63 @@ class NotRun(RuntimeError):
     Живёт здесь вместе с чтением дифа: механизм, поймавший этот отказ, обязан
     объявить его своим третьим исходом, а не выдать за «проверено».
     """
+
+
+#: Раздел `.pipeline.yml`, где потребитель задаёт НАПОЛНЕНИЕ фрагмента (#1570).
+#: Устройство общее — имя файла, роды, непустое тело, обязательная связь с
+#: задачей; чем фрагмент кончается и где стоит связь, у потребителя бывает
+#: разным (решение владельца 22.10.2026, #639: устройство истории наше,
+#: наполнение настраивается).
+SECTION: Final = "journal"
+#: Где стоит связь с задачей: последней строкой — или где угодно в тексте.
+LINK_TAIL: Final = "tail"
+LINK_BODY: Final = "body"
+LINK_PLACES: Final = (LINK_TAIL, LINK_BODY)
+
+
+@dataclass(frozen=True)
+class FragmentForm:
+    """Наполнение фрагмента: чем он кончается и где в нём связь с задачей."""
+
+    tail: re.Pattern[str]
+    link: str
+
+
+#: Наша форма — она же умолчание: без раздела поведение прежнее.
+DEFAULT_FORM: Final = FragmentForm(LINK_LINE_RE, LINK_TAIL)
+
+
+def form_of(section: Any) -> FragmentForm:
+    """Форма фрагмента из раздела `journal:`; раздела нет (`None`) — наша.
+
+    Отказ разбора — `NotRun` с причиной: образец, который не компилируется,
+    или место связи вне закрытого списка молча подменять умолчанием нельзя
+    (045).
+    """
+    if section is None:
+        return DEFAULT_FORM
+    if not isinstance(section, dict):
+        raise NotRun(f"раздел {SECTION}: ожидалось отображение, пришло {type(section).__name__}")
+    unknown = sorted(set(section) - {"tail", "link"})
+    if unknown:
+        raise NotRun(
+            f"раздел {SECTION}: незнакомые ключи {', '.join(unknown)} — читаются tail и link"
+        )
+    link = section.get("link", LINK_TAIL)
+    if link not in LINK_PLACES:
+        raise NotRun(
+            f"раздел {SECTION}: link «{link}» — ожидалось одно из {', '.join(LINK_PLACES)}"
+        )
+    said = section.get("tail")
+    if said is None:
+        return FragmentForm(LINK_LINE_RE, str(link))
+    if not isinstance(said, str) or not said:
+        raise NotRun(f"раздел {SECTION}: tail — непустой образец строкой")
+    try:
+        tail = re.compile(said)
+    except re.error as exc:
+        raise NotRun(f"раздел {SECTION}: tail «{said}» не компилируется: {exc}") from exc
+    return FragmentForm(tail, str(link))
 
 
 def base_from_env(given: str = "") -> str:
