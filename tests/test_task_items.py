@@ -592,3 +592,49 @@ def test_an_agent_marking_is_followed_by_finishing(
     run.write_text("{}", encoding="utf-8")
     module.main(["--repo", "o/r", "--pr", "7", "--from", str(run), "--apply"])
     assert called == ["finish"]
+
+
+NO_TASK_BODY: str = "Без задачи, потому что починка красной ветки\n"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--fate", "--pr", "7", "--apply"], ["--pr", "7", "--collect", "subject.md"]],
+    ids=["судьба", "предмет"],
+)
+def test_a_declared_no_task_is_nothing_after_merge(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    argv: list[str],
+) -> None:
+    """«Без задачи, потому что …» после слияния — «нечего» с кодом 0 (взгляд на #1584)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: linked_change(NO_TASK_BODY))
+    assert module.main(["--repo", "o/r", *argv]) == module.EXIT_NOTHING
+    assert "Без задачи, потому что" in capsys.readouterr().out
+
+
+def test_silence_about_the_task_is_still_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Связи нет и объявления нет — по-прежнему отказ с кодом 2: молчание не ответ (154)."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: linked_change("текст\n"))
+    assert module.main(["--repo", "o/r", "--fate", "--pr", "7"]) == module.EXIT_BROKEN
+
+
+def test_unlinked_tells_a_declaration_from_silence() -> None:
+    """`unlinked` — `NoTask` при объявлении, `NotRun` при молчании; объявление в коде не ответ."""
+    assert isinstance(module.unlinked(7, NO_TASK_BODY, "записывать"), module.NoTask)
+    silent = module.unlinked(7, "текст", "записывать")
+    assert type(silent) is module.NotRun
+    fenced = module.unlinked(7, f"```\n{NO_TASK_BODY}```\n", "записывать")
+    assert type(fenced) is module.NotRun
+
+
+def test_a_declaration_in_the_title_counts_like_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Объявление в заголовке — тоже «нечего»: гейт читает заголовок, шаг — так же (#1594)."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    change = {**linked_change("текст\n"), "title": NO_TASK_BODY.strip()}
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: change)
+    assert module.main(["--repo", "o/r", "--fate", "--pr", "7"]) == module.EXIT_NOTHING
