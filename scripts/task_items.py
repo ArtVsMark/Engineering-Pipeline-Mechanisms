@@ -66,6 +66,29 @@ class NotRun(RuntimeError):
     """Шаг не отработал: третий исход, а не «предлагать нечего»."""
 
 
+class NoTask(NotRun):
+    """Связи нет по объявлению автора («Без задачи, потому что …»): нечего, а не поломка.
+
+    Гейт изменения принимает объявление законным ответом (#1578), и после
+    слияния его отсутствие связи — то же состояние, а не отказ (взгляд на
+    #1584): прежде `--fate` на таком изменении краснел «нет связи с задачей».
+    """
+
+
+def unlinked(number: int, body: str, doing: str, title: str = "") -> NotRun:
+    """Отказ «связи нет»: объявленное отсутствие — `NoTask`, молчание — `NotRun`.
+
+    Объявление читается в теле и в заголовке — там же, где его ищет гейт
+    (`check_pr_meta`). ГРАНИЦА (взгляд на #1594): сообщения коммитов гейт
+    читает, а этот шаг — нет: после слияния их надо спрашивать у площадки
+    отдельным чтением. Изменение, открытое `agent_pr`, переносит объявление из
+    коммитов в тело, так что граница задевает только открытое руками.
+    """
+    if why := changerefs.no_task_in_all([body, title]):
+        return NoTask(f"#{number}: «{why}» — {doing} нечего")
+    return NotRun(f"у #{number} нет связи с задачей — {doing} не против чего")
+
+
 def proposals(text: str) -> tuple[list[tuple[str, str]], list[str]]:
     """Разбирает ответ: пары «пункт, доказательство» и пункты без него.
 
@@ -110,7 +133,7 @@ def subject(repo: str, number: int, token: str) -> str:
     body = str(change.get("body") or "")
     numbers = sorted({link.number for link in changerefs.links_in(body)})
     if not numbers:
-        raise NotRun(f"у #{number} нет связи с задачей — разбирать не против чего")
+        raise unlinked(number, body, "разбирать", str(change.get("title") or ""))
 
     lines = [
         f"# Предмет разбора: изменение #{number}",
@@ -338,9 +361,10 @@ def publish(repo: str, numbers: list[int], body: str, token: str) -> None:
 def linked(repo: str, number: int, token: str) -> tuple[list[int], dict[str, Any]]:
     """Задачи, с которыми связано изменение, и оно само."""
     change = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
-    found = sorted({link.number for link in changerefs.links_in(str(change.get("body") or ""))})
+    body = str(change.get("body") or "")
+    found = sorted({link.number for link in changerefs.links_in(body)})
     if not found:
-        raise NotRun(f"у #{number} нет связи с задачей — записывать некуда")
+        raise unlinked(number, body, "записывать", str(change.get("title") or ""))
     return found, change
 
 
@@ -485,6 +509,9 @@ def main(argv: list[str] | None = None) -> int:
     except late_look.NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+    except NoTask as exc:
+        print(exc)
+        return EXIT_NOTHING
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
