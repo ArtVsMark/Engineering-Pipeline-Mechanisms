@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import load_script
-from tests.test_scope_again import commit, git, tree, write
+from tests.test_scope import git
+from tests.test_scope_again import commit, tree, write
 
 areas = load_script("scope_areas.py")
 scope = load_script("scope.py")
