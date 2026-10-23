@@ -137,6 +137,70 @@ def test_the_predicate_has_both_halves(source: str, bad: bool) -> None:
     assert bool(undeadlined(source)) is bad
 
 
+#: Поимка у вызывающего (#1569): вызов процесса без своей поимки, функция,
+#: где он стоит, и её вызывающие.
+SPAWN = "import subprocess\ndef f():\n    subprocess.run(['x'], timeout=5)\n"
+CATCH = "    except subprocess.TimeoutExpired:\n        pass\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "bad"),
+    [
+        (SPAWN + "def main():\n    try:\n        f()\n" + CATCH, False),
+        (
+            SPAWN + "def g():\n    f()\ndef main():\n    try:\n        g()\n" + CATCH,
+            False,
+        ),
+        (
+            SPAWN + "def main():\n    try:\n        f()\n" + CATCH + "def other():\n    f()\n",
+            True,
+        ),
+        (SPAWN + "def main():\n    try:\n        f()\n" + CATCH + "HANDLERS = {'x': f}\n", True),
+        (SPAWN, True),
+        (
+            SPAWN + "def main():\n    try:\n        later = lambda: f()\n" + CATCH,
+            True,
+        ),
+        (
+            SPAWN + "def main():\n    try:\n        f()\n"
+            "    except subprocess.TimeoutExpired:\n        return 2\n"
+            "    except OSError:\n        return 1\n"
+            "if __name__ == '__main__':\n    raise SystemExit(main())\n",
+            False,
+        ),
+        (SPAWN + "def g():\n    g()\n    f()\n", True),
+        (
+            SPAWN + "def main():\n    try:\n        f()\n" + CATCH + "def other(o):\n    o.f()\n",
+            True,
+        ),
+    ],
+    ids=[
+        "пойман-у-единственного-вызывающего",
+        "цепочка-из-двух",
+        "второй-вызывающий-не-ловит",
+        "передана-значением",
+        "вызовов-нет",
+        "вызов-в-lambda-внутри-try",
+        "форма-хука-каталога",
+        "цикл-без-поимки",
+        "вызов-через-точку",
+    ],
+)
+def test_a_catch_at_every_caller_counts(source: str, bad: bool) -> None:
+    """Поимка у каждого вызывающего засчитывается; передача значением и пропуск — нет (#1569)."""
+    assert bool(undeadlined(source)) is bad
+
+
+def test_caught_by_callers_marks_the_body_of_the_caught_function() -> None:
+    """`caught_by_callers` отдаёт узлы тела засчитанной функции — и только её."""
+    tree = ast.parse(SPAWN + "def main():\n    try:\n        f()\n" + CATCH)
+    marked = gate.caught_by_callers(tree, gate.guarded(tree))
+    f, main = tree.body[1], tree.body[2]
+    assert isinstance(f, ast.FunctionDef) and isinstance(main, ast.FunctionDef)
+    assert all(id(node) in marked for node in ast.walk(f.body[0]))
+    assert id(main.body[0]) not in marked
+
+
 def test_executed_stops_at_nested_scopes() -> None:
     """Исполняемое на месте — без тел `def`, `lambda` и `class`: внешний `try` их не держит."""
     tree = ast.parse("def f():\n    g()\nh()\n")

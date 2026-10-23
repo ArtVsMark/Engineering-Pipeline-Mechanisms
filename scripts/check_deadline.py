@@ -34,6 +34,19 @@
 исполняются сразу, при определении, то есть в `try`, — их предикат тоже не
 засчитывает, и это строгость, а не дыра.
 
+ПОИМКА У ВЫЗЫВАЮЩЕГО ЗАСЧИТЫВАЕТСЯ (решение владельца 23.10.2026, #1569).
+Хук каталога ловит истечение в `main()`, а не у вызова, и нарочно: там он
+решает исход — толчок закрывает, прочую команду пропускает. Обёртка у вызова
+была бы кодом ради формы проверки. Поэтому вызов без своей поимки законен,
+когда функция верхнего уровня, где он стоит (`f`), вызывается в том же модуле
+хотя бы раз, и КАЖДЫЙ её вызов стоит в теле `try` с поимкой из `CATCHES` либо
+исполняется в функции, которая сама так засчитана (цепочка, предел глубины
+`CALLER_DEPTH`). Имя `f`, взятое значением — довод, словарь, присваивание, —
+снимает засчёт: вызывающий тогда неизвестен. Граница названа: вызов из ДРУГОГО
+модуля (`import hook; hook.f()`) не засчитывается — разбор идёт по одному
+файлу, и это строгость, а не дыра. Методы классов и вложенные функции тоже не
+засчитываются: имя у них не верхнего уровня.
+
 МОДУЛЬ ПОД ДРУГИМ ИМЕНЕМ — ТОТ ЖЕ МОДУЛЬ (находка `bde3e93`): `import
 subprocess as sp` даёт `sp.run`, и предикат его видит наравне с
 `from subprocess import run as r`.
@@ -94,6 +107,11 @@ CATCHES: Final = frozenset({"TimeoutExpired", "SubprocessError", "Exception"})
 #: `lambda` исполняется позже и вне него, тело `class` — сразу, и его гейт судит
 #: строже, чем исполняется (предел назван в шапке).
 SCOPES: Final = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+#: Глубина цепочки «пойман у вызывающего вызывающего». Предел — не догадка о
+#: дереве, а защита от разбора без конца: цикл вызовов засчёта не даёт вовсе.
+CALLER_DEPTH: Final = 8
 
 
 class NotRun(RuntimeError):
@@ -176,6 +194,69 @@ def waits_with_deadline(tree: ast.AST, safe: set[int]) -> set[int]:
     return allowed
 
 
+def caught_by_callers(tree: ast.Module, safe: set[int]) -> set[int]:
+    """Узлы функций верхнего уровня, чьё истечение ловит каждый их вызывающий (#1569).
+
+    Отдаёт `id` каждого узла, исполняемого в теле такой функции: вызов процесса
+    среди них засчитан пойманным. Условия и граница — в шапке модуля.
+    """
+    top = {
+        one.name: one
+        for one in tree.body
+        if isinstance(one, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    executed_in = {
+        id(node): name
+        for name, one in top.items()
+        for statement in one.body
+        for node in executed(statement)
+    }
+    callees = {
+        id(node.func)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    sites: dict[str, list[ast.Call]] = {name: [] for name in top}
+    taken: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in sites:
+                sites[node.func.id].append(node)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            # Вызов через точку с тем же именем (`obj.f()`, `mod.f()`): тот ли
+            # это объект, разбор одного файла не знает — вызывающий неизвестен,
+            # засчёт снимается, а не угадывается (045).
+            if node.func.attr in top:
+                taken.add(node.func.attr)
+        elif (
+            isinstance(node, ast.Name)
+            and node.id in top
+            and isinstance(node.ctx, ast.Load)
+            and id(node) not in callees
+        ):
+            taken.add(node.id)
+
+    def covered(name: str, depth: int, seen: frozenset[str]) -> bool:
+        """Ловит ли истечение каждый вызывающий `name`."""
+        if name in taken or not sites[name] or depth > CALLER_DEPTH or name in seen:
+            return False
+        for call in sites[name]:
+            if id(call) in safe:
+                continue
+            outer = executed_in.get(id(call))
+            if outer is None or not covered(outer, depth + 1, seen | {name}):
+                return False
+        return True
+
+    return {
+        id(node)
+        for name, one in top.items()
+        if covered(name, 0, frozenset())
+        for statement in one.body
+        for node in executed(statement)
+    }
+
+
 def undeadlined(source: str) -> list[str]:
     """Вызовы процесса исходника без дедлайна или без поимки его истечения."""
     tree = ast.parse(source)
@@ -195,6 +276,7 @@ def undeadlined(source: str) -> list[str]:
     )
     safe = guarded(tree)
     awaited = waits_with_deadline(tree, safe)
+    by_callers = caught_by_callers(tree, safe)
     found: list[str] = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and is_spawn(node, imported, modules)):
@@ -206,7 +288,7 @@ def undeadlined(source: str) -> list[str]:
                 )
         elif not any(word.arg == "timeout" for word in node.keywords):
             found.append(f"{node.lineno}: без timeout=")
-        elif id(node) not in safe:
+        elif id(node) not in safe and id(node) not in by_callers:
             found.append(f"{node.lineno}: TimeoutExpired не пойман")
     return found
 
