@@ -75,9 +75,16 @@ class NoTask(NotRun):
     """
 
 
-def unlinked(number: int, body: str, doing: str) -> NotRun:
-    """Отказ «связи нет»: объявленное отсутствие — `NoTask`, молчание — `NotRun`."""
-    if why := changerefs.no_task_in_all([body]):
+def unlinked(number: int, body: str, doing: str, title: str = "") -> NotRun:
+    """Отказ «связи нет»: объявленное отсутствие — `NoTask`, молчание — `NotRun`.
+
+    Объявление читается в теле и в заголовке — там же, где его ищет гейт
+    (`check_pr_meta`). ГРАНИЦА (взгляд на #1594): сообщения коммитов гейт
+    читает, а этот шаг — нет: после слияния их надо спрашивать у площадки
+    отдельным чтением. Изменение, открытое `agent_pr`, переносит объявление из
+    коммитов в тело, так что граница задевает только открытое руками.
+    """
+    if why := changerefs.no_task_in_all([body, title]):
         return NoTask(f"#{number}: «{why}» — {doing} нечего")
     return NotRun(f"у #{number} нет связи с задачей — {doing} не против чего")
 
@@ -126,7 +133,7 @@ def subject(repo: str, number: int, token: str) -> str:
     body = str(change.get("body") or "")
     numbers = sorted({link.number for link in changerefs.links_in(body)})
     if not numbers:
-        raise unlinked(number, body, "разбирать")
+        raise unlinked(number, body, "разбирать", str(change.get("title") or ""))
 
     lines = [
         f"# Предмет разбора: изменение #{number}",
@@ -357,7 +364,7 @@ def linked(repo: str, number: int, token: str) -> tuple[list[int], dict[str, Any
     body = str(change.get("body") or "")
     found = sorted({link.number for link in changerefs.links_in(body)})
     if not found:
-        raise unlinked(number, body, "записывать")
+        raise unlinked(number, body, "записывать", str(change.get("title") or ""))
     return found, change
 
 

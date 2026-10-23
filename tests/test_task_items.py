@@ -630,3 +630,11 @@ def test_unlinked_tells_a_declaration_from_silence() -> None:
     assert type(silent) is module.NotRun
     fenced = module.unlinked(7, f"```\n{NO_TASK_BODY}```\n", "записывать")
     assert type(fenced) is module.NotRun
+
+
+def test_a_declaration_in_the_title_counts_like_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Объявление в заголовке — тоже «нечего»: гейт читает заголовок, шаг — так же (#1594)."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    change = {**linked_change("текст\n"), "title": NO_TASK_BODY.strip()}
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: change)
+    assert module.main(["--repo", "o/r", "--fate", "--pr", "7"]) == module.EXIT_NOTHING
