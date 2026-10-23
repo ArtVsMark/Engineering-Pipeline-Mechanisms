@@ -137,6 +137,70 @@ def test_the_predicate_has_both_halves(source: str, bad: bool) -> None:
     assert bool(undeadlined(source)) is bad
 
 
+#: Поимка у вызывающего (#1569): вызов процесса без своей поимки, функция,
+#: где он стоит, и её вызывающие.
+SPAWN = "import subprocess\ndef f():\n    subprocess.run(['x'], timeout=5)\n"
+CATCH = "    except subprocess.TimeoutExpired:\n        pass\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "bad"),
+    [
+        (SPAWN + "def main():\n    try:\n        f()\n" + CATCH, False),
+        (
+            SPAWN + "def g():\n    f()\ndef main():\n    try:\n        g()\n" + CATCH,
+            False,
+        ),
+        (
+            SPAWN + "def main():\n    try:\n        f()\n" + CATCH + "def other():\n    f()\n",
+            True,
+        ),
+        (SPAWN + "def main():\n    try:\n        f()\n" + CATCH + "HANDLERS = {'x': f}\n", True),
+        (SPAWN, True),
+        (
+            SPAWN + "def main():\n    try:\n        later = lambda: f()\n" + CATCH,
+            True,
+        ),
+        (
+            SPAWN + "def main():\n    try:\n        f()\n"
+            "    except subprocess.TimeoutExpired:\n        return 2\n"
+            "    except OSError:\n        return 1\n"
+            "if __name__ == '__main__':\n    raise SystemExit(main())\n",
+            False,
+        ),
+        (SPAWN + "def g():\n    g()\n    f()\n", True),
+        (
+            SPAWN + "def main():\n    try:\n        f()\n" + CATCH + "def other(o):\n    o.f()\n",
+            True,
+        ),
+    ],
+    ids=[
+        "пойман-у-единственного-вызывающего",
+        "цепочка-из-двух",
+        "второй-вызывающий-не-ловит",
+        "передана-значением",
+        "вызовов-нет",
+        "вызов-в-lambda-внутри-try",
+        "форма-хука-каталога",
+        "цикл-без-поимки",
+        "вызов-через-точку",
+    ],
+)
+def test_a_catch_at_every_caller_counts(source: str, bad: bool) -> None:
+    """Поимка у каждого вызывающего засчитывается; передача значением и пропуск — нет (#1569)."""
+    assert bool(undeadlined(source)) is bad
+
+
+def test_caught_by_callers_marks_the_body_of_the_caught_function() -> None:
+    """`caught_by_callers` отдаёт узлы тела засчитанной функции — и только её."""
+    tree = ast.parse(SPAWN + "def main():\n    try:\n        f()\n" + CATCH)
+    marked = gate.caught_by_callers(tree, gate.guarded(tree))
+    f, main = tree.body[1], tree.body[2]
+    assert isinstance(f, ast.FunctionDef) and isinstance(main, ast.FunctionDef)
+    assert all(id(node) in marked for node in ast.walk(f.body[0]))
+    assert id(main.body[0]) not in marked
+
+
 def test_executed_stops_at_nested_scopes() -> None:
     """Исполняемое на месте — без тел `def`, `lambda` и `class`: внешний `try` их не держит."""
     tree = ast.parse("def f():\n    g()\nh()\n")
@@ -324,3 +388,73 @@ def test_our_tree_is_clean_under_the_step(capsys: pytest.CaptureFixture[str]) ->
     assert said["mechanism-gates-enforce"] is True, "у себя мета-гейт строгий"
     code = gate.main(["--root", str(ROOT), "--paths", " ".join(places), "--enforce"])
     assert code == gate.EXIT_OK, capsys.readouterr().out
+
+
+#: Вызов процесса с дедлайном без своей поимки — тело функции для случаев ниже.
+SPAWN_BODY = "    subprocess.run(['git'], timeout=5)\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "bad"),
+    [
+        (
+            "import subprocess\n\ndef f():\n" + SPAWN_BODY + "    yield 1\n\n"
+            "def main():\n    try:\n        gen = f()\n    except subprocess.TimeoutExpired:\n"
+            "        return 2\n    return list(gen)\n",
+            True,
+        ),
+        (
+            "import subprocess\n\nasync def f():\n" + SPAWN_BODY + "\n"
+            "async def main():\n    try:\n        coro = f()\n"
+            "    except subprocess.TimeoutExpired:\n        return 2\n    return await coro\n",
+            True,
+        ),
+        (
+            "import subprocess\n\ndef f():\n" + SPAWN_BODY + "\n"
+            "def main():\n    try:\n        f()\n    except subprocess.TimeoutExpired:\n"
+            "        return 2\n",
+            False,
+        ),
+    ],
+    ids=["генератор", "сопрограмма", "обычная-функция"],
+)
+def test_a_generator_or_coroutine_is_not_caught_at_the_call(source: str, bad: bool) -> None:
+    """Генератор и `async def` исполняются не в месте вызова — засчёта нет (взгляд на #1589)."""
+    assert bool(undeadlined(source)) is bad
+
+
+def test_a_name_taken_by_another_module_is_not_caught_here(tmp_path: Path) -> None:
+    """Имя, которое берёт другой модуль, не засчитывается по одним здешним вызовам (#1589).
+
+    `hook.f` ловится в `main()` своего файла, но `other.py` зовёт `f` без `try`:
+    истечение у второго вызывающего не поймано, и гейт обязан это сказать.
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "hook.py").write_text(
+        "import subprocess\n\ndef f():\n" + SPAWN_BODY + "\n"
+        "def main():\n    try:\n        f()\n    except subprocess.TimeoutExpired:\n"
+        "        return 2\n",
+        encoding="utf-8",
+    )
+    found, _, _ = gate.look(tmp_path, ["scripts"])
+    assert found == []
+    (tmp_path / "scripts" / "other.py").write_text("from hook import f\n\nf()\n", encoding="utf-8")
+    found, _, _ = gate.look(tmp_path, ["scripts"])
+    assert [(name, what) for name, _, what in found] == [
+        ("scripts/hook.py", "TimeoutExpired не пойман")
+    ]
+
+
+def test_exported_names_and_yields_name_their_subject() -> None:
+    """`exported_names` видит обе формы импорта; `yields` — только своё тело."""
+    trees = {
+        "hook": ast.parse("def f(): pass\n"),
+        "a": ast.parse("from hook import f\n"),
+        "b": ast.parse("import hook as h\nh.g()\n"),
+    }
+    assert gate.exported_names(trees)["hook"] == frozenset({"f", "g"})
+    own = ast.parse("def f():\n    yield 1\n").body[0]
+    nested = ast.parse("def f():\n    def g():\n        yield 1\n").body[0]
+    assert isinstance(own, ast.FunctionDef) and isinstance(nested, ast.FunctionDef)
+    assert gate.yields(own) and not gate.yields(nested)
