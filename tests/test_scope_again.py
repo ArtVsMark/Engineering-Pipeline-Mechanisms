@@ -256,7 +256,7 @@ def test_a_red_full_run_names_the_miss(tmp_path: Path, capsys: pytest.CaptureFix
     assert "::error::выбор тестов пропустил tests/test_b.py" in said
     assert "находка о графе" in said
     assert scope.main([*argv, str(junit(tmp_path, "tests.test_a"))]) == scope.EXIT_OK
-    assert "выбор первого толчка задел все упавшие" in capsys.readouterr().out
+    assert "выбор всего изменения задел все упавшие" in capsys.readouterr().out
 
 
 def test_an_unreadable_report_is_the_third_outcome(tmp_path: Path) -> None:
