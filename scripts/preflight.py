@@ -47,6 +47,7 @@ import ghrest
 import gitcall
 import paths
 import report
+import scope
 import yaml
 
 CI: Final = paths.WORKFLOWS / "ci.yml"
@@ -306,6 +307,58 @@ def steps(path: Path = CI) -> list[Step]:
     if not found:
         raise NotRun(f"{path}: ни одной выполнимой команды не нашлось — предмет не найден (075)")
     return found
+
+
+#: Строка набора тестов в блоке шага: к ней дописывается выбор классификатора.
+PYTEST: Final = "pytest "
+
+
+def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
+    """Шаг тестов — по выбору классификатора (#1597); прочие шаги как есть.
+
+    Выбора нет (отказ классификатора, `--all`) или он полный — шаг прежний.
+    Выбор пуст — шаг объявляет «судить нечего» вердиктом, а не выпадает молча:
+    пропуск без имени неотличим от «шага не было» (046).
+    """
+    if choice is None or choice.tests is None:
+        return found
+    out: list[Step] = []
+    for step in found:
+        lines = step.command.splitlines()
+        at = [n for n, line in enumerate(lines) if plain(line).startswith(PYTEST)]
+        if not at:
+            out.append(step)
+            continue
+        if not choice.tests:
+            said = f"судить нечего: сценарий {choice.scenario}, тестов не задето"
+            out.append(Step(step.name, f"echo {shlex.quote(said)}", step.installs))
+            continue
+        for n in at:
+            lines[n] = f"{lines[n]} {' '.join(shlex.quote(one) for one in choice.tests)}"
+        out.append(Step(step.name, "\n".join(lines), step.installs))
+    return out
+
+
+def chosen_scope(root: Path, *, everything: bool) -> scope.Choice | None:
+    """Выбор классификатора для этого дерева; отказ — полный набор и слово об этом."""
+    if everything:
+        print("выбор тестов: полный набор (--all)")
+        return None
+    try:
+        said = scope.choose(root, journal_base())
+    except scope.NotRun as exc:
+        print(f"выбор тестов не отработал — полный набор: {report.cut(str(exc))}")
+        return None
+    shown = "все" if said.tests is None else str(len(said.tests))
+    print(
+        f"сценарий: {said.scenario}; тест-файлов: {shown}" + (f" — {said.why}" if said.why else "")
+    )
+    return said
+
+
+def journal_base() -> str:
+    """База сравнения — та же, что у гейтов журнала и контракта."""
+    return scope.journal.base_from_env()
 
 
 def plain(line: str) -> str:
@@ -801,6 +854,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     parser.add_argument("--list", action="store_true", help="только показать, что будет запущено")
     parser.add_argument(
+        "--all", action="store_true", help="полный набор тестов, без выбора по задетому (#1597)"
+    )
+    parser.add_argument(
         "--push",
         action="store_true",
         help="толкнуть текущую ветку, ЕСЛИ зелено: проверка и действие одним заходом",
@@ -843,6 +899,8 @@ def main(argv: list[str] | None = None) -> int:
     except NotRun as exc:
         print(f"шаг не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
+
+    found = narrowed(found, chosen_scope(args.root, everything=args.all))
 
     if args.list:
         for step in found:

@@ -959,6 +959,9 @@
     "scripts/breaking_notice.py": {
       "answer": "ours",
       "why": "@provider"
+    },
+    "scripts/scope.py": {
+      "answer": "as-is"
     }
   }
 }
