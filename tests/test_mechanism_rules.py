@@ -28,7 +28,7 @@ paths = load_script("paths.py")
 CENSUS: Final = ROOT / paths.MECHANISM_RULES
 SKILL: Final = ROOT / ".claude" / "skills" / "a-gate-obeys-every-rule" / "SKILL.md"
 #: Места дерева, где живут механизмы: ключи `места` и каждой записи правила.
-PLACES: Final = frozenset({"paths.SOURCES", ".claude/hooks", ".github"})
+PLACES: Final = frozenset({"paths.SOURCES", ".claude/hooks", ".github", "kit/data"})
 #: Два ответа словом. После двоеточия — причина, у «не построено» — с замером.
 EXCLUDED: Final = "исключено: "
 UNBUILT: Final = "не построено: "

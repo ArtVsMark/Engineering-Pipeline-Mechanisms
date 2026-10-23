@@ -153,6 +153,9 @@ ENTRANCE: Final = Path("README.md")
 AUTHORS: Final = Path(".github/authors.txt")
 #: Отметка атрибуции в истории общей ветки — данные проекта, а не шага (#1556).
 ATTRIBUTION_SINCE: Final = Path(".github/attribution-since")
+#: Загрузчик предполётной у потребителя (#1553): выкачивает механизмы по тегу из
+#: `uses:` его прогонов и зовёт их `scripts/preflight.py` против его дерева.
+PREFLIGHT_LOADER: Final = Path(".claude/preflight.sh")
 #: Где факты и значки лежат в ветке `badges` — по контракту фактов семьи (#759).
 #: Это адрес ПРОИЗВОДНОГО в ветке `badges`, а не файл общей ветки.
 BADGES_DIR: Final = Path(".github/badges")
@@ -266,6 +269,7 @@ ALL: Final = (
     PIPELINE_DOC,
     ONBOARDING,
     ATTRIBUTION_SINCE,
+    PREFLIGHT_LOADER,
 )
 
 #: Адреса ДАННЫХ ОКНА: в дереве их нет по построению — файл появляется при
