@@ -123,6 +123,16 @@ def test_an_export_without_a_single_claim_is_the_third_outcome(
         module.claims()
 
 
+@pytest.mark.parametrize("export", [{}, {"rules": None}, {"rules": {}}])
+def test_an_export_without_a_rule_list_is_named_as_its_form(
+    monkeypatch: pytest.MonkeyPatch, export: Any
+) -> None:
+    """Списка правил нет — «не отработал» с причиной формы, а не «ни одного разбора» (075)."""
+    monkeypatch.setattr(module.catalogue.ghrest, "raw_json", lambda url: export)
+    with pytest.raises(module.NotRun, match="нет списка «rules»"):
+        module.claims()
+
+
 def test_a_silent_catalogue_is_its_own_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
     """Каталог не ответил — свой исход, не красный и не зелёный.
 

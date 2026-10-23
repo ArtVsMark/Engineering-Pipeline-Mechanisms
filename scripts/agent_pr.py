@@ -658,28 +658,47 @@ def apply_consent(repo: str, number: int, token: str, marks: set[str], dry_run: 
         print(f"согласие не проставлено: {exc} — изменение открыто, метку ставит человек")
 
 
-def finish_open(
+def settle(
     repo: str, token: str, pull: dict[str, Any], said: Described, branch: str, base: str
-) -> int:
-    """Довести уже открытое изменение: зоны, задержка, починка общей, согласие, описание.
+) -> None:
+    """Довести изменение до очереди: зоны, задержка, починка общей, согласие.
 
-    Путь один для «открыто прежним прогоном» и «создано, но ответ не дошёл»:
-    оба — одно состояние площадки, и две копии разошлись бы на первой правке.
-    Зоны доставляются и здесь, а не только при создании. Иначе отказ на шаге
-    разметки необратим: следующий прогон уходит этой веткой и выходит с нулём,
-    ни разу не попытавшись доставить метки, — а гейт разметки продолжает его
-    отвергать. Шаг обязан быть идемпотентным целиком, а не наполовину.
+    ЦЕПОЧКА ОДНА НА ОБА ПУТИ — «создано этим прогоном» и «уже открыто». Прежде
+    путь создания держал свою копию: та же последовательность, но метки с
+    пустого набора, — и следующая правка одной копии развела бы пути без
+    красного (взгляд на #1548). Метки берутся у ответа площадки в обоих: у
+    только что созданного их нет, и набор выходит тем же пустым.
     """
     number = int(pull["number"])
     apply_zones(repo, number, token, branch, base, dry_run=False)
     marks: set[str] = {str(item.get("name", "")) for item in pull.get("labels") or []}
+    # ЗАДЕРЖКА СИЛЬНЕЕ СОГЛАСИЯ И ЕДЕТ РАНЬШЕ НЕГО. Решение автор принимает ДО
+    # открытия и объявляет трейлером `Ждёт:` в коммите — поэтому оно доходит и
+    # до только что открытого изменения, которого человек ещё не видел.
     if said.hold:
         apply_hold(repo, number, token, said.hold, dry_run=False)
         marks = marks | {HOLD}
     if said.fixes and apply_fix_main(repo, number, token, said.fixes, base, dry_run=False):
         marks = marks | {FIX_MAIN}
     apply_consent(repo, number, token, marks, dry_run=False)
-    sync_description(repo, number, token, said.title, said.body, dry_run=False)
+
+
+def finish_open(
+    repo: str, token: str, pull: dict[str, Any], said: Described, branch: str, base: str
+) -> int:
+    """Довести уже открытое изменение: общая цепочка `settle` и описание.
+
+    Путь один для «открыто прежним прогоном» и «создано, но ответ не дошёл»:
+    оба — одно состояние площадки. Отличие от только что созданного одно —
+    `sync_description`: созданному тело отдано в том же запросе, а открытому
+    прежде оно могло устареть. Зоны доставляются и здесь, а не только при
+    создании. Иначе отказ на шаге разметки необратим: следующий прогон уходит
+    этой веткой и выходит с нулём, ни разу не попытавшись доставить метки, — а
+    гейт разметки продолжает его отвергать. Шаг обязан быть идемпотентным
+    целиком, а не наполовину.
+    """
+    settle(repo, token, pull, said, branch, base)
+    sync_description(repo, int(pull["number"]), token, said.title, said.body, dry_run=False)
     return EXIT_OK
 
 
@@ -789,6 +808,13 @@ def main(argv: list[str] | None = None) -> int:
             # не видно. Тогда исход — прежний отказ, как до этой починки: не
             # регресс, а непокрытый остаток. Чинит его следующий толчок в ветку
             # (путь «уже открыто») или перезапуск прогона.
+            #
+            # СОСЕДИ С ТЕМ ЖЕ ПРЕДМЕТОМ (195): «отказ шлюза на создании» есть и
+            # у механизмов, заводящих задачи, — `breaking_notice.py`,
+            # `review_findings.py`, `main_red.py`. Чтения после отказа у них
+            # нет; они самолечатся следующим прогоном, который ищет задачу по
+            # маркеру и находит созданную. Цена — дубль, если поиск отстанет так
+            # же, как здесь список; эта починка их не трогала.
             print(f"создание пришло отказом: {exc} — спрашиваю, создано ли", file=sys.stderr)
             existing = ghrest.request("GET", f"repos/{args.repo}/pulls?{query}", token) or []
             if not existing:
@@ -798,20 +824,7 @@ def main(argv: list[str] | None = None) -> int:
         number = created["number"]
         print(f"открыто изменение #{number}: {created['html_url']}")
         say_lost_marks(str(created.get("body") or ""), body)
-        apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
-        # ЗАДЕРЖКА СИЛЬНЕЕ СОГЛАСИЯ И ЕДЕТ РАНЬШЕ НЕГО. Здесь стояло «только что
-        # открытое изменение стоп-метки нести не может: её ставит человек, а он
-        # его ещё не видел» — верно про метку и неверно про решение: решение
-        # автор принимает ДО открытия и объявляет трейлером `Ждёт:` в коммите.
-        marks = set()
-        if said.hold:
-            apply_hold(args.repo, number, token, said.hold, args.dry_run)
-            marks = {HOLD}
-        if said.fixes and apply_fix_main(
-            args.repo, number, token, said.fixes, args.base, args.dry_run
-        ):
-            marks = marks | {FIX_MAIN}
-        apply_consent(args.repo, number, token, marks, args.dry_run)
+        settle(args.repo, token, created, said, args.branch, args.base)
         print(
             "Проба, а не доверие (135): автор в общей ветке после слияния обязан\n"
             "стать человеком. Не стал — механизм неверен, и видно это сразу."
