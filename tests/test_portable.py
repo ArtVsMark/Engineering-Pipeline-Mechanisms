@@ -1030,7 +1030,7 @@ def delivered_scripts() -> set[str]:
     closure = load_script("check_facts_contract.py").module_closure
     names = sorted(
         one.stem.removeprefix(onboard.STEP_PREFIX)
-        for one in (ROOT / paths.WORKFLOWS).glob(f"{onboard.STEP_PREFIX}*.yml")
+        for one in walk(ROOT / paths.WORKFLOWS, f"{onboard.STEP_PREFIX}*.yml")
     )
     found = {f"{paths.SCRIPTS.as_posix()}/{one}.py" for one in onboard.called_scripts(ROOT, names)}
     starts = {"preflight"} | {

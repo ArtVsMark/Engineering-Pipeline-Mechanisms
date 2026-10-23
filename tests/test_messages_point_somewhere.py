@@ -46,6 +46,10 @@ from tests.conftest import ROOT, code_files, load_script
 paths = load_script("paths.py")
 #: Адреса данных окна — у якоря, а не здесь: второй список разошёлся бы молча.
 WINDOW_DATA: Final = frozenset(one.as_posix() for one in paths.WINDOW_DATA)
+#: Адреса только дерева потребителя — у якоря; у нас лежит их заготовка (#1553).
+CONSUMER_ONLY: Final = frozenset(one.as_posix() for one in paths.CONSUMER_ONLY)
+#: Где лежат заготовки данных потребителя (`onboard.DATA_KIT`).
+DATA_KIT: Final = ROOT / paths.KIT / "data"
 
 #: Что считается путём НАШЕГО дерева. Список приставок закрытый: «похоже на
 #: путь» приняло бы и чужой адрес, и кусок URL
@@ -114,7 +118,9 @@ def test_every_path_named_by_a_message_exists() -> None:
     dead = [
         f"{path}:{line} — «{said}»"
         for path, line, said in paths_in_messages()
-        if said not in WINDOW_DATA and not (ROOT / said).exists()
+        if said not in WINDOW_DATA
+        and not (ROOT / said).exists()
+        and not (said in CONSUMER_ONLY and (DATA_KIT / said).is_file())
     ]
     assert not dead, (
         "сообщение механизма называет путь, которого нет (076):\n  "
@@ -171,3 +177,15 @@ def test_a_dead_path_in_prose_is_not_judged() -> None:
         "в докстроках механизмов нет ни одного намеренно мёртвого адреса — "
         "довод о границе пуст, и докстроку можно вернуть в предмет"
     )
+
+
+def test_a_consumer_only_address_has_its_kit_and_no_twin() -> None:
+    """Адрес только потребителя: заготовка у нас есть, а самого файла нет (#1553).
+
+    Иначе объявление лжёт: без заготовки адрес мёртвый, а с двойником в нашем
+    дереве он не «только потребителя», и судить его надо существованием.
+    """
+    assert CONSUMER_ONLY, "адресов потребителя якорь не объявляет — граница гейта пуста"
+    for said in sorted(CONSUMER_ONLY):
+        assert (DATA_KIT / said).is_file(), f"{said}: заготовки в {DATA_KIT} нет"
+        assert not (ROOT / said).exists(), f"{said}: в нашем дереве лежит двойник"
