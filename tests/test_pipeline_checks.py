@@ -1275,3 +1275,41 @@ def test_fragment_form_of_a_file_not_in_utf8_is_named(tmp_path: Path) -> None:
     path.write_bytes("journal: ы\n".encode("cp1251"))
     with pytest.raises(policy.journal.NotRun, match="не прочитан"):
         policy.fragment_form(path)
+
+
+@pytest.mark.parametrize(
+    ("section", "passes"),
+    [
+        ("scopes:\n  web:\n    paths: ['web/**']\n    tests: ['tests/web/**']\n", True),
+        ("scopes:\n  web:\n    paths: ['web/**']\n", False),
+        ("scopes:\n  web:\n    paths: []\n    tests: ['tests/web/**']\n", False),
+        ("scopes:\n  web:\n    paths: ['web/**']\n    tests: ['t']\n    why: x\n", False),
+        ("scopes: [web]\n", False),
+    ],
+    ids=["область", "без-тестов", "пустые-пути", "чужой-ключ", "не-отображение"],
+)
+def test_the_scopes_section_is_judged_with_the_answer(
+    tmp_path: Path, section: str, passes: bool
+) -> None:
+    """Раздел областей судится сверкой ответа — раньше первого прогона тестов (#1600)."""
+    path = answered(tmp_path / "tree")
+    path.write_text(path.read_text(encoding="utf-8") + section, encoding="utf-8")
+    supplier = supplier_at(tmp_path / "mechanisms", "0.1.0")
+    if passes:
+        policy.load(path, supplier=supplier)
+        assert [area.name for area in policy.areas_for_tests(path)] == ["web"]
+    else:
+        with pytest.raises(policy.BadPolicy, match="раздел scopes"):
+            policy.load(path, supplier=supplier)
+
+
+def test_areas_without_a_file_or_a_section_are_none(tmp_path: Path) -> None:
+    """Нет файла или раздела — областей нет; битый YAML — отказ с причиной."""
+    assert policy.areas_for_tests(tmp_path / "нет.yml") == ()
+    plain = tmp_path / "plain.yml"
+    plain.write_text("schema: 4\n", encoding="utf-8")
+    assert policy.areas_for_tests(plain) == ()
+    broken = tmp_path / "broken.yml"
+    broken.write_text("scopes: [\n", encoding="utf-8")
+    with pytest.raises(policy.scope_areas.BadAreas, match="не прочитан"):
+        policy.areas_for_tests(broken)

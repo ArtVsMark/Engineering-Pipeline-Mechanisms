@@ -43,6 +43,7 @@ import gitcall
 import labels
 import paths
 import report
+import scope
 
 PREFIXES: Final = ("agent/",)
 #: Отметка, по которой видно, что тело собрано механизмом. Тело, правленное
@@ -492,6 +493,56 @@ def apply_zones(repo: str, number: int, token: str, branch: str, base: str, dry_
     print(f"проставлены зоны: {', '.join(zones)}")
 
 
+def apply_scope(
+    repo: str, number: int, token: str, branch: str, base: str, on_pr: set[str], dry_run: bool
+) -> None:
+    """Ставит изменению метку сценария `scope/*` по тронутым путям (#1599).
+
+    МЕТКА — СЛЕД КЛАССИФИКАТОРА, как зона — след путей состава: сценарий
+    выводится тем же `scope.scenario`, что выбирает тесты, а не второй копией.
+    Графа здесь не нужно: сценарий решают пути, граф решает только тесты.
+
+    ТОЛЬКО РАСШИРЯЕТ. Стоит метка не уже ответа — её не трогают: это слово
+    владельца или прежний ответ, и снять его значило бы сузить проверки молча.
+    Уже ответа — снимается, иначе гейт разметки отвергнет изменение за след,
+    устаревший после толчка. Граница названа (195): прежний ответ шире
+    нынешнего остаётся, и стоит это минут, а не пропущенного красного.
+
+    МЕТКИ НЕ ОБЪЯВЛЕНЫ — СЦЕНАРИЙ НЕ СТАВИТСЯ. Потребитель, не заведший
+    `scope/*` в составе, получил бы необъявленную метку и красный гейт
+    разметки (068); его сценарии — предмет `scopes:` в `.pipeline.yml` (#1600).
+    Отказ площадки шаг не роняет: изменение открыто, метка — след (084).
+    """
+    kind, _ = scope.scenario(set(changed_files(branch, base)))
+    name = scope.label_of(kind)
+    if name not in {label.name for label in labels.load()}:
+        print(f"метки сценариев не объявлены в составе — {name} не ставится")
+        return
+    present = scope.widest(on_pr)
+    rank = scope.ORDER.index(kind)
+    narrower = [scope.label_of(one) for one in scope.ORDER[:rank] if scope.label_of(one) in on_pr]
+    adding = present is None or scope.ORDER.index(present) < rank
+    if dry_run:
+        print(f"сценарий: {kind}; поставило бы: {name if adding else '—'}; сняло бы: {narrower}")
+        return
+    try:
+        if adding:
+            ghrest.request(
+                "POST", f"repos/{repo}/issues/{number}/labels", token, {"labels": [name]}
+            )
+            print(f"проставлен сценарий: {name}")
+        for one in narrower:
+            try:
+                ghrest.request(
+                    "DELETE", f"repos/{repo}/issues/{number}/labels/{ghrest.quote(one)}", token
+                )
+                print(f"снят сценарий уже ответа: {one}")
+            except ghrest.NotFound:
+                print(f"сценария {one} уже нет")
+    except ghrest.TransportError as exc:
+        print(f"сценарий не проставлен: {exc} — гейт разметки скажет, чего недостаёт")
+
+
 def red_on_trunk(repo: str, token: str, name: str, base: str) -> bool:
     """Красен ли НАЗВАННЫЙ шаг на голове общей ветки — спрашивается у площадки.
 
@@ -673,6 +724,7 @@ def finish_open(
     number = int(pull["number"])
     apply_zones(repo, number, token, branch, base, dry_run=False)
     marks: set[str] = {str(item.get("name", "")) for item in pull.get("labels") or []}
+    apply_scope(repo, number, token, branch, base, marks, dry_run=False)
     if said.hold:
         apply_hold(repo, number, token, said.hold, dry_run=False)
         marks = marks | {HOLD}
@@ -799,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"открыто изменение #{number}: {created['html_url']}")
         say_lost_marks(str(created.get("body") or ""), body)
         apply_zones(args.repo, number, token, args.branch, args.base, args.dry_run)
+        apply_scope(args.repo, number, token, args.branch, args.base, set(), args.dry_run)
         # ЗАДЕРЖКА СИЛЬНЕЕ СОГЛАСИЯ И ЕДЕТ РАНЬШЕ НЕГО. Здесь стояло «только что
         # открытое изменение стоп-метки нести не может: её ставит человек, а он
         # его ещё не видел» — верно про метку и неверно про решение: решение

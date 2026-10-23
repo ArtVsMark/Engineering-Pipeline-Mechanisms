@@ -1345,3 +1345,36 @@ def test_the_source_is_the_first_line_of_the_report(
     preflight.main([])
     first = capsys.readouterr().out.splitlines()[0]
     assert first.startswith("⚠ код транспорта"), first
+
+
+def test_the_test_step_takes_the_classifier_choice() -> None:
+    """Шаг тестов получает выбор классификатора; пустой выбор — вердикт, а не пропуск (#1597)."""
+    step = preflight.Step("тесты", "set -euo pipefail\npytest --strict-markers", "")
+    other = preflight.Step("линтер", "ruff check scripts/", "")
+    picked = preflight.scope.Choice("code", ("tests/test_a.py",), "")
+    narrowed = preflight.narrowed([step, other], picked)
+    assert narrowed[0].command.splitlines()[-1] == "pytest --strict-markers tests/test_a.py"
+    assert narrowed[1] == other
+    empty = preflight.narrowed([step], preflight.scope.Choice("text", (), ""))
+    assert empty[0].command.startswith("echo ")
+    assert "судить нечего" in empty[0].command
+    assert preflight.narrowed([step], None) == [step]
+    whole = preflight.scope.Choice("full", None, "тронут общий файл")
+    assert preflight.narrowed([step], whole) == [step]
+
+
+def test_a_refused_choice_falls_back_to_the_whole_set(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """Классификатор отказал — полный набор и слово об этом; `--all` — полный без вопроса."""
+
+    def refused(root: Path, base: str, since: str = "") -> object:
+        raise preflight.scope.NotRun("базы нет")
+
+    monkeypatch.setattr(preflight.scope, "choose", refused)
+    assert preflight.chosen_scope(tmp_path, everything=False) is None
+    assert "полный набор: базы нет" in capsys.readouterr().out
+    assert preflight.chosen_scope(tmp_path, everything=True) is None
+    assert "--all" in capsys.readouterr().out
+    monkeypatch.setenv("GITHUB_BASE_REF", "main")
+    assert preflight.journal_base() == "origin/main"
