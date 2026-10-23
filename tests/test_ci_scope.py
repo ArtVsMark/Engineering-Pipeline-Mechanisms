@@ -50,7 +50,7 @@ def run_block(
     pytest_bin = bin_dir / "pytest"
     pytest_bin.write_text(
         f'#!/bin/bash\necho "$@" > "{tmp_path}/args.txt"\n'
-        f'echo "${{GH_TOKEN:-}}${{PR_TOKEN:-}}" > "{tmp_path}/pytest-token.txt"\nexit {red}\n',
+        f'echo "${{GH_TOKEN:-}}" > "{tmp_path}/pytest-token.txt"\nexit {red}\n',
         encoding="utf-8",
     )
     for one in (python, pytest_bin):
@@ -61,9 +61,9 @@ def run_block(
         "GITHUB_EVENT_NAME": event,
         "RANDOM_SEED": "1",
         "RUNNER_TEMP": str(tmp_path),
-        "PR_TOKEN": token,
-        # Токен окружения окна снимается: блок обязан выдать его сам и только классификатору.
-        "GH_TOKEN": "",
+        # Токен шага — в GH_TOKEN, как его объявляет прогон; токен окружения окна
+        # подменяется им: блок обязан снять его и отдать только классификатору.
+        "GH_TOKEN": token,
         "GITHUB_TOKEN": "",
     }
     return subprocess.run(

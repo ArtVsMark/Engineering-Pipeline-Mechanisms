@@ -138,11 +138,11 @@ jobs:
           # Токен — только вызову классификатора, не тестам (взгляд на #1605):
           # тест, читающий токен без подмены, в CI и у окна вёл бы себя по-разному.
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          pr_token="${PR_TOKEN:-}"
-          unset PR_TOKEN
+          pr_token="${GH_TOKEN:-}"
+          unset GH_TOKEN
           selected=()
           if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
             rc=0
