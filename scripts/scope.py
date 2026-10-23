@@ -148,7 +148,7 @@ class Choice:
 
 
 def modules(files: Iterable[str]) -> dict[str, set[str]]:
-    """Имя модуля → пути: `scripts/x.py`, `packages/transport/x.py`, `tests/x.py` — `x`."""
+    """Имя модуля → пути: модуль `x` в `scripts/`, `packages/transport/` или `tests/` — `x`."""
     index: dict[str, set[str]] = {}
     for one in files:
         # Тест-модуль, импортированный другим тестом (`from tests.test_x import f`),

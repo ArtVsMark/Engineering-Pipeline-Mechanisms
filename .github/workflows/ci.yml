@@ -141,7 +141,7 @@ jobs:
             rc=0
             said="$(python scripts/scope.py --tests --labels "${PR_LABELS:-}" --pr "${PR_NUMBER:-0}")" || rc=$?
             if [ "$rc" != 0 ]; then
-              echo "::warning::выбор тестов не отработал (код $rc) — полный набор"
+              echo "::warning::выбор тестов не отработал (код $rc) — гоним полный набор вместо выбора по задетому"
             elif [ -z "$said" ]; then
               echo "судить нечего: изменение не задело ни одного теста"
               exit 0

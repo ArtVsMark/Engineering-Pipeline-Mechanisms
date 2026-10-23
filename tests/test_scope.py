@@ -232,6 +232,7 @@ def git(root: Path, *args: str) -> str:
         ["git", "-C", str(root), "-c", "user.email=a@b", "-c", "user.name=t", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
         timeout=60,
     )

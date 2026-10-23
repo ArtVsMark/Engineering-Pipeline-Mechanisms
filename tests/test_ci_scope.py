@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 #: Имя шага тестов в джобе матрицы.
 STEP = "тесты"
@@ -65,6 +65,7 @@ def run_block(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
 
@@ -123,8 +124,7 @@ def test_a_consumer_keeps_the_whole_set() -> None:
     Семейство `test` потребителю не отдаётся (`docs/use/onboarding.md`), и выбор
     живёт в нашем `ci.yml`; до настройки областей (#1600) общий шаг его не берёт.
     """
-    shared = sorted((ROOT / ".github" / "workflows").glob("step-*.yml"))
-    assert shared, "общих шагов не найдено — гейт ничего не проверил (075)"
+    shared = walk(ROOT / ".github" / "workflows", "step-*.yml")
     taking = [one.name for one in shared if "scope.py" in one.read_text(encoding="utf-8")]
     assert not taking, f"общий шаг берёт выбор тестов до настройки потребителя: {taking}"
 
