@@ -7,6 +7,7 @@
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1225,3 +1226,52 @@ def test_the_journal_section_is_judged_with_the_answer(
     else:
         with pytest.raises(policy.BadPolicy, match="раздел journal"):
             policy.load(path, supplier=supplier)
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        lambda path: policy.run_of(path),
+        lambda path: policy.load(path),
+        lambda path: policy.span(path),
+    ],
+    ids=["прогон", "ответ", "диапазон"],
+)
+def test_a_file_not_in_utf8_is_a_refusal_not_a_trace(tmp_path: Path, read: Any) -> None:
+    """Файл не в UTF-8 — `BadPolicy` с причиной, а не `UnicodeDecodeError` (взгляд на #1567)."""
+    path = tmp_path / "x.yml"
+    path.write_bytes("name: ы\n".encode("cp1251"))
+    with pytest.raises(policy.BadPolicy, match="не прочитан"):
+        read(path)
+
+
+def test_file_text_reads_utf8_and_names_the_refusal(tmp_path: Path) -> None:
+    """`file_text` — текст в UTF-8; каталог вместо файла — отказ с названным предметом."""
+    path = tmp_path / "x.yml"
+    path.write_text("ы\n", encoding="utf-8")
+    assert policy.file_text(path, "прогон") == "ы\n"
+    with pytest.raises(policy.BadPolicy, match="прогон"):
+        policy.file_text(tmp_path, "прогон")
+
+
+def test_span_names_a_broken_yaml(tmp_path: Path) -> None:
+    """Битый YAML у `span` — `BadPolicy`, а не трасса `YAMLError`."""
+    path = tmp_path / ".pipeline.yml"
+    path.write_text("contract: [\n", encoding="utf-8")
+    with pytest.raises(policy.BadPolicy, match="не разбирается"):
+        policy.span(path)
+
+
+def test_a_contract_version_not_in_utf8_is_a_refusal(tmp_path: Path) -> None:
+    """`CONTRACT_VERSION` не в UTF-8 — `BadPolicy` у `contract_of` (взгляд на #1593)."""
+    (tmp_path / "CONTRACT_VERSION").write_bytes("1.0.0 ы\n".encode("cp1251"))
+    with pytest.raises(policy.BadPolicy, match="версия контракта"):
+        policy.contract_of(tmp_path, None)
+
+
+def test_fragment_form_of_a_file_not_in_utf8_is_named(tmp_path: Path) -> None:
+    """`fragment_form` читает тем же `file_text`: не UTF-8 — `journal.NotRun` с причиной."""
+    path = tmp_path / ".pipeline.yml"
+    path.write_bytes("journal: ы\n".encode("cp1251"))
+    with pytest.raises(policy.journal.NotRun, match="не прочитан"):
+        policy.fragment_form(path)

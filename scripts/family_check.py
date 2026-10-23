@@ -401,9 +401,9 @@ def steps_links(root: Path, summary: dict[str, Any]) -> list[Link]:
         return [Link("family", who, "steps", declared, None, where, "unknown", why)]
 
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        return grey(None, f"{PIPELINE} не прочитан: {exc}")
+        text = pipeline_checks.file_text(path, "ответ проекта")
+    except pipeline_checks.BadPolicy as exc:
+        return grey(None, str(exc))
     declared = pipeline_checks.span_said(text)
     if declared is None:
         return grey(None, "диапазон контракта шагов не объявлен или ответ не разбирается")

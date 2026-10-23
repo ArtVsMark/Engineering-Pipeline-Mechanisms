@@ -771,3 +771,21 @@ def test_a_nested_value_of_another_form_is_dropped_on_entry(
     assert said["projects"][0][field] == kept
     assert f"{field}." in capsys.readouterr().err
     fc.analyse(root, said, MECH)  # не падает, в том числе `uptake` у издателя
+
+
+def test_a_run_not_in_utf8_is_named_unread_not_a_trace(tmp_path: Path) -> None:
+    """Прогон не в UTF-8 — неразобранный файл с причиной, а не трасса (взгляд на #1567)."""
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "x.yml").write_bytes("name: ы\n".encode("cp1251"))
+    found, refused = fc.pinned(tmp_path)
+    assert found == []
+    assert [one.split(":")[0] for one in refused] == [".github/workflows/x.yml"]
+
+
+def test_steps_links_of_an_answer_not_in_utf8_is_grey(tmp_path: Path) -> None:
+    """Ответ проекта не в UTF-8 — серая связь с причиной от `file_text` (взгляд на #1593)."""
+    (tmp_path / ".pipeline.yml").write_bytes("contract: ы\n".encode("cp1251"))
+    (link,) = fc.steps_links(tmp_path, {"projects": []})
+    assert link.state == "unknown"
+    assert "не прочитан" in link.why
