@@ -387,8 +387,9 @@ def export_meta() -> tuple[dict[str, str], dict[str, list[str]]]:
     # СПИСКА ПРАВИЛ НЕТ — СЛОМАН ДОГОВОР, А НЕ «ПРАВИЛ НОЛЬ» (075). Прежде
     # `export.get("rules") or []` отдавал пустые заголовки молча, тогда как
     # дрейф ту же поломку называет находкой `export-form`: одна поломка
-    # читалась двумя способами. Чтение одно — `catalogue.rules_of` (взгляд на
-    # #1564). Карта взгляда совещательна и не падает, но причину называет.
+    # читалась двумя способами. Читается тем же `catalogue.rules_of`, что у
+    # дрейфа (взгляд на #1564); строже — только `audit_profile.export_rules`, см.
+    # check_foreign_why. Карта взгляда совещательна и не падает, но причину называет.
     try:
         rules = catalogue.rules_of(export)
     except catalogue.BadExport as exc:

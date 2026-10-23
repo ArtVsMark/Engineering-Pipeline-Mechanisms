@@ -494,9 +494,12 @@ def again(
 ) -> Choice:
     """Повторный толчок: судится изменённое с зелёной головы `since` (#1602).
 
-    СВОЁ — ТО, ЧТО ПОМЕНЯЛОСЬ С `since` И ОТЛИЧАЕТСЯ ОТ ВЕРШИНЫ БАЗЫ. Файл,
-    совпадающий с новой базой, пришёл влитой базой и проверен на ней: судить его
-    здесь значило бы гнать чужое. Поменялось только сообщение коммита — дерево
+    СВОЁ — ТО, ЧТО ПОМЕНЯЛОСЬ С `since` И НЕ ПРИНЕСЕНО ВЛИТОЙ БАЗОЙ. Файл,
+    который принесла база, проверен на ней: судить его здесь значило бы гнать
+    чужое. Файл, вернувшийся к вершине базы, которого база не трогала, — свой
+    откат, и он судится (взгляд на #1605): иначе зелёная голова с `b.py` и
+    `test_b.py` и откат `b.py` давали пустое «своё», и CI уходил «судить
+    нечего», хотя `test_b` упадёт. Поменялось только сообщение коммита — дерево
     то же, своего нет, тестов ноль.
 
     ПРИШЕДШЕЕ В БАЗУ — ПЕРЕСЕЧЕНИЕМ. Сдвинулся общий предок — база принесла
@@ -505,22 +508,28 @@ def again(
     (046): правки, не связанные графом, всё же могут сломать друг друга — это
     ловит полный набор слияния и общей ветки, а не этот выбор.
     """
-    own = touched_paths(root, since) & touched_paths(root, base)
-    kind, why = scenario(own, areas)
-    note = f"повторный толчок от {since[:12]}"
-    if kind in (FULL, FLOWS):
-        return Choice(kind, None, f"{note}: {why}")
-    picked = classify(own, edges, areas).tests if areas else chosen(edges, own)
-    tests: tuple[str, ...] | None = picked
     before = fork_of(root, base, since)
-    if before != fork:
-        came = {
+    came = (
+        {
             one
             for one in git(root, "diff", "-z", "--name-only", "--no-renames", before, fork).split(
                 "\0"
             )
             if one
         }
+        if before != fork
+        else set()
+    )
+    moved = touched_paths(root, since)
+    mine_now = touched_paths(root, base)
+    own = (moved & mine_now) | (moved - mine_now - came)
+    kind, why = scenario(own, areas)
+    note = f"повторный толчок от {since[:12]}"
+    if kind in (FULL, FLOWS):
+        return Choice(kind, None, f"{note}: {why}")
+    picked = classify(own, edges, areas).tests if areas else chosen(edges, own)
+    tests: tuple[str, ...] | None = picked
+    if before != fork:
         mine = classify(touched_paths(root, fork), edges, areas).tests
         tests = joined(picked, common(classify(came, edges, areas).tests, mine))
         note += f"; база сдвинулась с {before[:12]}"
@@ -624,11 +633,17 @@ def missed(choice: Choice, failed: set[str]) -> list[str]:
 def said_missed(root: Path, base: str, report: Path) -> int:
     """Полный прогон общей ветки покраснел: назвать, что выбор изменения пропустил (#1598).
 
-    Слитый коммит судится от `base` (на общей ветке — `HEAD^`) тем же выбором,
-    что гнал изменение. Упавший тест вне выбора — НАХОДКА О ГРАФЕ, а не
-    мигание: ребра, которое его связало бы с правкой, граф не видит. Исход —
-    «назван»: краснеет прогон сам, этот шаг только говорит, почему изменение
-    было зелёным.
+    Слитый коммит судится от `base` (на общей ветке — `HEAD^`) выбором ВСЕГО
+    ИЗМЕНЕНИЯ — по всему, что оно тронуло. Упавший тест вне выбора — НАХОДКА О
+    ГРАФЕ, а не мигание: ребра, которое его связало бы с правкой, граф не видит.
+    Исход — «назван»: краснеет прогон сам, этот шаг только говорит, почему
+    изменение было зелёным.
+
+    ГРАНИЦА НАЗВАНА (046, взгляд на #1605): повторный толчок судился уже — от
+    зелёной головы (`again`), и что он сузил, отсюда не видно: какую голову
+    изменение сочло зелёной, знает только его прогон. Пропуск, рождённый этим
+    сужением, здесь читается как «выбор всего изменения задел упавшее», и вывод
+    говорит именно это, а не «выбор, что гнало изменение, задел».
     """
     try:
         failed = failed_files(report)
@@ -642,7 +657,10 @@ def said_missed(root: Path, base: str, report: Path) -> int:
             "его не назвал — находка о графе (навык what-the-graph-misses)"
         )
     if not gaps:
-        print(f"выбор задел все упавшие тест-файлы: {len(failed)}")
+        print(
+            f"выбор всего изменения задел все упавшие тест-файлы: {len(failed)} "
+            "(сужение повторных толчков отсюда не сверить)"
+        )
     return EXIT_OK
 
 

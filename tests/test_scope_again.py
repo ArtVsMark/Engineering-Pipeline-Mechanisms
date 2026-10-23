@@ -93,6 +93,18 @@ def test_a_merged_base_is_subtracted(tmp_path: Path) -> None:
     assert "база сдвинулась" in said.why
 
 
+def test_a_revert_to_the_base_is_judged_as_own(tmp_path: Path) -> None:
+    """Зелёная голова правила `b` и его тест, повтор вернул `b` к базе — тест `b` гонится."""
+    root = tree(tmp_path)
+    write(root, "scripts/b.py", "B = 2\n")
+    write(root, "tests/test_b.py", 'load_script("b.py")\nassert B == 2\n')
+    since = commit(root, "первый толчок")
+    write(root, "scripts/b.py", "B = 1\n")
+    commit(root, "откат b")
+    said = scope.choose(root, "origin/main", since)
+    assert said.tests == ("tests/test_b.py",), said
+
+
 def test_a_moved_base_runs_the_intersection(tmp_path: Path) -> None:
     """База правит `c`, который зовёт тронутый изменением `a`: гонится пересечение — тест `a`."""
     root = tree(tmp_path)
@@ -244,7 +256,7 @@ def test_a_red_full_run_names_the_miss(tmp_path: Path, capsys: pytest.CaptureFix
     assert "::error::выбор тестов пропустил tests/test_b.py" in said
     assert "находка о графе" in said
     assert scope.main([*argv, str(junit(tmp_path, "tests.test_a"))]) == scope.EXIT_OK
-    assert "выбор задел все упавшие" in capsys.readouterr().out
+    assert "выбор всего изменения задел все упавшие" in capsys.readouterr().out
 
 
 def test_an_unreadable_report_is_the_third_outcome(tmp_path: Path) -> None:
