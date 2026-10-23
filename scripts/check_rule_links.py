@@ -74,10 +74,14 @@ def known() -> dict[str, str]:
         # Молчание канала НЕ превращается в «не отработал»: у него свой исход,
         # и поднимается он до точки входа нетронутым (039).
         raise
+    # Списка правил нет — сломан договор выгрузки, и это названо им самим, а не
+    # «ни одного правила»: чтение одно на всех читателей (`catalogue.rules_of`).
+    try:
+        rules = catalogue.rules_of(export)
+    except catalogue.BadExport as exc:
+        raise NotRun(f"{exc} — сверять не с чем (075)") from exc
     found: dict[str, str] = {}
-    for rule in export.get("rules") or []:
-        if not isinstance(rule, dict):
-            continue
+    for rule in rules:
         number, slug = str(rule.get("id") or ""), str(rule.get("slug") or "")
         if number and slug:
             found[number] = slug

@@ -199,6 +199,20 @@ def test_a_bilingual_title_takes_the_project_language(monkeypatch: pytest.Monkey
     assert module.titles() == {"003": "По-русски"}
 
 
+@pytest.mark.parametrize("export", [{}, {"rules": None}, {"rules": {}}])
+def test_an_export_without_a_rule_list_is_named_as_its_form(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], export: Any
+) -> None:
+    """Списка правил нет — предупреждение `export-form`, а не молча пустые заголовки (075).
+
+    Дрейф называет ту же поломку находкой `export-form`; карта взгляда прежде
+    читала её «правил ноль» (взгляд на #1564).
+    """
+    monkeypatch.setattr(module.ghrest, "raw_json", lambda _: export)
+    assert module.export_meta() == ({}, {})
+    assert "export-form" in capsys.readouterr().err
+
+
 def test_a_map_that_assembled_is_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

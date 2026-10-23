@@ -614,3 +614,41 @@ def test_a_refused_creation_that_created_nothing_stays_a_refusal(
     seen = gateway_refusal(monkeypatch, created=False)
     assert module.main(["--repo", "о/р", "--branch", "agent/x"]) == module.EXIT_BROKEN
     assert not any(path.endswith("/labels") for _, path in seen)
+
+
+@pytest.mark.parametrize("opened", [False, True])
+def test_created_and_already_open_go_through_one_settle(
+    monkeypatch: pytest.MonkeyPatch, opened: bool
+) -> None:
+    """Оба пути — «создано» и «уже открыто» — зовут одну `settle`, а не свою копию.
+
+    Копия цепочки на пути создания уже разошлась с `finish_open` (метки с
+    пустого набора) — следующая правка одной копии развела бы пути без красного.
+    """
+    settled: list[int] = []
+    synced: list[int] = []
+
+    def platform(method: str, path: str, token: str, body: Any = None) -> Any:
+        if method == "GET" and "/pulls?" in path:
+            return [{"number": 7, "labels": []}] if opened else []
+        if method == "POST" and path.endswith("/pulls"):
+            return {"number": 7, "html_url": "адрес", "body": "б", "labels": []}
+        return {}
+
+    def settle(repo: str, token: str, pull: dict[str, Any], *_: Any) -> None:
+        settled.append(pull["number"])
+
+    def sync(repo: str, number: int, *_: Any, **__: Any) -> None:
+        synced.append(number)
+
+    monkeypatch.setenv("MERGE_QUEUE_TOKEN", "токен")
+    monkeypatch.setattr(module.ghrest, "request", platform)
+    monkeypatch.setattr(
+        module, "describe", lambda *_: module.Described(title="т", body="б", hold=None)
+    )
+    monkeypatch.setattr(module, "settle", settle)
+    monkeypatch.setattr(module, "sync_description", sync)
+    assert module.main(["--repo", "о/р", "--branch", "agent/x"]) == module.EXIT_OK
+    assert settled == [7]
+    # Описание сверяется только у открытого прежде: созданному тело отдано запросом.
+    assert synced == ([7] if opened else [])

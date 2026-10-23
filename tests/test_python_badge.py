@@ -899,6 +899,36 @@ def test_a_refusal_is_warned_once_when_the_ladder_is_the_same_tree(
     assert len(read) == 1
 
 
+def test_another_ci_on_the_same_tree_keeps_the_family_ladder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """То же дерево, другой `--ci`: лесенка — версии основного CI семьи, а не чужого прогона.
+
+    Сосед починки «тот же каталог — свои `pairs`»: `pairs` равны `versions()`
+    дерева механизмов, только когда и основной CI тот же (правило 195).
+    """
+    tree(tmp_path)
+    (tmp_path / ".github" / "workflows" / "other.yml").write_text(
+        "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n" + setup_step("3.13"),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MECHANISMS", str(tmp_path))
+    out = tmp_path / "p.svg"
+    code = draw(
+        tmp_path,
+        out,
+        "--ci",
+        "other.yml",
+        runs=lambda _: [run("success", "2026-10-01T10:00Z")],
+        jobs=lambda _: [job("success", "ubuntu-latest", "test")],
+        builds=lambda: {(3, 13), (3, 14), (3, 15)},
+        release=lambda: None,
+    )
+    assert code == 0
+    svg = out.read_text(encoding="utf-8")
+    assert ">3.13<" in svg and ">3.14<" in svg and ">3.15<" in svg
+
+
 def test_the_mechanisms_tree_is_the_supplier_or_the_working_tree(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -145,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
             # (взгляд на #1565): исход объявлен, и чинится он записью.
             print(f"{target} не прочитана — {exc.strerror}: с замером не сходится", file=sys.stderr)
             return EXIT_DIFFERS
+        except UnicodeDecodeError as exc:
+            # Сосед «нет таблицы»: таблица не в UTF-8 — тоже не то, что пишет
+            # сборщик, и чинится той же записью, а не трассой (195).
+            print(f"{target} не в UTF-8 — {exc.reason}: с замером не сходится", file=sys.stderr)
+            return EXIT_DIFFERS
         if written != text:
             print(f"{target} расходится с замером шрифтов", file=sys.stderr)
             return EXIT_DIFFERS

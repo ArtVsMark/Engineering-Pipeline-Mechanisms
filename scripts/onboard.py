@@ -903,6 +903,13 @@ def area_kit(root: Path) -> str:
 #: оно другое). Заход ставит на его место владельца из `--repo`.
 FAMILY_SLOT: Final = "OWNER/*"
 
+#: Форма `--repo`, как её принимает площадка: владелец — латиница, цифры и
+#: дефис без ведущего и замыкающего, не длиннее 39; имя — `[A-Za-z0-9._-]+`.
+#: Ровно одна косая: `a/b/c` владельцем семьи не является.
+REPO_RE: Final = re.compile(
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)/(?P<name>[A-Za-z0-9._-]+)"
+)
+
 
 def data_kit(root: Path, repo: str) -> dict[Path, str]:
     """Заготовки данных взгляда и `dependabot.yml`: `kit/data/<путь>` → `<путь>` (#1386).
@@ -926,14 +933,16 @@ def data_kit(root: Path, repo: str) -> dict[Path, str]:
             f"в заготовке {paths.DEPENDABOT} нет слота семьи «{FAMILY_SLOT}» — "
             "выпуск механизмов ждал бы у потребителя выдержку чужого"
         )
-    owner, slash, name = repo.partition("/")
-    if not (owner and slash and name):
+    shaped = REPO_RE.fullmatch(repo)
+    if shaped is None:
         # Без формы «владелец/имя» владельца нет: `Mechanisms` дал бы слот
         # «Mechanisms/*», и выпуск семьи молча ждал бы выдержку чужого (045).
+        # Сверяется ФОРМА имени, а не непустота частей: `a/b/c` давал слот
+        # `a/*`, а владелец с пробелом или кавычкой ломал YAML заготовки.
         raise NotRun(
             f"--repo «{repo}» не «владелец/имя» — владельца семьи для {paths.DEPENDABOT} не взять"
         )
-    found[paths.DEPENDABOT] = said.replace(f'"{FAMILY_SLOT}"', f'"{owner}/*"')
+    found[paths.DEPENDABOT] = said.replace(f'"{FAMILY_SLOT}"', f'"{shaped["owner"]}/*"')
     return found | {paths.AREA_PATHS: area_kit(root)}
 
 

@@ -899,7 +899,10 @@ def test_zones_are_applied_even_when_the_change_is_already_open(
     already = source.index("изменение для ветки уже открыто")
     returns = source.index("return ", already)
     assert source.startswith("return finish_open(", returns), "«уже открыто» мимо finish_open"
-    assert "apply_zones(" in inspect.getsource(module.finish_open), "finish_open без зон"
+    # Цепочка доводки одна на оба пути — `settle` (взгляд на #1548): зоны в ней,
+    # а `finish_open` её зовёт.
+    assert "settle(" in inspect.getsource(module.finish_open), "finish_open мимо settle"
+    assert "apply_zones(" in inspect.getsource(module.settle), "settle без зон"
 
 
 def test_the_journal_unfolds_a_bounded_number_of_releases(tmp_path: Path) -> None:
