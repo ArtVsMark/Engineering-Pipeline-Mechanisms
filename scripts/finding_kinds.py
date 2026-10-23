@@ -105,7 +105,7 @@ FATE_RE: Final = re.compile(r"^(?P<kind>предложено|своё|есть)\
 #: правило действует. Встречи ДО неё — история рода, к порогу нового правила
 #: не идут; встречи ПОСЛЕ — сигнал «правило не держит», а не повод для второго.
 SINCE: Final = "правило с"
-SINCE_RE: Final = re.compile(r"^#(?P<number>\d+)$")
+SINCE_RE: Final = changerefs.WHOLE_REF_RE
 
 
 class NotRun(RuntimeError):
