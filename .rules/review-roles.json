@@ -2,16 +2,124 @@
   "_": "Кем смотреть на изменение: обязательные роли идут на каждом изменении, контекстные — по тронутым путям. Решение владельца 24.09.2026 (#776): обязательные — роли проверяющего рода, остальные зависят от контекста изменения. Таблица читается механизмом (scripts/review_map.py) с ОБЩЕЙ ветки, а не с головы изменения (085). Имена ролей — заголовки профилей docs/agent/roles.md; роль, которой там нет, отвергает tests/test_review_roles.py. Процедура взгляда — docs/agent/review.md.",
   "schema": 1,
   "_schema": "версия формы этого файла: ключи required, ignored и by_path (paths — образцы путей fnmatch от корня: `*` проходит и через `/`, а образец без `/` берёт только путь в корне; ignored.except — пути, которые ролей зовут, хотя подпадают под ignored.paths; roles — имена профилей); читает scripts/review_map.py",
-  "required": ["тестировщик", "аудитор", "ревизор", "критик метода", "правила каталога"],
-  "ignored": {"paths": ["changelog.d/*"], "except": ["changelog.d/*.contract.md", "changelog.d/README.md"], "why": "фрагмент журнала приносит почти каждое изменение: роли, которые он звал бы, стали бы обязательными по факту, и граница «обязательные — по контексту» стёрлась бы (взгляд на #785). Релиз-инженера зовут файлы выпуска и фрагмент, двигающий контракт (`except`), а не любой фрагмент. README в `except` — не фрагмент, а правила их записи: документ о выпуске, и он зовёт свои роли"},
+  "required": [
+    "тестировщик",
+    "аудитор",
+    "ревизор",
+    "критик метода",
+    "правила каталога"
+  ],
+  "_by_scope": "Сценарий изменения (метка scope/*, #1599) сужает обязательные роли (#1608, слово владельца 23.10.2026): на правке одного текста тестировщик, аудитор и критик метода не зовутся — критик метода приходит по by_path, если правка задевает навыки или договор. Сценария нет в списке — обязательные все. Метки нет — тоже все (ошибка вширь).",
+  "by_scope": {
+    "text": [
+      "ревизор",
+      "правила каталога"
+    ]
+  },
+  "ignored": {
+    "paths": [
+      "changelog.d/*"
+    ],
+    "except": [
+      "changelog.d/*.contract.md",
+      "changelog.d/README.md"
+    ],
+    "why": "фрагмент журнала приносит почти каждое изменение: роли, которые он звал бы, стали бы обязательными по факту, и граница «обязательные — по контексту» стёрлась бы (взгляд на #785). Релиз-инженера зовут файлы выпуска и фрагмент, двигающий контракт (`except`), а не любой фрагмент. README в `except` — не фрагмент, а правила их записи: документ о выпуске, и он зовёт свои роли"
+  },
   "by_path": [
-    {"paths": ["docs/*", "*.md", ".claude/skills/*", "changelog.d/README.md"], "roles": ["техписатель", "редактор"]},
-    {"paths": ["docs/agent/behaviour.md", "docs/use/pipeline.md", "docs/decisions/*", ".rules/*", ".pipeline.yml"], "roles": ["архитектор"]},
-    {"paths": [".github/workflows/*", ".github/actions/*"], "roles": ["инженер площадки", "безопасность", "эконом прогонов"]},
-    {"paths": ["scripts/*", "packages/*", "tests/*"], "roles": ["механик"]},
-    {"paths": ["CONTRACT_VERSION", "changelog.d/*.contract.md", "changelog.d/README.md", "scripts/release.py", "scripts/contract.py", "scripts/version.py"], "roles": ["релиз-инженер"]},
-    {"paths": ["AGENTS.md", "CLAUDE.md", ".claude/*", "scripts/check_window_lifetime.py", "scripts/check_rulebook_fresh.py"], "roles": ["методолог процесса"]},
-    {"paths": ["scripts/automerge.py", "scripts/stuck.py", "scripts/hail.py", "scripts/work_plan.py", "docs/dev/roadmap.md"], "roles": ["диспетчер"]},
-    {"paths": ["scripts/family.py", "scripts/family_uptake.py", "scripts/consumers.py", "scripts/onboard.py", ".rules/portable.json"], "roles": ["сосед по семье"]}
+    {
+      "paths": [
+        "docs/*",
+        "*.md",
+        ".claude/skills/*",
+        "changelog.d/README.md"
+      ],
+      "roles": [
+        "техписатель",
+        "редактор"
+      ]
+    },
+    {
+      "paths": [
+        "docs/agent/behaviour.md",
+        "docs/use/pipeline.md",
+        "docs/decisions/*",
+        ".rules/*",
+        ".pipeline.yml"
+      ],
+      "roles": [
+        "архитектор"
+      ]
+    },
+    {
+      "paths": [
+        ".github/workflows/*",
+        ".github/actions/*"
+      ],
+      "roles": [
+        "инженер площадки",
+        "безопасность",
+        "эконом прогонов"
+      ]
+    },
+    {
+      "paths": [
+        "scripts/*",
+        "packages/*",
+        "tests/*"
+      ],
+      "roles": [
+        "механик"
+      ]
+    },
+    {
+      "paths": [
+        "CONTRACT_VERSION",
+        "changelog.d/*.contract.md",
+        "changelog.d/README.md",
+        "scripts/release.py",
+        "scripts/contract.py",
+        "scripts/version.py"
+      ],
+      "roles": [
+        "релиз-инженер"
+      ]
+    },
+    {
+      "paths": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".claude/*",
+        "scripts/check_window_lifetime.py",
+        "scripts/check_rulebook_fresh.py"
+      ],
+      "roles": [
+        "методолог процесса"
+      ]
+    },
+    {
+      "paths": [
+        "scripts/automerge.py",
+        "scripts/stuck.py",
+        "scripts/hail.py",
+        "scripts/work_plan.py",
+        "docs/dev/roadmap.md"
+      ],
+      "roles": [
+        "диспетчер"
+      ]
+    },
+    {
+      "paths": [
+        "scripts/family.py",
+        "scripts/family_uptake.py",
+        "scripts/consumers.py",
+        "scripts/onboard.py",
+        ".rules/portable.json"
+      ],
+      "roles": [
+        "сосед по семье"
+      ]
+    }
   ]
 }

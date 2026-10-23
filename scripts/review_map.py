@@ -43,6 +43,9 @@ import ghrest
 import gitcall
 import kinds
 import paths
+import pipeline_checks
+import scope
+import scope_areas
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -56,6 +59,8 @@ MACHINE: Final = kinds.MACHINE
 EXPORT_URL: Final = catalogue.EXPORT_URL
 #: Файл ответа каталогу — он же предмет подделки, если читать его из головы.
 ANSWER: Final = paths.BINDINGS
+#: Ключ таблицы ролей: сценарий → обязательные роли, что остаются на нём (#1608).
+BY_SCOPE: Final = "by_scope"
 
 
 class NotRun(RuntimeError):
@@ -146,6 +151,17 @@ def table_shape(table: Any) -> dict[str, Any]:
             and strings(rule.get("roles", []))
         ):
             raise NotRun(f"`by_path[{at}]` — не правило с `paths` и `roles` списками строк")
+    by_scope = table.get(BY_SCOPE, {})
+    if not isinstance(by_scope, dict) or not all(strings(one) for one in by_scope.values()):
+        raise NotRun(f"`{BY_SCOPE}` — не словарь сценария на список обязательных ролей")
+    unknown = sorted(set(by_scope) - set(scope.ORDER))
+    if unknown:
+        raise NotRun(f"`{BY_SCOPE}`: сценарии {', '.join(unknown)} неизвестны, из {scope.ORDER}")
+    extra = sorted({r for one in by_scope.values() for r in one} - set(table.get("required", [])))
+    if extra:
+        raise NotRun(
+            f"`{BY_SCOPE}`: роли {', '.join(extra)} не обязательные — сценарий только сужает"
+        )
     return table
 
 
@@ -195,6 +211,78 @@ def roles_for(files: list[str], table: dict[str, Any]) -> tuple[list[str], dict[
     return required, dict(sorted(context.items()))
 
 
+def scenario_of(labels: set[str] | None) -> str:
+    """Сценарий взгляда по меткам изменения; меток нет или они не прочитаны — `full`.
+
+    МЕТКА — ОТВЕТ КЛАССИФИКАТОРА (#1599): её ставит `agent_pr`, гейт разметки
+    отвергает метку уже ответа, владелец ставит шире. Нет метки — полный
+    состав: ошибка вширь стоит минут взгляда, а не пропущенной роли (045).
+    """
+    return (scope.widest(labels or set()) or scope.FULL) if labels else scope.FULL
+
+
+def labels_of(repo: str, number: int, token: str) -> set[str] | None:
+    """Метки изменения у площадки; не прочитаны — `None`, и состав полный."""
+    if not number or not repo or not token:
+        return None
+    try:
+        return {
+            str(one.get("name") or "")
+            for one in ghrest.paginate(f"repos/{repo}/issues/{number}/labels", token)
+        }
+    except ghrest.TransportError as exc:
+        print(f"метки изменения не прочитаны — состав полный: {exc}", file=sys.stderr)
+        return None
+
+
+def for_scenario(required: list[str], table: dict[str, Any], kind: str) -> list[str]:
+    """Обязательные роли сценария: `by_scope` таблицы сужает их, нет записи — все."""
+    kept = table.get(BY_SCOPE, {}).get(kind)
+    return required if kept is None else [one for one in required if one in kept]
+
+
+def chosen_tests(files: list[str], root: Path = Path()) -> tuple[str, ...] | None:
+    """Тесты, задетые изменением, по графу дерева базы; не посчитать — `None` (#1608).
+
+    ГРАНИЦА НАЗВАНА (046): джоб карты стоит на базе, и граф — графом базы, а
+    тронутые тест-файлы входят в выбор сами. Модуль, новый в голове, граф не
+    знает; полный набор на изменении всё равно гонит CI — выбор взгляда только
+    говорит, на чём ему смотреть, вердикта он не меняет.
+    """
+    try:
+        areas = pipeline_checks.areas_for_tests(root / paths.PIPELINE)
+        edges = scope.graph(root, scope.tracked(root))
+        said = scope.classify(set(files), edges, areas)
+    except (scope.NotRun, scope_areas.BadAreas) as exc:
+        print(f"выбор тестов взгляда не посчитан: {exc}", file=sys.stderr)
+        return None
+    if said.tests is None:
+        return None
+    return tuple(sorted({*said.tests, *(one for one in files if scope.is_test(one))}))
+
+
+def tests_said(kind: str, tests: tuple[str, ...] | None) -> list[str]:
+    """Строки карты о тестах взгляда по сценарию; пусто — прежнее указание процедуры."""
+    if kind == scope.TEXT:
+        return [
+            "",
+            f"**Тесты не гоняй:** сценарий `{scope.label_of(kind)}` — изменение не задело",
+            "кода, и судить тестами нечего. Смотри текст глазами ролей (#1608).",
+        ]
+    if kind == scope.CODE and tests is not None:
+        shown = " ".join(tests) if tests else ""
+        if not shown:
+            return ["", "**Тесты не гоняй:** выбор классификатора пуст — судить нечего (#1608)."]
+        return [
+            "",
+            f"**Тесты — только выбор классификатора** (сценарий `{scope.label_of(kind)}`,",
+            "#1608), а не тесты диффа на глаз:",
+            "",
+            f"`python -m pytest -q {shown}`",
+        ]
+    return []
+
+
 def changed_files(repo: str, number: int, token: str) -> list[str]:
     """Пути изменения — у площадки: у позднего взгляда голова уже общая ветка."""
     return [
@@ -205,7 +293,12 @@ def changed_files(repo: str, number: int, token: str) -> list[str]:
 
 
 def render_roles(
-    procedure: str, required: list[str], context: dict[str, list[str]], *, unread: str = ""
+    procedure: str,
+    required: list[str],
+    context: dict[str, list[str]],
+    *,
+    unread: str = "",
+    tests: list[str] | None = None,
 ) -> str:
     """Раздел карты: процедура взгляда и роли этого изменения."""
     lines = [
@@ -231,7 +324,7 @@ def render_roles(
             lines.append(f"- **{role}** — {shown}{more}")
     else:
         lines += ["", "**Ролей по контексту нет:** тронутые пути не названы таблицей."]
-    return "\n".join([*lines, "", procedure.strip(), ""]) + "\n"
+    return "\n".join([*lines, *(tests or []), "", procedure.strip(), ""]) + "\n"
 
 
 def export_meta() -> tuple[dict[str, str], dict[str, list[str]]]:
@@ -728,7 +821,11 @@ def roles_section(
     if files is None:
         files, unread = touched_files(repo, number)
     required, context = roles_for(files, table)
-    return render_roles(procedure, required, context, unread=unread)
+    kind = scenario_of(labels_of(repo, number, ghrest.token_from_env()))
+    tests = tests_said(kind, chosen_tests(files) if kind == scope.CODE and files else None)
+    return render_roles(
+        procedure, for_scenario(required, table, kind), context, unread=unread, tests=tests
+    )
 
 
 if __name__ == "__main__":
