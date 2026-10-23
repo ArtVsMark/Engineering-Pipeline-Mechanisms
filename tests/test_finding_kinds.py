@@ -770,7 +770,8 @@ def test_the_entry_point_names_the_history_and_its_outsiders(
     kinds = tmp_path / "kinds.json"
     kinds.write_text(json.dumps({"kinds": history_kinds("1111111")}, ensure_ascii=False))
     bodies = ["Разобрано: aaaaaaa\nРод: род", "Разобрано: bbbbbbb\nРод: опечатка"]
-    monkeypatch.setattr(module.trunk_log, "merged_bodies", lambda *_, **__: bodies)
+    numbered = list(enumerate(bodies, start=1))
+    monkeypatch.setattr(module.trunk_log, "merged_numbered", lambda *_, **__: numbered)
     assert module.main(["--kinds", str(kinds)]) == module.EXIT_OK
     out = capsys.readouterr().out
     assert f"встреч 2 ({module.HISTORY_SAID} origin/main — 1)" in out
@@ -791,10 +792,10 @@ def test_an_unreadable_history_is_the_third_outcome(
 ) -> None:
     """История не прочитана — отказ, а не счёт по одному словарю (045)."""
 
-    def refuse(*_: object, **__: object) -> list[str]:
+    def refuse(*_: object, **__: object) -> list[tuple[int, str]]:
         raise module.trunk_log.NotRun(module.trunk_log.SHALLOW)
 
-    monkeypatch.setattr(module.trunk_log, "merged_bodies", refuse)
+    monkeypatch.setattr(module.trunk_log, "merged_numbered", refuse)
     assert module.main([]) == module.EXIT_BROKEN
     assert module.trunk_log.SHALLOW in capsys.readouterr().err
 
@@ -867,3 +868,51 @@ def test_one_old_name_under_two_kinds_is_refused() -> None:
 def test_mark_of_strips_the_backticks() -> None:
     """`mark_of` — одна форма встречи на счёт и на проверку повтора (#1092)."""
     assert module.mark_of("`abc1234`") == module.mark_of("abc1234") == "abc1234"
+
+
+def test_meetings_before_the_rule_do_not_count_toward_a_new_one() -> None:
+    """Отметка «правило с #N»: до #N — история рода, после — «правило не держит» (#1607)."""
+    kinds = {
+        "род": {"признак": "x", "встречен": ["1111111"], "закрыт": "нет — x", module.SINCE: "#2"},
+        "сирота": {"признак": "y", "встречен": [], "закрыт": "нет — y"},
+    }
+    numbered = [
+        (1, "Разобрано: aaaaaaa\nРод: род"),
+        (2, "Разобрано: bbbbbbb\nРод: род"),
+        (3, "Разобрано: ccccccc\nРод: род\nРазобрано: ddddddd\nРод: род"),
+        (4, "Разобрано: eeeeeee\nРод: род\nРазобрано: fffffff\nРод: сирота"),
+    ]
+    after = module.after_rule(kinds, numbered)
+    assert after == {"род": ["ccccccc", "ddddddd", "eeeeeee"]}
+    assert module.not_held(after) == [("род", 3)]
+    merged, _ = module.with_history(kinds, [body for _, body in numbered])
+    assert "род" not in [name for name, _ in module.unheld(merged)], (
+        "род с правилом — не повод для нового"
+    )
+
+
+def test_a_twin_met_before_the_rule_is_not_met_again_after() -> None:
+    """Двойник цепочки, встреченной до правила, после правила второй раз не считается (022)."""
+    kinds = {"род": {"признак": "x", "встречен": [], module.SINCE: "#1"}}
+    numbered = [
+        (1, "Разобрано: aaaaaaa\nРод: род"),
+        (2, "Разобрано: aaaaaaa\nРод: род"),
+    ]
+    assert module.after_rule(kinds, numbered) == {"род": []}
+
+
+@pytest.mark.parametrize("said", ["692", "#", "#69a", "с #692"])
+def test_a_mark_of_the_wrong_form_is_a_refusal(said: str) -> None:
+    """Отметка не вида #N — отказ с причиной, а не «отметки нет» (045)."""
+    with pytest.raises(module.NotRun, match="номер слитого изменения"):
+        module.since_of({module.SINCE: said})
+
+
+def test_every_mark_of_the_dictionary_names_a_born_rule() -> None:
+    """Отметка стоит только у рода, из которого правило родилось: «есть — N» или «породил»."""
+    marked = {name: body for name, body in kinds().items() if module.SINCE in body}
+    assert marked, "отметок в словаре нет — гейт ничего не проверил (075)"
+    for name, body in marked.items():
+        module.since_of(body)
+        said = module.fate(body)
+        assert (said and said[0] == "есть") or body.get(module.BORN), name
