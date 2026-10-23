@@ -734,7 +734,14 @@ LICENSE_ID: Final = "SPDX-License-Identifier: MIT"
 #: Как строка лицензии записывается в файле каждого рода, который кладёт заход.
 #: JSON комментариев не знает, и строка там — поле `_license` первым ключом:
 #: поля с `_` читатели наших таблиц пропускают.
-LICENSE_FORMS: Final = {".yml": "# {line}\n", ".yaml": "# {line}\n", ".md": "<!-- {line} -->\n"}
+LICENSE_FORMS: Final = {
+    ".yml": "# {line}\n",
+    ".yaml": "# {line}\n",
+    ".md": "<!-- {line} -->\n",
+    # Загрузчик зовётся `bash <путь>`, а не как исполняемый: строка лицензии
+    # первой не отнимает у него `#!` (#1553).
+    ".sh": "# {line}\n",
+}
 
 
 def is_signed(path: Path, text: str) -> bool:
@@ -870,6 +877,8 @@ DATA_KITTED: Final = (
     paths.PROTECTION,
     paths.SERIES,
     paths.RERUN,
+    # #1553: предполётная у потребителя — загрузчик, а не копии скриптов (090).
+    paths.PREFLIGHT_LOADER,
 )
 #: Данные потребителя, которым заготовки НЕТ, — с причиной (#1557). Каждый путь
 #: `consumer_data` стоит либо в `DATA_KITTED`, либо здесь; держит это

@@ -889,6 +889,10 @@ def consumer_has(said: str, answers: dict[str, Any]) -> bool:
     # состав свода — у гейта его свежести, а не второй список здесь (022).
     if said in RULEBOOK.RULEBOOK:
         return True
+    # Заготовки данных кладёт заход подключения (`DATA_KITTED`, #1557, #1553):
+    # у потребителя они есть с первого захода, и состав — у захода, а не здесь.
+    if said in {one.as_posix() for one in load_script("onboard.py").DATA_KITTED}:
+        return True
     head = "/".join(said.split("/")[:3])
     if head.startswith(".claude/skills/"):
         return bool(answers.get(head, {}).get("answer") == "as-is")
@@ -1012,3 +1016,49 @@ def test_a_flow_the_kit_is_cut_from_is_answered_configured() -> None:
         if answers.get(f".github/workflows/{flow.name}", {}).get("answer") != "configured"
     )
     assert not wrong, f"заготовка режется из прогона, а ответ не `configured`: {wrong}"
+
+
+def delivered_scripts() -> set[str]:
+    """Наши скрипты, которые у потребителя кто-то зовёт: шаги по тегу и предполётная (#1553).
+
+    Шаги — тем же `called_scripts`, что выводит данные потребителя; предполётная
+    — её модуль и проверки перед толчком (`BEFORE_PUSH`), каждый с импортами
+    (`module_closure`). Второго обхода импортов здесь нет (214).
+    """
+    onboard = load_script("onboard.py")
+    preflight = load_script("preflight.py")
+    closure = load_script("check_facts_contract.py").module_closure
+    names = sorted(
+        one.stem.removeprefix(onboard.STEP_PREFIX)
+        for one in walk(ROOT / paths.WORKFLOWS, f"{onboard.STEP_PREFIX}*.yml")
+    )
+    found = {f"{paths.SCRIPTS.as_posix()}/{one}.py" for one in onboard.called_scripts(ROOT, names)}
+    starts = {"preflight"} | {
+        match.group(1)
+        for step in preflight.BEFORE_PUSH
+        for match in onboard.CALLED_SCRIPT.finditer(step.command)
+    }
+    for start in sorted(starts):
+        found |= {one.as_posix() for one in closure(start, ROOT)}
+    return found
+
+
+def test_an_as_is_script_is_reached_at_the_consumer() -> None:
+    """Скрипт `as-is` у потребителя зовёт шаг или предполётная — иначе ответ лжёт (#1553).
+
+    Выкачка механизмов по тегу несёт весь `scripts/`, но «работает у соседа без
+    правки» значит и «его есть чем запустить». Скрипт, который зовёт только наш
+    `ci.yml`, навык или хук окна, отвечает причиной (`@window-path`), пока путь
+    к соседу не проложен (#1552, #1554).
+    """
+    answers = inventory()["answers"]
+    reached = delivered_scripts()
+    assert len(reached) > 50, f"достижимых скриптов {len(reached)} — обход сломан (075)"
+    stray = sorted(
+        name
+        for name, one in answers.items()
+        if name.startswith(f"{paths.SCRIPTS.as_posix()}/")
+        and one.get("answer") == "as-is"
+        and name not in reached
+    )
+    assert not stray, f"ответ as-is, а у потребителя скрипт звать нечем: {stray}"

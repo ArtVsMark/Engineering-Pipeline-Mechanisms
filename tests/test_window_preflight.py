@@ -490,7 +490,8 @@ def test_the_commit_text_is_judged_before_the_push() -> None:
     """
     commands = [step.command for step in preflight.BEFORE_PUSH]
     assert any(
-        command.startswith("python scripts/check_pr_meta.py --local ") for command in commands
+        preflight.plain(command).startswith("python scripts/check_pr_meta.py --local ")
+        for command in commands
     )
     assert "текст коммитов" in preflight.NEEDS_PLATFORM["python scripts/check_pr_meta.py"]
 
@@ -569,9 +570,9 @@ def test_a_red_verdict_never_reaches_the_push(monkeypatch: pytest.MonkeyPatch) -
     """
     pushed: list[object] = []
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("красный", "false")])
-    monkeypatch.setattr(preflight, "run", lambda step, root: (1, "красное"))
+    monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (1, "красное"))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
     # СВЕРКА ОКРУЖЕНИЯ — ТАКОЙ ЖЕ СОСЕД, как `steps` и `run`. Предмет здесь —
     # отношение «красное → не толкаем», а не состав чужой машины: без подмены
@@ -585,9 +586,9 @@ def test_a_green_verdict_pushes_in_the_same_run(monkeypatch: pytest.MonkeyPatch)
     """Зелёный вердикт толкает ТЕМ ЖЕ заходом: проверка и действие — один акт."""
     pushed: list[object] = []
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
-    monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
+    monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
     # СВЕРКА ОКРУЖЕНИЯ — ТАКОЙ ЖЕ СОСЕД, как `steps` и `run`. Предмет здесь —
     # отношение «красное → не толкаем», а не состав чужой машины: без подмены
@@ -605,9 +606,9 @@ def test_without_the_flag_nothing_is_pushed(monkeypatch: pytest.MonkeyPatch) -> 
     """
     pushed: list[object] = []
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
-    monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
+    monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
     # СВЕРКА ОКРУЖЕНИЯ — ТАКОЙ ЖЕ СОСЕД, как `steps` и `run`. Предмет здесь —
     # отношение «красное → не толкаем», а не состав чужой машины: без подмены
@@ -647,7 +648,7 @@ def test_an_environment_gap_runs_nothing_at_all(
         return 0, ""
 
     monkeypatch.setattr(preflight, "push_branch", lambda root: remember(pushed, root))
-    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
     monkeypatch.setattr(preflight, "run", noted)
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
@@ -1338,9 +1339,9 @@ def test_the_source_is_the_first_line_of_the_report(
     """Строка об источнике идёт первой: остальное имеет смысл только после неё (216)."""
     monkeypatch.setattr(preflight, "code_origin", lambda root: "/elsewhere/ghrest.py")
     monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
-    monkeypatch.setattr(preflight, "steps", lambda path: [])
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])
-    monkeypatch.setattr(preflight, "run", lambda step, root: (0, ""))
+    monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (0, ""))
     monkeypatch.setattr(preflight, "report_gaps", lambda: None)
     preflight.main([])
     first = capsys.readouterr().out.splitlines()[0]
@@ -1378,6 +1379,67 @@ def test_a_refused_choice_falls_back_to_the_whole_set(
     assert "--all" in capsys.readouterr().out
     monkeypatch.setenv("GITHUB_BASE_REF", "main")
     assert preflight.journal_base() == "origin/main"
+
+
+def consumer_tree(tmp_path: Path) -> tuple[Path, Path]:
+    """Дерево потребителя с вызовом общего шага по тегу и выкачка поставщика рядом."""
+    tree, supplier = tmp_path / "consumer", tmp_path / "mechanisms"
+    (tree / ".github" / "workflows").mkdir(parents=True)
+    (tree / ".github" / "workflows" / "ci.yml").write_text(
+        "jobs:\n  lint:\n    uses: o/m/.github/workflows/step-lint.yml@v1.2.3\n",
+        encoding="utf-8",
+    )
+    (supplier / ".github" / "workflows").mkdir(parents=True)
+    (supplier / ".github" / "workflows" / "step-lint.yml").write_text(
+        "jobs:\n  lint:\n    steps:\n      - name: линтер\n        run: ruff check\n",
+        encoding="utf-8",
+    )
+    return tree, supplier
+
+
+def test_a_supplier_call_is_opened_from_the_checkout(tmp_path: Path) -> None:
+    """Вызов `<владелец>/<репо>/…@тег` раскрывается по выкачке поставщика (#1553)."""
+    tree, supplier = consumer_tree(tmp_path)
+    found = preflight.steps(tree / preflight.CI, supplier, "o/m")
+    assert [(one.name, one.command) for one in found] == [("линтер", "ruff check")]
+
+
+def test_a_call_of_another_owner_stays_unrunnable(tmp_path: Path) -> None:
+    """Чужой переиспользуемый прогон рядом с поставщиком назван, а не роняет заход (#1618)."""
+    tree, supplier = consumer_tree(tmp_path)
+    flow = tree / ".github" / "workflows" / "ci.yml"
+    flow.write_text(
+        flow.read_text(encoding="utf-8")
+        + "  other:\n    uses: someone/else/.github/workflows/deploy.yml@v2\n",
+        encoding="utf-8",
+    )
+    found = preflight.steps(flow, supplier, "o/m")
+    assert [one.name for one in found] == ["линтер"]
+    assert "someone/else/.github/workflows/deploy.yml@v2" in preflight.UNRUNNABLE
+
+
+def test_without_the_checkout_the_supplier_call_is_named(tmp_path: Path) -> None:
+    """Без выкачки вызов поставщика — невыполнимый с причиной, а не тихий пропуск (046)."""
+    tree, _ = consumer_tree(tmp_path)
+    with pytest.raises(preflight.NotRun, match="ни одной выполнимой"):
+        preflight.steps(tree / preflight.CI)
+    assert "o/m/.github/workflows/step-lint.yml@v1.2.3" in preflight.UNRUNNABLE
+
+
+def test_a_call_missing_from_the_checkout_is_a_refusal(tmp_path: Path) -> None:
+    """Прогона нет в выкачке — отказ с адресом: выкачан не тот тег или не тот поставщик."""
+    tree, supplier = consumer_tree(tmp_path)
+    (supplier / ".github" / "workflows" / "step-lint.yml").unlink()
+    with pytest.raises(preflight.NotRun, match=r"step-lint\.yml"):
+        preflight.steps(tree / preflight.CI, supplier, "o/m")
+
+
+def test_the_code_of_the_steps_is_the_checkout(tmp_path: Path) -> None:
+    """`$MECHANISMS` шага — выкачка, а не дерево потребителя: у него скриптов нет (#1553)."""
+    tree, supplier = consumer_tree(tmp_path)
+    step = preflight.Step("где код", f'test "${preflight.MECHANISMS}" = "{supplier.resolve()}"')
+    assert preflight.run(step, tree, supplier)[0] == 0
+    assert preflight.run(step, tree)[0] != 0
 
 
 def git_in(root: Path, *args: str) -> None:
