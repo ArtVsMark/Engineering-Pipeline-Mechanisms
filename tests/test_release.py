@@ -1138,9 +1138,9 @@ def test_a_breaking_release_notifies_who_took_our_steps() -> None:
     оповещение — красное, а не жёлтая строка в зелёном прогоне (045).
     """
     names = [str(one.get("name") or "") for one in release_steps()]
-    notice = names.index("оповестить взявших о несовместимом выпуске")
+    notice = names.index("оповестить потребителей о смене контракта")
     assert notice > names.index("выпустить"), names
-    step = named("оповестить взявших о несовместимом выпуске")
+    step = named("оповестить потребителей о смене контракта")
     assert '$MECHANISMS/scripts/breaking_notice.py --tag "v${version}" --apply' in step["run"]
     assert step["env"]["GH_TOKEN"] == "${{ secrets.MERGE_QUEUE_TOKEN }}"
     assert step["env"]["GITHUB_REPOSITORY"] == "${{ github.repository }}"
@@ -1183,7 +1183,7 @@ def test_the_tail_does_not_build_the_release_again() -> None:
     "name",
     [
         "поднять свои шаги до выпуска",
-        "оповестить взявших о несовместимом выпуске",
+        "оповестить потребителей о смене контракта",
         "снять метку «ждёт выпуска» с задач плана",
     ],
 )
@@ -1330,7 +1330,7 @@ RELEASE_VERSION: Final = "${{ steps.release.outputs.version || steps.tagged.outp
 NUMBERED_TAIL: Final = (
     "завести страницу выпуска",
     "поднять свои шаги до выпуска",
-    "оповестить взявших о несовместимом выпуске",
+    "оповестить потребителей о смене контракта",
     "снять метку «ждёт выпуска» с задач плана",
 )
 
