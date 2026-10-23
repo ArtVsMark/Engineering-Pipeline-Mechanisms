@@ -190,6 +190,10 @@
       "answer": "ours",
       "why": "@skill-tree"
     },
+    ".claude/skills/what-the-graph-misses": {
+      "answer": "ours",
+      "why": "@skill-tree"
+    },
     ".claude/skills/work-the-plan": {
       "answer": "ours",
       "why": "@skill-tree"
