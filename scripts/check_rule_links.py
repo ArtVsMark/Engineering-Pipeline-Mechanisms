@@ -33,8 +33,10 @@
 import argparse
 import ast
 import codecs
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 from typing import Final
 
@@ -110,11 +112,22 @@ def as_ascii_compatible(data: bytes) -> bytes:
     return data
 
 
-#: Место строкового литерала в исходнике: строка и байт начала, строка и байт конца.
+#: Место строкового литерала в исходнике: строка и символ начала, строка и символ конца.
 Span = tuple[int, int, int, int]
+#: Тот же образец ссылки — для раскодированного исходника Python.
+LINK_TEXT_RE: Final = re.compile(LINK_RE.pattern.decode("ascii"))
 
 
-def code_literals(data: bytes) -> list[Span]:
+def python_text(data: bytes) -> str | None:
+    """Исходник Python в его объявленной кодировке (PEP 263); не раскодировался — None."""
+    try:
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
+        return data.decode(encoding)
+    except SyntaxError, LookupError, UnicodeDecodeError:
+        return None
+
+
+def code_literals(text: str) -> list[Span] | None:
     """Места строковых литералов КОДА в исходнике Python — без докстрок (#1571).
 
     В литерале кода стоят входы проверок: подставка вида `001-a.md` в каталоге
@@ -124,19 +137,27 @@ def code_literals(data: bytes) -> list[Span]:
     в докстроках 974 ссылки, в комментариях 138, в литералах кода 15 — все
     в `tests/`, входы тестов гейта и его соседей.
 
-    Смещения `ast` — байты UTF-8, тем же счётом, что у байтового поиска
-    (`links`). Исходник не разобрался — литералов не названо, и файл судится
-    целиком: сужение не даёт права пропускать то, чего не прочли (045).
+    МЕСТО БЕРЁТСЯ У ТОКЕНОВ, А НЕ У AST (взгляд на #1588). Склеенные строки
+    `"a"  # коммент` и `"b"` ast отдаёт одним узлом от первой части до
+    последней, и комментарий между ними попадал внутрь места. Токен — каждая
+    часть отдельно, комментарий — свой токен. Счёт — символы раскодированного
+    текста: смещения ast — байты UTF-8, и у исходника с объявленной кодировкой
+    они разошлись бы с байтами файла. AST здесь только узнаёт докстроки.
+
+    Исходник не разобрался — `None`, и файл судится целиком: сужение не даёт
+    права пропускать то, чего не прочли (045).
 
     ГРАНИЦА НАЗВАНА. Литерал, который выводится человеку
-    (`print("… rules/ru/157-….md")`), тоже не судится. Вне `tests/` таких у
-    нас ноль на 22.10.2026.
+    (`print("… путь к правилу")`), тоже не судится. Вне `tests/` таких у нас
+    ноль на 22.10.2026.
     """
     try:
-        tree = ast.parse(data)
-    except SyntaxError, ValueError:
-        return []
-    docs: set[int] = set()
+        tree = ast.parse(text)
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except SyntaxError, ValueError, tokenize.TokenError:
+        return None
+    lines = text.splitlines(keepends=True)
+    docs: set[tuple[int, int]] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             first = node.body[0] if node.body else None
@@ -145,22 +166,49 @@ def code_literals(data: bytes) -> list[Span]:
                 and isinstance(first.value, ast.Constant)
                 and isinstance(first.value.value, str)
             ):
-                docs.add(id(first.value))
-    return [
-        (node.lineno, node.col_offset, node.end_lineno or node.lineno, node.end_col_offset or 0)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, (str, bytes))
-        and id(node) not in docs
-    ]
+                line = lines[first.value.lineno - 1].encode("utf-8")
+                column = len(line[: first.value.col_offset].decode("utf-8"))
+                docs.add((first.value.lineno, column))
+    spans: list[Span] = []
+    opened: list[tuple[int, int]] = []
+    for token in tokens:
+        name = tokenize.tok_name[token.type]
+        if name == "STRING" and token.start not in docs:
+            spans.append((*token.start, *token.end))
+        elif name.endswith("STRING_START"):
+            opened.append(token.start)
+        elif name.endswith("STRING_END") and opened:
+            begin = opened.pop()
+            if not opened and begin not in docs:
+                spans.append((*begin, *token.end))
+    return spans
 
 
 def inside(spans: list[Span], line: int, column: int) -> bool:
-    """Стоит ли байт `column` строки `line` внутри одного из литералов."""
+    """Стоит ли символ `column` строки `line` внутри одного из литералов."""
     return any(
         (line, column) >= (start_line, start_col) and (line, column) < (end_line, end_col)
         for start_line, start_col, end_line, end_col in spans
     )
+
+
+def python_links(name: str, data: bytes) -> list[tuple[Path, int, str, str]] | None:
+    """Ссылки исходника Python вне литералов кода; не раскодировался или не разобрался — None.
+
+    None зовущий читает как «судить файл целиком байтами» — так, как до сужения.
+    """
+    text = python_text(data)
+    if text is None:
+        return None
+    literals = code_literals(text)
+    if literals is None:
+        return None
+    found: list[tuple[Path, int, str, str]] = []
+    for line_number, line in enumerate(text.splitlines(), 1):
+        for match in LINK_TEXT_RE.finditer(line):
+            if not inside(literals, line_number, match.start()):
+                found.append((Path(name), line_number, match["number"], match["slug"]))
+    return found
 
 
 def links(root: Path) -> list[tuple[Path, int, str, str]]:
@@ -190,11 +238,11 @@ def links(root: Path) -> list[tuple[Path, int, str, str]]:
         # файл с меткой порядка байтов перекодируется (`as_ascii_compatible`),
         # без метки — его не отличить от двоичного, и это предел (взгляд на #1302).
         data = as_ascii_compatible(data)
-        literals = code_literals(data) if path.suffix == ".py" else []
+        if path.suffix == ".py" and (said := python_links(name, data)) is not None:
+            found.extend(said)
+            continue
         for line_number, line in enumerate(data.splitlines(), 1):
             for match in LINK_RE.finditer(line):
-                if inside(literals, line_number, match.start()):
-                    continue
                 number, slug = match["number"].decode(), match["slug"].decode()
                 found.append((Path(name), line_number, number, slug))
     return found
