@@ -210,8 +210,9 @@ def family_of(
     monkeypatch: pytest.MonkeyPatch,
     seen: list[Any],
     unread: list[str] | None = None,
+    declared: list[str] | None = None,
 ) -> list[str]:
-    """Подменяет семью, обход, отдаваемые шаги и токен; отдаёт, к кому шло оповещение.
+    """Подменяет семью, обход, реестр, отдаваемые шаги и токен; отдаёт, к кому шло оповещение.
 
     Токен окружения снимается: с `GH_TOKEN` в среде прогона `main` шёл бы к
     площадке, и исход зависел бы от среды, а не от дерева (107; поздний взгляд
@@ -222,8 +223,11 @@ def family_of(
     monkeypatch.setattr(module.family_uptake, "family", lambda: ["o/взял", "o/не-взял"])
     monkeypatch.setattr(module.family_uptake, "sweep", lambda repos, where: (seen, unread or []))
     monkeypatch.setattr(module.onboard, "steps", lambda root: ["release", "review"])
+    monkeypatch.setattr(
+        module.consumers, "registry", lambda root: [{"repo": one} for one in declared or []]
+    )
 
-    def notify(repo: str, tag: str, body: str, token: str, login: str, *, dry_run: bool) -> str:
+    def notify(repo: str, tag: str, body: str, token: str, login: str, **_: object) -> str:
         notified.append(repo)
         return f"{repo}: оповещён"
 
@@ -241,11 +245,124 @@ def test_a_consumer_notifies_nobody(tree: Path, monkeypatch: pytest.MonkeyPatch)
     assert notified == []
 
 
-def test_a_minor_release_notifies_nobody(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Минор не повод: окно контракта у соседа примет его само."""
-    notified = family_of(monkeypatch, [TOOK])
+#: Окно, покрывающее минор подделки, и окно, прибитое к прежнему минору.
+COVERING: str = f">={_MAJOR}.{_MINOR},<{_MAJOR}.{_MINOR + 2}"
+PINNED: str = f">={_MAJOR}.{_MINOR},<{_MAJOR}.{_MINOR + 1}"
+
+
+def took(repo: str, span: str | None) -> Any:
+    """Взявший наш шаг выпуска с данным окном `contract:`."""
+    return module.family_uptake.Took(repo, (("step-release", "v1.6.0"),), span)
+
+
+def test_a_minor_within_the_window_notifies_nobody(
+    tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Минор, который окно соседа покрывает, — не повод: перечитывать ему нечего (#1586)."""
+    notified = family_of(monkeypatch, [took("o/взял", COVERING)])
     assert module.main(["--tag", "v1.7.0", *OURS]) == module.EXIT_OK
     assert notified == []
+    assert "покрывает" in capsys.readouterr().out
+
+
+def test_a_minor_outside_the_window_notifies_its_owner(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Минор вне окна: оповещён тот, чьё окно его не покрывает, и только он (#1586)."""
+    notified = family_of(monkeypatch, [took("o/взял", PINNED), took("o/шире", COVERING), SKIPPED])
+    assert module.main(["--tag", "v1.7.0", *OURS]) == module.EXIT_OK
+    assert notified == ["o/взял"]
+
+
+def test_a_declared_consumer_is_judged_by_the_window_in_its_tree(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Объявленный, которого обход не застал, судится окном из его дерева у площадки."""
+    notified = family_of(monkeypatch, [], declared=["o/объявлен", "o/покрыт"])
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "т")
+    monkeypatch.setattr(module, "asked_owner", lambda token: "владелец")
+    windows = {"o/объявлен": PINNED, "o/покрыт": COVERING}
+    monkeypatch.setattr(
+        module.consumers, "answer_of", lambda repo, token: {"contract": windows[repo]}
+    )
+    assert module.main(["--tag", "v1.7.0", *OURS]) == module.EXIT_OK
+    assert notified == ["o/объявлен"]
+
+
+def test_an_unread_window_makes_the_minor_partial(
+    tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Окно не прочитано — не «покрывает»: сосед назван, и исход частичный (045)."""
+    notified = family_of(monkeypatch, [took("o/взял", None)], declared=["O/ВЗЯЛ"])
+    assert module.main(["--tag", "v1.7.0", *OURS]) == module.EXIT_PARTIAL
+    assert notified == []
+    out = capsys.readouterr().out
+    assert "окно не прочитано" in out
+    assert "не прочитаны: o/взял;" in out
+
+
+def test_a_major_ignores_the_window(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Мажор оповещает каждого взявшего, какое бы окно он ни держал."""
+    notified = family_of(monkeypatch, [took("o/взял", f">={_MAJOR + 1}.0,<{_MAJOR + 2}.0")])
+    assert module.main(["--tag", "v1.8.0", *OURS]) == module.EXIT_OK
+    assert notified == ["o/взял"]
+
+
+def test_a_dry_run_before_the_release_names_whom_the_minor_reaches(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--to`: «до» — контракт последнего выпуска, «после» — названная версия."""
+    notified = family_of(monkeypatch, [took("o/взял", f">={_MAJOR + 1}.1,<{_MAJOR + 1}.2")])
+    assert module.main(["--tag", "v1.11.0", "--to", f"{_MAJOR + 1}.2.0", *OURS]) == module.EXIT_OK
+    assert notified == ["o/взял"]
+
+
+def test_to_is_refused_in_an_applied_run(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Боевой заход с `--to` не начинается: о невыпущенном соседям не пишут."""
+    notified = family_of(monkeypatch, [took("o/взял", PINNED)])
+    argv = ["--tag", "v1.11.0", "--to", f"{_MAJOR + 1}.2.0", *OURS, "--apply"]
+    assert module.main(argv) == module.EXIT_BROKEN
+    assert notified == []
+
+
+@pytest.mark.parametrize(
+    ("was", "now", "moved"),
+    [("1.2.0", "1.3.0", True), ("1.2.0", "2.0.0", True), ("1.2.0", "1.2.5", False)],
+    ids=["минор", "мажор", "патч"],
+)
+def test_grown_sees_major_and_minor_not_patch(was: str, now: str, moved: bool) -> None:
+    """`grown` — рост MAJOR.MINOR; патч поверхности не трогает."""
+    assert (module.grown(was, now) is not None) is moved
+
+
+def test_addressees_join_takers_and_declared_once() -> None:
+    """Объявленный, уже застанный обходом, не повторяется — регистр имени не значим."""
+    joined = module.addressees([took("o/Взял", PINNED)], ["o/взял", "o/новый"])
+    assert [one.repo for one in joined] == ["o/Взял", "o/новый"]
+    assert joined[1].span is None
+
+
+def test_window_of_and_covers_name_their_refusals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Окна нет или оно не разобрано — `NotRun` с причиной, а не «покрывает»."""
+    assert module.window_of(took("o/взял", PINNED), "") == PINNED
+    with pytest.raises(module.NotRun, match="токена"):
+        module.window_of(took("o/взял", None), "")
+    monkeypatch.setattr(module.consumers, "answer_of", lambda repo, token: {})
+    with pytest.raises(module.NotRun, match="не объявлено"):
+        module.window_of(took("o/взял", None), "т")
+    with pytest.raises(module.NotRun, match="не разобрано"):
+        module.covers("любое", "1.0.0")
+    assert module.covers(">=1.2,<1.3", "1.2.4")
+
+
+def test_the_minor_body_names_the_window_it_left() -> None:
+    """Тело о миноре несёт метку, переход и окно соседа, которое его не покрывает."""
+    body = module.minor_body_of("v1.7.0", "1.2.0", "1.3.0", ">=1.2,<1.3", ["Правка"])
+    assert body.startswith(module.marker("v1.7.0"))
+    assert "`1.2.0` → `1.3.0`" in body
+    assert 'contract: ">=1.2,<1.3"' in body
+    assert "- Правка" in body
+    assert "1.3.0" in module.minor_title("v1.7.0", "1.3.0")
 
 
 def test_a_major_release_notifies_only_who_took_our_steps(
@@ -318,7 +435,9 @@ def test_an_applied_run_notifies_as_the_owner_of_the_token(
     monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "т")
     monkeypatch.setattr(module.ghrest, "request", lambda *_: {"login": "владелец"})
 
-    def notify(repo: str, tag: str, body: str, token: str, login: str, *, dry_run: bool) -> str:
+    def notify(
+        repo: str, tag: str, body: str, token: str, login: str, *, dry_run: bool, **_: object
+    ) -> str:
         seen.append((login, str(dry_run)))
         return repo
 
@@ -408,3 +527,17 @@ def test_an_applied_run_with_an_unnamed_owner_is_refused(
     monkeypatch.setattr(module.ghrest, "request", forbidden)
     assert module.main(["--tag", "v1.8.0", *OURS, "--apply"]) == module.EXIT_BROKEN
     assert notified == []
+
+
+def test_jump_names_a_grown_minor_and_skips_the_first(tree: Path) -> None:
+    """`jump` видит и минор, и мажор; у первого выпуска перехода нет."""
+    assert module.jump("v1.7.0") == (FAKE_VERSION, MINOR_UP)
+    assert module.jump("v1.8.0") == (MINOR_UP, MAJOR_UP)
+    assert module.jump("v1.6.0") is None
+
+
+def test_a_minor_notice_carries_its_own_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Заголовок, переданный зовущим, идёт в задачу вместо заголовка мажора."""
+    monkeypatch.setattr(module.ghrest, "paginate", issues_of([]))
+    said = module.notify("o/взял", "v1.7.0", "тело", "т", "владелец", dry_run=True, title="свой")
+    assert "«свой»" in said
