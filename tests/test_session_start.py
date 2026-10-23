@@ -289,3 +289,47 @@ def test_the_hook_dir_survives_a_relative_call_and_a_cd(hook: str) -> None:
         check=False,
     )
     assert done.returncode == 0, f"{hook}: после cd floor.sh не найден: {done.stderr}"
+
+
+def test_the_hook_turns_signing_off_and_keeps_the_author(tmp_path: Path) -> None:
+    """Подпись ключом платформы выключена локально, автор репозитория не тронут (#1614).
+
+    Планки нет — хук выходит на ней, и выключение подписи обязано стоять раньше:
+    от планки оно не зависит.
+    """
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    shutil.copy2(HOOK, hooks / HOOK.name)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=30)
+    for key, value in (("user.name", "Владелец"), ("user.email", "owner@example.org")):
+        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True, timeout=30)
+    environment = {
+        **os.environ,
+        "CLAUDE_CODE_REMOTE": "true",
+        "CLAUDE_PROJECT_DIR": str(repo),
+        "CLAUDE_ENV_FILE": str(tmp_path / "env"),
+    }
+    done = subprocess.run(
+        [str(hooks / HOOK.name)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "подпись коммитов ключом платформы выключена" in done.stdout, done.stdout
+
+    def local(key: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), "config", "--local", key],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        ).stdout.strip()
+
+    assert local("commit.gpgsign") == "false"
+    assert (local("user.name"), local("user.email")) == ("Владелец", "owner@example.org")
