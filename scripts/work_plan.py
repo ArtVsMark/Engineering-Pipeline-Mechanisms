@@ -906,7 +906,7 @@ def fresh_build(
 
     СОСЕДИ ПО ПРИЗНАКУ «ПЕРЕПИСЫВАЕТ ТЕЛО ЗАДАЧИ ПОСЛЕ ДОЛГОЙ РАБОТЫ» НАЗВАНЫ
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
-    Тело задачи через PATCH пишут восемь механизмов. Шесть — `drift`,
+    Тело задачи через PATCH пишут девять механизмов. Шесть — `drift`,
     `review_findings`, `unlooked`, `stuck`, `schedules_seen`, `main_red` —
     ведут тело целиком сами, ручной части в нём нет, и потерять правку
     человека им нечем. Седьмой — `items.follow` — пишет в тела ЭПИКОВ, которые
@@ -914,7 +914,9 @@ def fresh_build(
     же дефект, и он починен тем же приёмом — чтение до пересчёта и ещё раз
     перед записью. `items.mark` читает задачу и пишет
     её сразу, без работы между — окно в один запрос, как здесь. Нашёл внешний
-    взгляд на #684 (`55d530e`).
+    взгляд на #684 (`55d530e`). Девятый — `announce_refusal` этого же модуля
+    (#1621): блок отказа он кладёт поверх свежего тела тем же приёмом, чтение
+    и сразу запись, и ручную часть не трогает — лишь вставляет блок под маркер.
     """
     for _ in range(TRIES):
         number, body = findings.live_issue(repo, token, MARKER)
@@ -957,6 +959,9 @@ def fresh_build(
 #: успешная. Границы — скрытые строки разметки, их читатель не видит.
 REFUSAL_OPEN: Final = "<!-- plan-refused -->"
 REFUSAL_CLOSE: Final = "<!-- /plan-refused -->"
+#: Предел причины в блоке отказа: строка шапки, а не журнал прогона — полная
+#: причина остаётся в прогоне по адресу из блока.
+REASON_LIMIT: Final = 300
 
 
 def without_refusal(body: str) -> str:
@@ -978,8 +983,14 @@ def with_refusal(body: str, reason: str, run: str) -> str:
     """
     clean = without_refusal(body)
     first, _, rest = clean.partition("\n")
+    # ОДНОЙ СТРОКОЙ И С ПРЕДЕЛОМ (взгляд на #1629): многострочная причина —
+    # тело ответа площадки в `TransportError` — вышла бы из цитаты `>` прямо в
+    # шапку плана.
+    said = " ".join(reason.split())
+    if len(said) > REASON_LIMIT:
+        said = said[: REASON_LIMIT - 1].rstrip() + "…"
     block = (
-        f"{REFUSAL_OPEN}\n> ⛔ **План не собран, разделы ниже — прежние.** {reason}. "
+        f"{REFUSAL_OPEN}\n> ⛔ **План не собран, разделы ниже — прежние.** {said}. "
         f"Прогон: {run}. Блок снимет следующая успешная сборка.\n{REFUSAL_CLOSE}"
     )
     return f"{first}\n{block}\n{rest}"

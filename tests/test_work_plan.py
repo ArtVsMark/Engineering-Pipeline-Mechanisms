@@ -1417,3 +1417,13 @@ def test_the_step_turns_red_only_on_a_refused_build() -> None:
     red = next(one for one in steps if "steps.plan.outputs.rc" in str(one.get("if", "")))
     assert red["if"] == "steps.plan.outputs.rc != '0' && steps.plan.outputs.rc != '3'"
     assert "exit 1" in red["run"] and not red.get("continue-on-error")
+
+
+def test_a_multiline_reason_stays_one_quoted_line() -> None:
+    """Причина отказа — одной строкой и с пределом: из цитаты она не выходит (взгляд на #1629)."""
+    body = f"{module.MARKER}\nшапка\n"
+    said = module.with_refusal(body, "строка один\n\nстрока два " + "х" * 500, "р")
+    block = said.split(module.REFUSAL_OPEN, 1)[1].split(module.REFUSAL_CLOSE, 1)[0].strip()
+    assert block.count("\n") == 0 and block.startswith(">"), block
+    assert "строка один строка два" in block and "…" in block
+    assert len(block) < module.REASON_LIMIT + 200
