@@ -373,11 +373,12 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
             return [segment], ""
         try:
             inner = commands_of(script)
-        except ValueError:
+        except ValueError as exc:
             # Скрипт обрезается ВСЛУХ: молчаливый срез на месте выглядит полным
             # ответом (016, взгляд на #1462), а целиком он даёт причину любой
-            # длины (`64f3440`).
-            return [], f"скрипт оболочки не разбирается: {cut(script)}"
+            # длины (`64f3440`). Причина отказа — та же, что у верхнего уровня
+            # (`look`): кавычка или разделитель документа (195).
+            return [], f"скрипт оболочки не разбирается — {exc}: {cut(script)}"
         found: list[list[str]] = []
         for part in inner:
             deeper, blind = unwrap(part, depth - 1)
@@ -396,8 +397,8 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
         if script is not None:
             try:
                 inner = commands_of(script)
-            except ValueError:
-                return [], f"строка `env -S` не разбирается: {cut(script)}"
+            except ValueError as exc:
+                return [], f"строка `env -S` не разбирается — {exc}: {cut(script)}"
             split: list[list[str]] = []
             for part in inner:
                 deeper, blind = unwrap(part, depth - 1)

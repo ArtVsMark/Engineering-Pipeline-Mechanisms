@@ -1348,3 +1348,11 @@ def test_a_section_key_not_a_string_is_a_refusal() -> None:
     """Нестроковый ключ раздела — `NotRun` с названным ключом, а не TypeError (039)."""
     with pytest.raises(journal.NotRun, match="незнакомые ключи 1"):
         journal.form_of({1: "x", "tail": "^#"})
+
+
+def test_fragments_said_names_whose_fragments_were_read() -> None:
+    """Тронут `.pipeline.yml` — итог называет копящиеся, а не «фрагменты изменения» (#1603)."""
+    changelog = load_script("build_changelog.py")
+    assert "изменения разбираются: 0" in changelog.fragments_said([], ["changelog.d/x.added.md"])
+    said = changelog.fragments_said([], [".pipeline.yml"])
+    assert "все копящиеся фрагменты: 0" in said, said

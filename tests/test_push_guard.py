@@ -1330,3 +1330,17 @@ def test_run_ends_outside_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module.sys, "stdin", __import__("io").StringIO(event))
     assert module.main() == 0
     assert module.started is None
+
+
+@pytest.mark.parametrize(
+    ("segment", "cause"),
+    [
+        (["bash", "-c", 'git push "x'], "двойная кавычка не закрыта"),
+        (["env", "-S", "git push 'x"], "одиночная кавычка не закрыта"),
+    ],
+    ids=["bash-c", "env-S"],
+)
+def test_a_nested_parse_refusal_names_its_cause(segment: list[str], cause: str) -> None:
+    """Вложенный отказ разбора называет причину, как верхний уровень (195, `1b66011`)."""
+    found, blind = module.unwrap(segment, module.DEPTH)
+    assert not found and cause in blind, blind

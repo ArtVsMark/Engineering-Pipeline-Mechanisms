@@ -76,7 +76,12 @@ def declared_context(summary_job: str) -> str:
         raise NotRun(f"нет каталога прогонов: {GATES_DIR}")
     found: list[tuple[Path, Any]] = []
     for path in sorted(GATES_DIR.glob("*.yml")):
-        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        # Не UTF-8 или не разбирается — «не прочитано», а не трасса мимо `NotRun`
+        # (взгляд на #1593, 195): тот же предмет, что у `run_of`.
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise NotRun(f"{path}: прогон не прочитан: {exc}") from exc
         jobs = document.get("jobs") or {}
         if summary_job in jobs:
             found.append((path, jobs[summary_job] or {}))

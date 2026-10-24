@@ -71,11 +71,24 @@ def _events_of(document: dict[Any, Any]) -> dict[str, Any]:
     return events
 
 
+def parsed(path: Path, what: str) -> Any:
+    """YAML файла через общего читателя: не UTF-8 или не разбирается — `BadPolicy`.
+
+    Один читатель на прогоны и ответ проекта — `policy.file_text` (взгляд на
+    #1593): прежде снимок читал их сам, и прогон не в UTF-8 ронял гейт
+    поверхности трассой мимо третьего исхода.
+    """
+    try:
+        return yaml.safe_load(policy.file_text(path, what))
+    except yaml.YAMLError as exc:
+        raise policy.BadPolicy(f"{what} {path} не разбирается: {exc}") from exc
+
+
 def workflows_surface(directory: Path = paths.WORKFLOWS) -> dict[str, Any]:
     """Снимок поверхности прогонов: имена джобов и события с входами."""
     found: dict[str, Any] = {}
     for path in sorted(directory.glob("*.y*ml")):
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        document = parsed(path, "прогон")
         if not isinstance(document, dict):
             continue
         jobs = {
@@ -90,7 +103,7 @@ def checks_surface(path: Path = paths.PIPELINE) -> dict[str, Any]:
     """Снимок формы ответа потребителя: схема, имена проверок и их классы."""
     if not path.is_file():
         return {}
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document = parsed(path, "ответ проекта")
     if not isinstance(document, dict):
         return {}
     checks = document.get("checks") or {}

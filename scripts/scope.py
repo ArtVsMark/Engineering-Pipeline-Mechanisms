@@ -48,6 +48,7 @@ Bazel `rdeps`. Код не переносится, только идея.
 
 import argparse
 import ast
+import contextlib
 import os
 import subprocess
 import sys
@@ -568,6 +569,21 @@ def present(choice: Choice, files: set[str]) -> Choice:
     return Choice(choice.scenario, tuple(one for one in choice.tests if one in files), choice.why)
 
 
+def current_heads(root: Path) -> set[str]:
+    """Нынешняя голова изменения: `HEAD`, а у синтетического слияния — и его второй родитель.
+
+    На `pull_request` выкачка кладёт коммит слияния, которого среди коммитов
+    изменения нет: голова изменения — второй родитель. Без него «кроме
+    нынешней» не исключало ничего, и повтор прогона на зелёной голове судил
+    от неё самой (взгляд на #1605).
+    """
+    found = {git(root, "rev-parse", "HEAD").strip()}
+    # Не слияние — второго родителя нет, и `git` отказывает: это ответ, а не сбой.
+    with contextlib.suppress(NotRun):
+        found.add(git(root, "rev-parse", "--verify", "--quiet", "HEAD^2").strip())
+    return found - {""}
+
+
 def last_green(repo: str, number: int, token: str, root: Path) -> str:
     """Последняя голова изменения, кроме нынешней, с зелёным `ci-complete` (#1602).
 
@@ -577,13 +593,13 @@ def last_green(repo: str, number: int, token: str, root: Path) -> str:
     предка. Отказ площадки — `NotRun`: зовущий судит от предка, а не «ничего не
     тронуто» (039).
     """
-    head = git(root, "rev-parse", "HEAD").strip()
+    now = current_heads(root)
     try:
         heads = [
             str(one.get("sha") or "")
             for one in ghrest.paginate(f"repos/{repo}/pulls/{number}/commits", token)
         ]
-        for sha in [one for one in reversed(heads) if one and one != head][:MAX_HEADS]:
+        for sha in [one for one in reversed(heads) if one and one not in now][:MAX_HEADS]:
             runs = ghrest.paginate(
                 f"repos/{repo}/commits/{sha}/check-runs?check_name={GREEN_CHECK}",
                 token,

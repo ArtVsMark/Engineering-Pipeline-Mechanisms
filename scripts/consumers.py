@@ -116,10 +116,20 @@ def registry(root: Path) -> list[dict[str, Any]]:
     # Повторы — без регистра, как у обхода семьи (находка `cfbc3d0`, правило
     # 195): `Owner/Repo` и `owner/repo` — один проект, и прочитанный дважды он
     # давал лишнюю единицу в «не прочитано ответов: N из M». Первая запись
-    # остаётся.
+    # остаётся. ПОВТОР С ДРУГИМИ ПОЛЯМИ — ОТКАЗ, А НЕ ТИХИЙ ВЫБОР (взгляд на
+    # #1603, 045): `setdefault` молча терял `since` и `why` второй записи. Повтор
+    # с теми же полями сводится: он ничего не теряет.
     unique: dict[str, dict[str, Any]] = {}
     for one in rows:
-        unique.setdefault(str(one["repo"]).casefold(), dict(one))
+        key = str(one["repo"]).casefold()
+        seen = unique.setdefault(key, dict(one))
+        if {k: v for k, v in seen.items() if k != "repo"} != {
+            k: v for k, v in one.items() if k != "repo"
+        }:
+            raise NotRun(
+                f"{path}: «{seen['repo']}» записан дважды с разными полями — "
+                f"{seen} и {one}; какая запись верна, решает реестр, а не заход"
+            )
     return list(unique.values())
 
 
@@ -159,6 +169,14 @@ def swept(path: Path) -> tuple[list[str], list[str]]:
     return found, sorted(unspelled.values())
 
 
+class BadAnswer(NotRun):
+    """Ответ по проверкам прочитан, но не разбирается — состояние соседа, а не сбой чтения.
+
+    Подкласс `NotRun`: прежние ловцы отказа его по-прежнему ловят. Отдельный
+    класс — для того, кому важно, чинит ли это повтор захода (взгляд на #1591).
+    """
+
+
 def answer_of(repo: str, token: str) -> dict[str, Any]:
     """Ответ потребителя по проверкам — из ЕГО дерева, а не из нашего реестра.
 
@@ -175,7 +193,7 @@ def answer_of(repo: str, token: str) -> dict[str, Any]:
     try:
         return policy.answer_text(raw, repo)
     except policy.BadPolicy as exc:
-        raise NotRun(str(exc)) from exc
+        raise BadAnswer(str(exc)) from exc
 
 
 def bypassed(answer: dict[str, Any]) -> list[str]:
