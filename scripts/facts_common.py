@@ -194,6 +194,14 @@ class NotRun(RuntimeError):
     """Сборка не отработала: третий исход, а не пустые факты."""
 
 
+def answer_path(root: Path) -> Path:
+    """Адрес ответа каталогу по таблице путей дерева `root` (#1632); битый раздел — `NotRun`."""
+    try:
+        return policy.project_path("bindings", root)
+    except paths.BadPaths as exc:
+        raise NotRun(str(exc)) from exc
+
+
 def release_series(tag: str | None) -> str:
     """Выпуск в форме договора фактов 1.3 — серия `X.Y`, а не тег; выпуска нет — пусто.
 
@@ -404,7 +412,7 @@ def rules_said(root: Path, supplier: str = "") -> dict[str, Any]:
     не ноль (045).
     """
     try:
-        return rules_facts(root / paths.BINDINGS, supplier)
+        return rules_facts(root / answer_path(root), supplier)
     except NotRun as exc:
         return {"read": False, "why": str(exc)}
 

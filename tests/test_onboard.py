@@ -2576,3 +2576,16 @@ def test_laid_at_the_consumer_is_the_union_of_every_kit() -> None:
     assert {*module.DATA_KITTED, *module.TREE_KITTED, *module.SKILLS_KITTED} <= laid
     assert {Path("AGENTS.md"), Path("CLAUDE.md")} <= laid
     assert Path("docs/dev/gaps.md") not in laid and module.paths.SCRIPTS not in laid
+
+
+def test_the_bindings_note_reads_the_consumers_path_table(tmp_path: Path) -> None:
+    """Ответ каталогу переназначен потребителем — ищется по его адресу (#1632)."""
+    (tmp_path / "cfg").mkdir()
+    (tmp_path / "cfg" / "answer.json").write_text("{}", encoding="utf-8")
+    assert "карта взгляда не собирается" in module.bindings_note(tmp_path)
+    (tmp_path / ".pipeline.yml").write_text(
+        "paths:\n  bindings: cfg/answer.json\n", encoding="utf-8"
+    )
+    assert module.bindings_note(tmp_path) == ""
+    (tmp_path / ".pipeline.yml").write_text("paths:\n  bindings: /a.json\n", encoding="utf-8")
+    assert "не проверен" in module.bindings_note(tmp_path)

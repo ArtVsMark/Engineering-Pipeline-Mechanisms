@@ -53,6 +53,7 @@ import family_check
 import ghrest
 import kinds
 import paths
+import pipeline_checks as policy
 import python_badge
 
 EXIT_OK: Final = 0
@@ -202,7 +203,8 @@ def build(
     """Картинка в две строки и причины серого."""
     top, why_top = state_zones(python_zones)
     try:
-        answer: object = json.loads((root / ANSWER).read_text(encoding="utf-8"))
+        where = policy.project_path("bindings", root)
+        answer: object = json.loads((root / where).read_text(encoding="utf-8"))
     except OSError, ValueError:
         answer = None
     rules, why_rules = rules_zones(answer, active_of(fetch))
