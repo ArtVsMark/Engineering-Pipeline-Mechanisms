@@ -273,3 +273,25 @@ def test_true_among_other_keys_of_a_flow_mapping_is_judged(tmp_path: Path) -> No
         "        with: {fetch-depth: 0, persist-credentials: true}\n",
     )
     assert any("без причины" in one for one in found(tree(tmp_path, {"a.yml": text})))
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        f"      - {{uses: {CHECKOUT}, with: {{persist-credentials: true}}}}\n",
+        f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials:\n"
+        "            true # причина на другой строке\n",
+        f"      - uses: {CHECKOUT}\n        with: &keep\n"
+        "          persist-credentials: true # толкает\n"
+        f"      - uses: {CHECKOUT}\n        with: *keep\n",
+    ],
+    ids=["шаг-в-строку", "значение-ниже", "якорь"],
+)
+def test_a_true_whose_key_line_is_not_found_turns_red(tmp_path: Path, step: str) -> None:
+    """`true`, чью строку ключа не найти, — находка счётом, а не молчание (взгляд на #1650)."""
+    text = CLEAN.replace(
+        f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials: false\n", step
+    )
+    assert text != CLEAN
+    told = found(tree(tmp_path, {"a.yml": text}))
+    assert any("строк ключа найдено" in one for one in told), told

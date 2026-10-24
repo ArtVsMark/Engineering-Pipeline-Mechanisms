@@ -246,10 +246,25 @@ def judge(
                 met.add((name, uses))
                 continue
             found.append(f"{where}: {uses} — {problem}")
+    lines = 0
     for number, line in enumerate(text.splitlines() if trues else [], 1):
         value = TRUE_RE.search(line)
-        if value and not REASON_RE.search(line[value.end() :]):
+        if not value:
+            continue
+        lines += 1
+        if not REASON_RE.search(line[value.end() :]):
             found.append(f"{path}:{number}: {PERSIST}: true без причины комментарием на строке")
+    # СВЕРКА СЧЁТОМ, А НЕ ЕЩЁ ОДНОЙ ФОРМОЙ СТРОКИ (210: второй круг по
+    # `TRUE_RE`, #1634 → #1650). Разбор знает, сколько выгрузок держат `true`;
+    # строк ключа найдено меньше — шаг записан в строку, значение стоит на
+    # другой строке или задано якорем YAML, и причину искать негде. Это отказ,
+    # а не молчание: запишите ключ блочно, с причиной на его строке.
+    if lines < trues:
+        found.append(
+            f"{path}: {PERSIST}: true у выгрузок {trues}, а строк ключа найдено {lines} — "
+            "запись, где причину не найти строкой (шаг в строку, значение на другой "
+            "строке, якорь); запишите ключ блочно с причиной комментарием"
+        )
     return found, met
 
 
