@@ -66,6 +66,9 @@ DATA = {
 TREE = {
     str(one): "{}\n" if one.suffix == ".json" else f"#!/bin/sh\n# хук {one.name}\n"
     for one in module.TREE_KITTED
+} | {
+    str(one): f"---\nname: {one.parent.name}\n---\n\nЗовите `python scripts/work_plan.py`.\n"
+    for one in module.SKILLS_KITTED
 }
 #: Планка поддельного дерева: из неё заход ставит число в `floor.sh`.
 PYPROJECT = '[project]\nname = "x"\nrequires-python = ">=3.14"\n'
@@ -2237,7 +2240,7 @@ def test_a_missing_hook_of_the_tree_is_refused(tmp_path: Path) -> None:
     root = tree(tmp_path, **{"step-пример": MARKED})
     (root / module.paths.HOOKS / "push_guard.py").unlink()
     with pytest.raises(module.NotRun, match=r"push_guard\.py"):
-        module.tree_kit(root)
+        module.tree_kit(root, "o/r")
 
 
 def test_the_tree_kit_is_every_as_is_answer_under_claude() -> None:
@@ -2363,7 +2366,7 @@ def test_plan_tree_sorts_current_stale_and_edited(tmp_path: Path) -> None:
     root = tree(tmp_path / "наше", **{"step-пример": MARKED})
     name = module.paths.HOOKS / "push_guard.py"
     old = (root / name).read_text(encoding="utf-8")
-    assert module.blob_of(old) in module.blobs_in_history(root, name)
+    assert module.blob_of(old) in module.blobs_in_history(root, name, module.shape_of(name, "o/r"))
     commit_hook(root, "push_guard.py", "#!/bin/sh\n# новый\n")
     ours = {name: "#!/bin/sh\n# новый\n"}
     consumer = tmp_path / "потребитель"
@@ -2371,5 +2374,118 @@ def test_plan_tree_sorts_current_stale_and_edited(tmp_path: Path) -> None:
         (consumer / name).parent.mkdir(parents=True, exist_ok=True)
         (consumer / name).write_text(mine, encoding="utf-8")
         plan = module.Update()
-        module.plan_tree(plan, consumer, ours, root)
+        module.plan_tree(plan, consumer, ours, root, "o/r")
         assert name in getattr(plan, where), (mine, plan)
+
+
+# --- навыки окна копией (#1552) ---------------------------------------------
+
+
+def test_the_skills_kit_is_every_as_is_skill_answer() -> None:
+    """Копией кладётся ровно то, что перепись навыков зовёт `as-is` (#1552)."""
+    answers = json.loads((ROOT / module.paths.PORTABLE).read_text(encoding="utf-8"))["answers"]
+    as_is = {
+        Path(path) / "SKILL.md"
+        for path, said in answers.items()
+        if path.startswith(f"{module.paths.SKILLS}/") and said["answer"] == "as-is"
+    }
+    assert as_is == set(module.SKILLS_KITTED)
+
+
+@pytest.mark.parametrize(
+    ("said", "laid"),
+    [
+        ("`python scripts/work_plan.py`", "`bash .claude/mechanisms.sh work_plan.py`"),
+        ("python3 scripts/scope.py --x", "bash .claude/mechanisms.sh scope.py --x"),
+        ("python scripts/preflight.py --push", "bash .claude/preflight.sh --push"),
+        ("держит `tests/test_x.py`.", "держит `tests/test_x.py` поставщика."),
+        (
+            "`docs/dev/gaps.md` и `docs/agent/roles.md`",
+            "`docs/dev/gaps.md` поставщика и `docs/agent/roles.md`",
+        ),
+        ("решение владельца, #639; ## 5", "решение владельца, o/r#639; ## 5"),
+        ("уже o/r#12 и x/y#7 и issues/12#c", "уже o/r#12 и x/y#7 и issues/12#c"),
+    ],
+    ids=[
+        "команда",
+        "python3-с-доводом",
+        "предполётная",
+        "тест-поставщика",
+        "документ-свой-и-чужой",
+        "голый-номер",
+        "полный-адрес-не-трогается",
+    ],
+)
+def test_skill_kit_calls_through_the_launcher_and_names_supplier_refs(said: str, laid: str) -> None:
+    """Команда навыка у потребителя — запускателем, ссылка на наше — «поставщика»."""
+    assert module.skill_kit(said, "o/r") == laid
+    assert module.skill_kit(laid, "o/r") == laid, "подстановка не идемпотентна"
+
+
+def test_split_head_keeps_the_frontmatter_first() -> None:
+    """Лицензия у навыка — после заголовка YAML: перед ним навык не прочёлся бы."""
+    text = "---\nname: x\n---\n\nтело\n"
+    path = module.paths.SKILLS / "x" / "SKILL.md"
+    assert module.split_head(text) == ("---\nname: x\n---\n", "\nтело\n")
+    signed = module.licensed(path, text, "o/r")
+    assert signed.startswith("---\nname: x\n---\n<!-- " + module.LICENSE_ID), signed
+    assert module.is_signed(path, signed)
+    assert module.unsigned(path, signed) == text
+    assert module.split_head("---\nбез конца\n") == ("", "---\nбез конца\n")
+
+
+def test_update_lifts_a_stale_skill_through_its_shape(tmp_path: Path) -> None:
+    """Старая копия навыка — с подстановкой — узнаётся по истории и поднимается."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    skill = module.SKILLS_KITTED[0]
+    laid = (consumer / skill).read_text(encoding="utf-8")
+    assert "bash .claude/mechanisms.sh work_plan.py" in laid, laid
+    (root / skill).write_text(
+        "---\nname: x\n---\n\nНовое: `python scripts/x.py`.\n", encoding="utf-8"
+    )
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "commit", "--quiet", "-am", "навык"], check=True, timeout=30)
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    assert "bash .claude/mechanisms.sh x.py" in (consumer / skill).read_text(encoding="utf-8")
+
+
+def test_a_shallow_supplier_clone_is_refused_with_its_reason(tmp_path: Path) -> None:
+    """Мелкий клон — отказ с причиной, а не «правлено» и совет нести задачу (взгляд на #1619)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    shallow = tmp_path / "мелкий"
+    subprocess.run(
+        ["git", "clone", "--quiet", "--depth", "1", root.as_uri(), str(shallow)],
+        check=True,
+        timeout=60,
+    )
+    with pytest.raises(module.NotRun, match="клон поставщика мелкий"):
+        module.blobs_in_history(shallow, module.paths.HOOKS / "push_guard.py", str)
+
+
+@pytest.mark.parametrize(
+    ("mine", "where", "after"),
+    [
+        ("want=3.12\n", "write", "want=3.14\n"),
+        ("want=3.15\n", "current", "want=3.15\n"),
+        ("# свой\n", "edited", "# свой\n"),
+    ],
+    ids=["ниже-поднять", "выше-оставить", "без-строки"],
+)
+def test_plan_floor_lifts_only_a_lower_floor(
+    tmp_path: Path, mine: str, where: str, after: str
+) -> None:
+    """Планка хуков ниже нашей поднимается, выше — выбор проекта (взгляд на #1619, 195)."""
+    (tmp_path / module.paths.FLOOR).parent.mkdir(parents=True)
+    (tmp_path / module.paths.FLOOR).write_text(f"# пояснение\n{mine}", encoding="utf-8")
+    plan = module.Update()
+    module.plan_floor(plan, tmp_path, "# наш\nwant=3.14\n")
+    assert module.paths.FLOOR in getattr(plan, where), plan
+    if where == "write":
+        assert plan.write[module.paths.FLOOR] == f"# пояснение\n{after}"
+
+
+def test_version_of_compares_numbers_not_strings() -> None:
+    """`3.9` ниже `3.14`: строкой сравнение вышло бы наоборот."""
+    assert module.version_of("3.9") < module.version_of("3.14")
