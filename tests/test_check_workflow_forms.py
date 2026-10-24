@@ -195,9 +195,24 @@ def test_our_tree_is_clean() -> None:
 
 
 def test_the_gate_refuses_a_red_tree_with_its_exit(tmp_path: Path) -> None:
-    """Прогон отказа: дерево с формой — исход «отвергнуто», а не «чисто» (140)."""
+    """Прогон отказа: дерево с формой при `--enforce` — «отвергнуто», а не «чисто» (140)."""
     root = tree(tmp_path, {"a.yml": CLEAN.replace("@v2.1.0", "@main")})
-    assert module.main(["--root", str(root)]) == module.EXIT_REJECTED
+    assert module.main(["--root", str(root), "--enforce"]) == module.EXIT_REJECTED
+
+
+def test_without_enforce_a_form_is_a_warning_with_its_place(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """У потребителя без `--enforce` форма — предупреждение, а не красный шаг (`c6f9696`).
+
+    Дерево, писанное без гейта, иначе краснело бы с первым подъёмом тега (051);
+    найденное при этом не молчит: аннотация на каждую форму и итог числом.
+    """
+    root = tree(tmp_path, {"a.yml": CLEAN.replace("@v2.1.0", "@main")})
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert said.count("::warning::") == len(found(root)) >= 1, said
+    assert "предупреждено: опасных форм прогонов" in said, said
 
 
 @pytest.mark.parametrize(

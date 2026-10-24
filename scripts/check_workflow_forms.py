@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import catalogue
+import check_deadline
 import paths
 import yaml
 
@@ -256,6 +257,9 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
+    parser.add_argument(
+        "--enforce", action="store_true", help="найденное — отказ, а не предупреждение"
+    )
     args = parser.parse_args(argv)
     try:
         found = look(args.root)
@@ -263,13 +267,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if found:
+        # У ПОТРЕБИТЕЛЯ — ПРЕДУПРЕЖДЕНИЕ, ОТКАЗ — КЛЮЧОМ `--enforce` (взгляд на
+        # #1634, `c6f9696`): шаг `pipeline` судит дерево потребителя, писанное
+        # без гейта, и без выключателя краснел бы с первым подъёмом тега (051).
+        # Приём и вход — те же, что у дедлайна (`mechanism-gates-enforce`).
+        level = "error" if args.enforce else "warning"
+        for one in found:
+            print(f"::{level}::{check_deadline.escaped(one, prop=False)}")
+        verdict = "отвергнуто" if args.enforce else "предупреждено"
         print(
-            f"отвергнуто: опасных форм прогонов {len(found)} — они уехали бы к каждому потребителю"
+            f"{verdict}: опасных форм прогонов {len(found)} — они уехали бы к каждому потребителю"
         )
         for one in found:
             print(f"  {one}")
         print("Перечень форм и исключения — шапка scripts/check_workflow_forms.py (#1430).")
-        return EXIT_REJECTED
+        return EXIT_REJECTED if args.enforce else EXIT_OK
     print(f"опасных форм в прогонах нет ({len(files(args.root))} файлов)")
     return EXIT_OK
 
