@@ -674,6 +674,12 @@ def test_compare_facts_names_the_move() -> None:
     assert fc.compare_facts("2.0", "2.1").state == "behind"
 
 
+def test_compare_facts_is_signed_by_the_repository_it_read() -> None:
+    """Связь фактов подписана тем издателем, у кого прочитан номер (`4e67128`)."""
+    assert fc.compare_facts("2.0", "2.1", "o/переименован").publisher == "o/переименован"
+    assert fc.compare_facts("2.0", "2.1").publisher == fc.family_uptake.OURS
+
+
 def test_read_summary_by_address_and_path(tmp_path: Path) -> None:
     """Сводка по адресу — общим транспортом; отказ и чужая форма — беда с адресом."""
     url = "https://example.test/family.json"
@@ -811,6 +817,7 @@ def test_a_renamed_mechanisms_publisher_still_gives_the_facts_deal(tmp_path: Pat
     links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
     (link,) = [one for one in links if one["what"] == "facts"]
     assert link["state"] == "ok", link
+    assert link["publisher"] == "New/Mechanisms", link  # подпись — тот, у кого номер (`4e67128`)
 
 
 def test_the_answer_is_read_where_the_table_puts_it(tmp_path: Path) -> None:
