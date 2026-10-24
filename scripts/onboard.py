@@ -977,6 +977,10 @@ SKILL_CALL: Final = re.compile(r"\bpython3? scripts/([A-Za-z0-9_]+\.py)")
 #: уже подписанное «поставщика» в исходнике, подпись теряет и получает адрес;
 #: имя внутри ссылки разметки (`[` перед ним) — уже адрес, и оно не трогается.
 SUPPLIER_REF: Final = re.compile(r"(?<!\[)`((?:scripts|tests|docs)/[^`\s]+)`(?: поставщика)?")
+#: Подпись ссылки разметки — `[…](`: имя внутри неё уже часть адреса, где бы в
+#: подписи оно ни стояло (`[см. \`scripts/x.py\`](…)`), и в ссылку не оборачивается:
+#: иначе вышла бы ссылка в ссылке (взгляд на #1639, `c2f998a`).
+LINK_LABEL: Final = re.compile(r"\[[^\[\]\n]*\]\(")
 #: Относительная ссылка разметки в тексте навыка: цель отсчитывается от его каталога.
 SKILL_LINK: Final = re.compile(r"\]\((?P<target>\.\./[^)\s#]+)(?P<anchor>#[^)\s]*)?\)")
 #: Каталог навыка от корня дерева: `.claude/skills/<имя>/` — у всех навыков один.
@@ -1002,6 +1006,8 @@ def skill_kit(text: str, repo: str) -> str:
         )
 
     def ref(found: re.Match[str]) -> str:
+        if any(start < found.start() < end for start, end in labels):
+            return found[0]
         # Документ, который заход кладёт потребителю (`docs/agent/roles.md`), —
         # его собственный: ссылка на него ведёт в его дерево.
         file = found[1].split("::", 1)[0]
@@ -1030,7 +1036,9 @@ def skill_kit(text: str, repo: str) -> str:
         prefix = "".join(f"{part}/" for part in base)
         return f"](https://github.com/{repo}/blob/{paths.TRUNK}/{prefix}{rest})"
 
-    shaped = SUPPLIER_REF.sub(ref, SKILL_CALL.sub(call, text))
+    called = SKILL_CALL.sub(call, text)
+    labels = [one.span() for one in LINK_LABEL.finditer(called)]
+    shaped = SUPPLIER_REF.sub(ref, called)
     shaped = SKILL_LINK.sub(link, shaped)
     return BARE_ISSUE.sub(rf"{repo}#\1", shaped)
 

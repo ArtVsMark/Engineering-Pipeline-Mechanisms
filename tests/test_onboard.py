@@ -2599,15 +2599,25 @@ def test_the_bindings_note_reads_the_consumers_path_table(tmp_path: Path) -> Non
 
 
 def test_a_kitted_skill_names_no_supplier_file_without_its_address() -> None:
-    """Наш файл в навыке потребителя — ссылкой на дерево поставщика, а не именем (#1637)."""
+    """Наш файл в навыке потребителя — ссылкой на дерево поставщика, а не именем (#1637).
+
+    И не ссылкой внутри ссылки: подпись с адресом в ней адресом не считается
+    (`aa56ac6`) — такая разметка ломается, и имя снова без адреса.
+    """
     bare = re.compile(r"(?<!\[)`([^`\s]+)` поставщика")
-    left = {
-        str(skill): bare.findall(
-            module.skill_kit((ROOT / skill).read_text(encoding="utf-8"), "o/r")
-        )
-        for skill in module.SKILLS_KITTED
-    }
+    nested = re.compile(r"\[[^\]\n]*\[[^\]\n]*\]\([^)\s]*\)[^\]\n]*\]\(")
+    left = {}
+    for skill in module.SKILLS_KITTED:
+        laid = module.skill_kit((ROOT / skill).read_text(encoding="utf-8"), "o/r")
+        left[str(skill)] = bare.findall(laid) + [one[0] for one in nested.finditer(laid)]
     assert {skill: names for skill, names in left.items() if names} == {}
+
+
+def test_the_gate_sees_a_link_inside_a_link() -> None:
+    """Сам гейт краснеет на ссылке в ссылке — подпись с адресом не прячет имя (`aa56ac6`)."""
+    nested = re.compile(r"\[[^\]\n]*\[[^\]\n]*\]\([^)\s]*\)[^\]\n]*\]\(")
+    assert nested.search("[см. [`scripts/x.py`](https://o/r) поставщика](../a.md)")
+    assert not nested.search("[`scripts/x.py`](https://o/r) поставщика и [b](../a.md)")
 
 
 @pytest.mark.parametrize(
@@ -2624,9 +2634,10 @@ def test_a_kitted_skill_names_no_supplier_file_without_its_address() -> None:
             " поставщика",
         ),
         ("[`docs/x.md`](https://a/b) уже адрес", "[`docs/x.md`](https://a/b) уже адрес"),
+        ("[см. `scripts/x.py`](https://a/b) адрес", "[см. `scripts/x.py`](https://a/b) адрес"),
         ("`docs/agent/roles.md` свой", "`docs/agent/roles.md` свой"),
     ],
-    ids=["имя", "хвост-функции-и-подпись", "уже-ссылка", "кладётся-потребителю"],
+    ids=["имя", "хвост-функции-и-подпись", "уже-ссылка", "имя-в-подписи", "кладётся-потребителю"],
 )
 def test_a_supplier_name_becomes_a_link_to_its_file(said: str, laid: str) -> None:
     """Имя — ссылкой на файл, хвост `::функция` — на свой файл; адрес и своё не трогаются."""
