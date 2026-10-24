@@ -72,6 +72,14 @@ if [ ! -f "$cache/scripts/preflight.py" ]; then
   # `mv`: `mv` на занятый каталог кладёт копию ВНУТРЬ него. Отказ переноса —
   # код 1 без слов; интерпретатор, который не запускается, назван заранее, а
   # не читается «кеш неполон» (взгляд на #1640).
+  # ОСТАТОК — недокачанный кеш без `preflight.py` — оставляет только прежний
+  # запускатель, писавший прямо в кеш (до `1f31aee0`): нынешний кладёт кеш
+  # одним переименованием готовой копии. Остаток не уносится, а называется:
+  # любой перенос каталога кеша мог бы унести готовый кеш соседа, ставший на
+  # его место между проверкой и переносом (взгляды на #1640), — без переноса
+  # гонке негде случиться. Стереть разовый остаток — одно действие человека.
+  [ -d "$cache" ] && [ ! -f "$cache/scripts/preflight.py" ] \
+    && refuse "кеш механизмов $cache неполон — остаток прежнего запускателя; удалите его, и следующий заход выкачает заново"
   "${PYTHON:-python3}" -c '' 2>/dev/null \
     || refuse "интерпретатор ${PYTHON:-python3} не запускается — переносить кеш нечем"
   swap() {
@@ -86,40 +94,14 @@ except OSError:
   rm -rf "$part"
   "$deadline" 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$part" \
     || { rm -rf "$part"; refuse "механизмы $supplier@$tag не выкачаны из $origin"; }
-  # ОСТАТОК — недокачанный кеш без `preflight.py` (`3341be3`) — уходит в сторону
-  # и стирается уже там. Проверка, перенос и сверка — ОДНИМ процессом: каталог,
-  # унесённый в сторону, сверяется по inode с тем, что был признан остатком, и
-  # готовый или подменённый соседом возвращается на место. Прежде проверка шла
-  # в оболочке, а перенос — отдельным процессом, и сосед, поставивший готовый
-  # кеш между ними, терял его на время возврата (взгляд на #1640). Окно между
-  # переносом и возвратом осталось — одна пара системных вызовов, а не два
-  # запуска интерпретатора; закрыть его нечем без обмена каталогов, которого
-  # у `os` нет.
-  stale="$cache.stale.$$"
-  retired=0
-  "${PYTHON:-python3}" -c '
-import os, sys
-cache, stale = sys.argv[1:3]
-ready = lambda where: os.path.isfile(os.path.join(where, "scripts", "preflight.py"))
-try:
-    seen = os.stat(cache)
-    if ready(cache):
-        sys.exit(0)
-    os.rename(cache, stale)
-except OSError:
-    sys.exit(0)
-moved = os.stat(stale)
-if (moved.st_dev, moved.st_ino) != (seen.st_dev, seen.st_ino) or ready(stale):
-    try:
-        os.rename(stale, cache)
-    except OSError:
-        pass
-    sys.exit(0)
-sys.exit(3)' "$cache" "$stale" || retired=$?
-  if [ "$retired" = 3 ]; then rm -rf "$stale"; fi
+  # Выкачка без `preflight.py` — не механизмы (ссылка `uses:` не на поставщика
+  # или тег не того дерева): на место кеша она не встаёт, иначе следующий заход
+  # назвал бы её «остатком прежнего запускателя» (взгляд на #1642).
+  [ -f "$part/scripts/preflight.py" ] \
+    || { rm -rf "$part"; refuse "в $supplier@$tag нет scripts/preflight.py — по тегу выкачаны не механизмы"; }
   swap "$part" "$cache" || rm -rf "$part"
   [ -f "$cache/scripts/preflight.py" ] \
-    || refuse "кеш механизмов $cache неполон и не заменён — удалите его, и следующий заход выкачает заново"
+    || refuse "кеш механизмов $cache не встал на место: перенос выкачки отказал"
 fi
 [ -f "$cache/scripts/$script" ] || refuse "в механизмах $supplier@$tag нет scripts/$script"
 
