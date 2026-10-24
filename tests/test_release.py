@@ -1320,8 +1320,13 @@ def test_a_tail_without_its_number_or_apply_is_refused(
 
 @pytest.mark.parametrize(
     ("version", "tagged", "said"),
-    [("1.2.3", True, ""), ("", True, "Номер выпуска не назван"), ("1.2.4", True, "Время тега")],
-    ids=["граница-тега", "без-номера", "тега-нет"],
+    [
+        ("1.2.3", True, ""),
+        ("", True, "Номер выпуска не назван"),
+        ("1.2.4", True, "Время тега"),
+        ("1.2.3", False, "Время тега"),
+    ],
+    ids=["граница-тега", "без-номера", "тег-другой", "тегов-нет"],
 )
 def test_the_tail_frees_only_the_labels_of_its_release(
     tmp_path: Path, version: str, tagged: bool, said: str
