@@ -2631,3 +2631,38 @@ def test_a_kitted_skill_names_no_supplier_file_without_its_address() -> None:
 def test_a_supplier_name_becomes_a_link_to_its_file(said: str, laid: str) -> None:
     """Имя — ссылкой на файл, хвост `::функция` — на свой файл; адрес и своё не трогаются."""
     assert module.skill_kit(said, "o/r") == laid
+
+
+def directions_of(text: str) -> list[str]:
+    """Названия направлений карты: первая клетка строк таблиц, кроме шапки."""
+    return [
+        line.split("|")[1].strip()
+        for line in text.splitlines()
+        if line.startswith("| ") and not line.startswith(("| Направление", "|---"))
+    ]
+
+
+def test_the_directions_kit_carries_every_direction_of_our_map() -> None:
+    """Заготовка карты несёт ровно наши направления, по разделам (взгляд на #1647).
+
+    Направления — правила 082, у потребителя те же; новое направление в нашей
+    карте без этой сверки до заготовки не дошло бы, и ничего не покраснело бы.
+    """
+    ours = (ROOT / module.paths.DIRECTIONS).read_text(encoding="utf-8")
+    kit = (ROOT / module.DATA_KIT / module.paths.DIRECTIONS).read_text(encoding="utf-8")
+    assert directions_of(ours), "в нашей карте не найдено ни одного направления (075)"
+    assert directions_of(kit) == directions_of(ours)
+    sections = [line for line in ours.splitlines() if line.startswith("## ")]
+    kit_sections = [line for line in kit.splitlines() if line.startswith("## ")]
+    assert kit_sections == sections[: len(kit_sections)] and kit_sections, kit_sections
+
+
+def test_the_mechanism_rules_kit_carries_every_rule_of_our_census() -> None:
+    """Заготовка переписи несёт те же правила о механизмах, без наших мест (взгляд на #1647)."""
+    ours = json.loads((ROOT / module.paths.MECHANISM_RULES).read_text(encoding="utf-8"))
+    kit = json.loads(
+        (ROOT / module.DATA_KIT / module.paths.MECHANISM_RULES).read_text(encoding="utf-8")
+    )
+    assert sorted(kit["rules"]) == sorted(ours["rules"])
+    assert all(places == {} for places in kit["rules"].values()), "в заготовке наши места"
+    assert kit["места"] == {}
