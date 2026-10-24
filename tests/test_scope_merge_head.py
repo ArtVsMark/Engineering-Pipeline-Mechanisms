@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_scope_again import commit, git, green_head, platform, scope, tree, write
+from tests.test_scope import git
+from tests.test_scope_again import commit, green_head, platform, scope, tree, write
 
 
 def test_the_merge_commit_excludes_the_change_head(

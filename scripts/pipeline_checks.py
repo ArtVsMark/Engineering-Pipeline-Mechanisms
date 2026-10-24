@@ -465,7 +465,7 @@ def foreign(supplier: Path | None) -> bool:
     """
     if supplier is None:
         return False
-    here = os.environ.get("GITHUB_REPOSITORY", "").lower() or supplier_repo(Path.cwd())
+    here = os.environ.get("GITHUB_REPOSITORY", "").lower() or supplier_repo(Path())
     there = supplier_repo(supplier)
     return bool(here and there and here != there)
 

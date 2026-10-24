@@ -42,6 +42,7 @@ import contract
 import gitcall
 import journal
 import paths
+import pipeline_checks
 import report
 
 #: Род фрагмента, которым объявляется правка поверхности.
@@ -185,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.show:
         try:
             print(contract.as_text(contract.surface()))
-        except contract.policy.BadPolicy as exc:
+        except pipeline_checks.BadPolicy as exc:
             print(f"гейт не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
         return EXIT_CLEAN
@@ -201,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             before = contract.surface(base_tree(fork, Path(room)))
         after = contract.surface()
         changes = contract.differences(before, after)
-    except (journal.NotRun, contract.policy.BadPolicy) as exc:
+    except (journal.NotRun, pipeline_checks.BadPolicy) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     except NotRun as exc:
