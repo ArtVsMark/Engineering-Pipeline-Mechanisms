@@ -159,3 +159,75 @@ def test_the_loader_is_laid_by_onboarding() -> None:
     """Загрузчик — заготовка захода подключения, а не файл, который потребитель пишет сам."""
     assert onboard.paths.PREFLIGHT_LOADER in onboard.DATA_KITTED
     assert LOADER.is_file()
+
+
+LAUNCHER: Final = ROOT / onboard.DATA_KIT / onboard.paths.LAUNCHER
+
+
+def launch(tree: Path, tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Позвать запускатель так, как его зовёт навык окна потребителя (#1552)."""
+    env = {
+        **os.environ,
+        "XDG_CACHE_HOME": str(tmp_path / "cache"),
+        "MECHANISMS_ORIGIN": (tmp_path / "origin").as_uri(),
+        "PYTHON": sys.executable,
+    }
+    env.pop("PYTHONPATH", None)
+    return subprocess.run(
+        ["bash", str(LAUNCHER), *args],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        timeout=120,
+    )
+
+
+def test_the_launcher_runs_any_supplier_script_from_the_consumer_root(tmp_path: Path) -> None:
+    """Скрипт выкачки зовётся из корня потребителя, с `MECHANISMS`, без ключей предполётной."""
+    origin = supplier(tmp_path)
+    repo = origin / "o" / "m.git"
+    (repo / "scripts" / "work_plan.py").write_text(
+        "import os, sys\nprint('доводы:', *sys.argv[1:])\nprint('где:', os.getcwd())\n"
+        "print('механизмы:', os.environ['MECHANISMS'])\n",
+        encoding="utf-8",
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "ещё скрипт")
+    git(repo, "tag", "-f", "v1.2.3")
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    done = launch(tree, tmp_path, "work_plan.py", "--apply")
+    assert done.returncode == 0, done.stderr
+    assert "доводы: --apply" in done.stdout and "--root" not in done.stdout, done.stdout
+    assert f"где: {tree.resolve()}" in done.stdout, done.stdout
+    assert "mechanisms/o_m@v1.2.3" in done.stdout, done.stdout
+
+
+@pytest.mark.parametrize(
+    ("args", "said"),
+    [
+        ((), "не назван скрипт"),
+        (("../x.py",), "не имя скрипта"),
+        (("нет.py",), "не имя скрипта"),
+        (("missing.py",), "нет scripts/missing.py"),
+    ],
+    ids=["без-скрипта", "путь", "не-латиница", "нет-такого"],
+)
+def test_the_launcher_refuses_with_a_reason(
+    tmp_path: Path, args: tuple[str, ...], said: str
+) -> None:
+    """Отказ запускателя — исход 2 с причиной: имя вне `scripts/` не зовётся (039)."""
+    supplier(tmp_path)
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    done = launch(tree, tmp_path, *args)
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert said in done.stderr, done.stderr
+
+
+def test_the_preflight_loader_goes_through_the_launcher() -> None:
+    """Выкачка одна (214): у загрузчика предполётной своей нет, он зовёт запускатель."""
+    said = LOADER.read_text(encoding="utf-8")
+    assert "git" not in said.split("set -euo pipefail", 1)[1], "у загрузчика своя выкачка"
+    assert 'mechanisms.sh" preflight.py' in said
+    assert onboard.paths.LAUNCHER in onboard.DATA_KITTED

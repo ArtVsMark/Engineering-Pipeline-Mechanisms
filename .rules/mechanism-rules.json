@@ -12,7 +12,7 @@
       "paths.SOURCES": "tests/test_ghrest.py",
       ".claude/hooks": "исключено: хуки окна к API площадки не ходят — страж толчка спрашивает только локальный git (rev-parse, config), хук старта ходит в PyPI, журнал навыков пишет только свой файл; grep -cE 'graphql|api\\.github|urllib|requests|\\bgh\\b' по .claude/hooks/* — 0 во всех шести файлах (замер 17.10.2026) (без границы слова «gh» ловит «preflight» в session-start.sh — взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
       ".github": "исключено: шаги прогонов к API площадки не обращаются — grep -nE 'gh (api|pr|issue|run|release|workflow|label|repo)|graphql|api.github.com|GITHUB_API_URL|github-script' по .github/workflows/*.yml и .github/actions/*/action.yml — 0; к площадке ходит код scripts/ через packages/transport/ghrest.py (его судит tests/test_ghrest.py), а curl в badges.yml:128 и step-facts.yml:267 качает файлы raw.githubusercontent.com и выпусков, не API",
-      "kit/data": "исключено: загрузчик окна потребителя (kit/data/.claude/preflight.sh, #1553) к API площадки не ходит — git rev-parse локально и git clone тега по https; grep -cE 'graphql|api\\.github|curl|wget|\\bgh\\b' — 0 (замер 23.10.2026); заготовка хука старта (kit/data/.claude/hooks/session-start.sh, #1554) сама в сеть не ходит — установку интерпретатора несёт общий .claude/hooks/install_floor.sh, его ответ у места .claude/hooks; тот же grep по заготовке — 0 (замер 24.10.2026)"
+      "kit/data": "исключено: запускатель окна потребителя (kit/data/.claude/mechanisms.sh, #1552) и загрузчик предполётной поверх него (preflight.sh, #1553) к API площадки не ходят — git rev-parse локально и git clone тега по https; grep -cE 'graphql|api\\.github|curl|wget|\\bgh\\b' — 0 (замер 23.10.2026); заготовка хука старта (kit/data/.claude/hooks/session-start.sh, #1554) сама в сеть не ходит — установку интерпретатора несёт общий .claude/hooks/install_floor.sh, его ответ у места .claude/hooks; тот же grep по заготовке — 0 (замер 24.10.2026)"
     },
     "016": {
       "paths.SOURCES": "tests/test_report.py",
@@ -78,7 +78,7 @@
       "paths.SOURCES": "исключено: правило об именах переменных оболочки, а paths.SOURCES — Python: code_files берёт *.py, файлов *.sh в scripts/ и packages/transport/ — 0 (find)",
       ".claude/hooks": "не построено: оболочечные хуки (floor.sh, push_guard.sh, session-start.sh, skill_log.sh) на латиницу имён не сверяются — tests/test_source_hygiene.py::test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 17.10.2026 тем же SHELL_ASSIGN_RE по .claude/hooks/*.sh: присваиваний 11, не ASCII 0",
       ".github": "tests/test_source_hygiene.py",
-      "kit/data": "не построено: оболочечный загрузчик на латиницу имён не сверяется — test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 23.10.2026: присваиваний 6, не ASCII 0; заготовка хука старта и floor.sh (#1554) — присваиваний 2, не ASCII 0 (замер 24.10.2026)"
+      "kit/data": "не построено: оболочечный загрузчик на латиницу имён не сверяется — test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 23.10.2026: присваиваний 6, не ASCII 0; после выноса выкачки в запускатель (#1552) — присваиваний 8 (запускатель 7, загрузчик 1), не ASCII 0 (замер 24.10.2026); заготовка хука старта и floor.sh (#1554) — присваиваний 2, не ASCII 0 (замер 24.10.2026)"
     },
     "176": {
       "paths.SOURCES": "tests/test_source_hygiene.py",
@@ -93,7 +93,7 @@
       },
       ".claude/hooks": "не построено: check_reached_by_work.py судит добавленное в paths.SOURCES (neighbour.touched) и рабочим путём считает paths.SOURCES и прогоны — хук окна не входит ни туда, ни туда — замер 17.10.2026 тем же предикатом mentioned/reached по .claude/hooks/*.py (рабочие пути: .claude/settings.json → push_guard.sh → push_guard.py::main и .claude/settings.json → skill_log.sh → skill_log.py::main; разовый разбор окна, в дерево не положен — признак назван здесь же): функций и классов верхнего уровня 21, без рабочего пути 0",
       ".github": "исключено: прогон — точка входа площадки, а не имя кода: reached() засчитывает имя, названное шагом (RUNS = paths.WORKFLOWS), а общие шаги step-*.yml — поверхность для потребителей, вызываемость которой держит tests/test_reusable_steps.py::test_every_step_is_actually_callable",
-      "kit/data": "не построено: check_reached_by_work.py судит paths.SOURCES, а загрузчик лежит в kit/data — путь работы заход подключения (DATA_KITTED) → заготовка kit/AGENTS.md называет `bash .claude/preflight.sh` — замер 23.10.2026: имён 1, на пути работы 1 (tests/test_consumer_preflight.py::test_the_loader_is_laid_by_onboarding)"
+      "kit/data": "не построено: check_reached_by_work.py судит paths.SOURCES, а загрузчик лежит в kit/data — путь работы заход подключения (DATA_KITTED) → заготовка kit/AGENTS.md называет `bash .claude/preflight.sh` — замер 23.10.2026: имён 1, на пути работы 1 (tests/test_consumer_preflight.py::test_the_loader_is_laid_by_onboarding); запускатель kit/data/.claude/mechanisms.sh (#1552) — на том же пути: его зовёт загрузчик предполётной"
     },
     "212": {
       "paths.SOURCES": "tests/test_lists_are_read_to_the_end.py",
@@ -114,7 +114,7 @@
       },
       ".claude/hooks": "tests/test_session_start.py",
       ".github": "tests/test_python_after_setup.py",
-      "kit/data": "не построено: интерпретатор загрузчик не выбирает — зовёт PYTHON окна (по умолчанию python3), а предполётная на чужом корне окружение не сверяет: environment_gap печатает «окружение НЕ сверено» (scripts/preflight.py) — замер 24.10.2026: выборов интерпретатора в загрузчике 1 (${PYTHON:-python3}), сверок планки у потребителя 0"
+      "kit/data": "не построено: интерпретатор загрузчик не выбирает — зовёт PYTHON окна (по умолчанию python3), а предполётная на чужом корне окружение не сверяет: environment_gap печатает «окружение НЕ сверено» (scripts/preflight.py) — замер 24.10.2026: выборов интерпретатора в запускателе 1 (${PYTHON:-python3}), сверок планки у потребителя 0"
     }
   },
   "суждение": {
