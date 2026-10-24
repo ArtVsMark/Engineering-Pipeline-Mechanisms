@@ -57,6 +57,7 @@
 """
 
 import argparse
+import functools
 import os
 import sys
 import time
@@ -146,6 +147,24 @@ RANK_NAMES: Final = {
 #: Ошибка тут дешёвая — порядок слияния, а не решение о слиянии, — а точного
 #: признака у долга по правилам в дереве нет вовсе.
 RULES_ANSWER: Final = f"{paths.BINDINGS}"
+
+
+@functools.cache
+def rules_answer() -> str:
+    """Ответ каталогу по таблице путей дерева (#1632); битая таблица — умолчание С ПОМЕТКОЙ.
+
+    Ступень очереди — порядок, а не допуск: отказать всей очереди из-за битого
+    раздела путей значило бы остановить слияния, а его уже красит сверка ответа
+    (`check_pipeline`). Поэтому умолчание, но названное в журнале (045).
+    """
+    try:
+        return policy.project_path("bindings").as_posix()
+    except paths.BadPaths as exc:
+        print(
+            f"::warning::таблица путей не разобрана, ответ — по умолчанию: {exc}", file=sys.stderr
+        )
+        return RULES_ANSWER
+
 
 #: Состояние изменения, при котором площадка сама говорит «слить нечем».
 STATE_CONFLICT: Final = "dirty"
@@ -448,7 +467,7 @@ def rank(change: Change) -> int:
         return RANK_FINDINGS
     if LABEL_BLOCKER in change.marks:
         return RANK_OWNER
-    if RULES_ANSWER in change.files:
+    if rules_answer() in change.files:
         return RANK_RULES
     return RANK_PLAN
 

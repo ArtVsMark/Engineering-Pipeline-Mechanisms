@@ -38,6 +38,7 @@ from typing import Any, Final
 import findings
 import ghrest
 import paths
+import pipeline_checks as policy
 import report
 
 #: Объявление расписаний — то же, по которому держится цена захода (022).
@@ -106,8 +107,12 @@ class Seen:
         return f"- `{self.name}` (`{self.cron}`) — {about}"
 
 
-def declared(where: Path = DECLARED) -> dict[str, str]:
-    """Объявленные расписания: файл прогона → выражение cron."""
+def declared(where: Path | None = None) -> dict[str, str]:
+    """Объявленные расписания: файл прогона → выражение cron; путь — по таблице путей (#1632)."""
+    try:
+        where = where or policy.project_path("schedules")
+    except paths.BadPaths as exc:
+        raise NotRun(f"объявление расписаний не найдено: {exc}") from exc
     try:
         document: dict[str, Any] = json.loads(where.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

@@ -2842,7 +2842,12 @@ def test_unread_proposals_do_not_silence_the_export_drift(
     proposals = tmp_path / "proposals.json"
     if written is not None:
         proposals.write_text(written, encoding="utf-8")
-    monkeypatch.setattr(module.paths, "PROPOSALS", proposals)
+    real = module.ours_path
+    monkeypatch.setattr(
+        module,
+        "ours_path",
+        lambda key, root=None: proposals if key == "proposals" else real(key, root),
+    )
     found = module.catalogue_asked({"rules": [], "count": 3, "candidates": []}, {"rules": {}})
     assert [one.source for one in found] == ["rules-count"], found
     if written is not None:
@@ -2861,7 +2866,12 @@ def test_a_broken_proposals_file_silences_only_its_own_source(
     """
     broken = tmp_path / "proposals.json"
     broken.write_text("{не json", encoding="utf-8")
-    monkeypatch.setattr(module.paths, "PROPOSALS", broken)
+    real = module.ours_path
+    monkeypatch.setattr(
+        module,
+        "ours_path",
+        lambda key, root=None: broken if key == "proposals" else real(key, root),
+    )
     monkeypatch.setattr(module, "fetch", lambda url: {"count": 0, "candidates": []})
     for name in (
         "family_summary",

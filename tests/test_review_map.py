@@ -306,7 +306,8 @@ def test_the_head_is_compared_as_given(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(module.subprocess, "run", fake)
     module.touches_the_answer("HEAD", "FETCH_HEAD")
-    assert seen and seen[0][seen[0].index("-z") + 1 : seen[0].index("-z") + 3] == [
+    diff = [cmd for cmd in seen if "-z" in cmd]
+    assert diff and diff[0][diff[0].index("-z") + 1 : diff[0].index("-z") + 3] == [
         "HEAD",
         "FETCH_HEAD",
     ], seen

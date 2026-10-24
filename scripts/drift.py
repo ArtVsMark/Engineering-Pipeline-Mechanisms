@@ -187,14 +187,27 @@ def ours_file(path: Path, *, missing: str) -> dict[str, Any]:
     return said
 
 
+def ours_relative(key: str, root: Path | None = None) -> Path:
+    """Адрес нашего файла от корня по таблице путей (#1632); битая таблица — отказ источника."""
+    try:
+        return pipeline_checks.project_path(key, root or Path())
+    except paths.BadPaths as exc:
+        raise NotRun(f"таблица путей не разобрана: {exc}") from exc
+
+
+def ours_path(key: str, root: Path | None = None) -> Path:
+    """Наш файл по таблице путей дерева — для чтения."""
+    return (root or Path()) / ours_relative(key, root)
+
+
 def ours_proposals() -> dict[str, Any]:
     """Наши предложения каталогу — из дерева."""
-    return ours_file(paths.PROPOSALS, missing="канал предложений не подключён")
+    return ours_file(ours_path("proposals"), missing="канал предложений не подключён")
 
 
 def ours() -> dict[str, Any]:
     """Наш живой ответ каталогу — из дерева, а не из чужого снимка."""
-    return ours_file(paths.BINDINGS, missing="сверять снимок не с чем")
+    return ours_file(ours_path("bindings"), missing="сверять снимок не с чем")
 
 
 #: Наши файлы, отвечающие контрактам каталога: имя контракта → путь и ключ
@@ -227,7 +240,9 @@ def ours_by_contract(mine: dict[str, Any], root: Path | None = None) -> list[tup
     """
     said: list[tuple[str, str, str]] = []
     base = root or Path()
-    for name, path in OUR_CONTRACTS:
+    for name, _ in OUR_CONTRACTS:
+        # Ключ контракта — он же ключ таблицы путей: адрес по таблице дерева.
+        path = ours_relative(name, base).as_posix()
         if name == "bindings":
             said.append((name, path, str(mine.get("schema") or "")))
             continue
@@ -1961,7 +1976,7 @@ def proposals_answered(answer: dict[str, Any], mine: dict[str, Any], project: st
 
 def ours_showcase() -> dict[str, Any]:
     """Наш набор вопросов витрины — из дерева."""
-    return ours_file(paths.SHOWCASE, missing="сверять набор вопросов не с чем")
+    return ours_file(ours_path("showcase"), missing="сверять набор вопросов не с чем")
 
 
 def asked_ids(said: dict[str, Any]) -> list[str]:

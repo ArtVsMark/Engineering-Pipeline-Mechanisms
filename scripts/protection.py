@@ -31,6 +31,7 @@ from typing import Any, Final
 
 import ghrest
 import paths
+import pipeline_checks as policy
 
 #: Правило набора, несущее список обязательных контекстов.
 CHECKS_RULE: Final = "required_status_checks"
@@ -42,7 +43,10 @@ class NotRead(RuntimeError):
 
 def declared(where: Path | None = None) -> dict[str, Any]:
     """Объявленная защита общей ветки — из дерева."""
-    path = where or paths.PROTECTION
+    try:
+        path = where or policy.project_path("protection")
+    except paths.BadPaths as exc:
+        raise NotRead(f"защита общей ветки не найдена: {exc}") from exc
     if not path.is_file():
         raise NotRead(f"нет {path}: защита общей ветки не объявлена (075)")
     said: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))

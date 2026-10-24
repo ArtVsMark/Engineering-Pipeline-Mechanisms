@@ -86,6 +86,7 @@ import finding_kinds
 import findings
 import ghrest
 import paths
+import pipeline_checks as policy
 import trunk_log
 from report import announce
 
@@ -393,8 +394,19 @@ def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> So
     обрезанная история — молчание раздела, а не меньший счёт (045). `bodies`
     подставляет историю для прогона на подделках.
     """
-    declared = where or paths.FINDING_KINDS
-    queue_path = declared.parent / paths.PROPOSALS.name
+    try:
+        if where is None:
+            # Адреса — по таблице путей дерева (#1632); подделка зовёт с `where`,
+            # и тогда соседи лежат рядом с ним, как прежде.
+            declared = policy.project_path("finding-kinds")
+            queue_path = policy.project_path("proposals")
+            answer_path = policy.project_path("bindings")
+        else:
+            declared = where
+            queue_path = where.parent / paths.PROPOSALS.name
+            answer_path = where.parent / paths.BINDINGS.name
+    except paths.BadPaths as exc:
+        return Source(unread=f"таблица путей не разобрана: {exc}")
     try:
         said = trunk_log.merged_bodies() if bodies is None else bodies
         unseen = trunk_log.unseen() if bodies is None else 0
@@ -402,7 +414,7 @@ def birth_part(where: Path | None = None, bodies: list[str] | None = None) -> So
         left = finding_kinds.unanswered(
             kinds,
             finding_kinds.queued(queue_path),
-            finding_kinds.known_rules(declared.parent / paths.BINDINGS.name),
+            finding_kinds.known_rules(answer_path),
         )
     except (finding_kinds.NotRun, trunk_log.NotRun) as exc:
         return Source(unread=f"роды находок не прочитаны: {exc}")
