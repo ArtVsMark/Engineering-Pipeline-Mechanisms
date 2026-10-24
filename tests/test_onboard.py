@@ -2424,6 +2424,52 @@ def test_plan_tree_sorts_current_stale_and_edited(tmp_path: Path) -> None:
         assert name in getattr(plan, where), (mine, plan)
 
 
+def test_the_write_lays_the_record_of_what_it_laid(tmp_path: Path) -> None:
+    """Подключение пишет перечень положенного: путь → имя объекта текста (`f7e5ee4`)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    laid = module.laid_of(consumer)
+    guard = module.paths.HOOKS / "push_guard.py"
+    mine = module.unsigned(guard, (consumer / guard).read_text(encoding="utf-8"))
+    assert laid[guard] == module.blob_of(mine)
+    assert set(laid) <= module.LAID_KINDS and module.SKILLS_KITTED[0] in laid
+    said = json.loads((consumer / module.paths.KIT_LAID).read_text(encoding="utf-8"))
+    assert next(iter(said)) == "_license", "перечень положен без подписи"
+
+
+def test_a_copy_the_history_no_longer_shapes_is_stale_by_the_record(tmp_path: Path) -> None:
+    """Копия, положенная прежней подстановкой, — устаревшая по перечню, а не правленая.
+
+    История пропускается через нынешнюю подстановку и такой копии не
+    воспроизводит; без перечня `--update` отказал бы на неправленом (`f7e5ee4`).
+    """
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    name = module.paths.HOOKS / "push_guard.py"
+    ours = {name: "#!/bin/sh\n# новый\n"}
+    consumer = tmp_path / "потребитель"
+    before = "#!/bin/sh\n# положен подстановкой, которой больше нет\n"
+    module.lay(consumer, {name: before}, "o/r")
+    plan = module.Update()
+    module.plan_tree(plan, consumer, ours, root, "o/r")
+    assert name in plan.write, plan
+    (consumer / name).write_text("# свой\n", encoding="utf-8")
+    plan = module.Update()
+    module.plan_tree(plan, consumer, ours, root, "o/r")
+    assert name in plan.edited, "правленая копия перечнем не прощается"
+
+
+def test_a_broken_record_is_not_run(tmp_path: Path) -> None:
+    """Битый перечень — «не отработал» с выходом, а не тихая история (045)."""
+    (tmp_path / module.paths.KIT_LAID).parent.mkdir(parents=True)
+    for said in ('{"laid": {"a": "не-имя"}}', "[]", "{"):
+        (tmp_path / module.paths.KIT_LAID).write_text(said, encoding="utf-8")
+        with pytest.raises(module.NotRun, match="удалите его"):
+            module.laid_of(tmp_path)
+    (tmp_path / module.paths.KIT_LAID).unlink()
+    assert module.laid_of(tmp_path) == {}
+
+
 # --- навыки окна копией (#1552) ---------------------------------------------
 
 

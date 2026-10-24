@@ -882,6 +882,46 @@ def lay(root: Path, files: dict[Path, str], repo: str) -> None:
         # без права на исполнение хук не запустился бы (#1554).
         if text.startswith(SHEBANG):
             (root / path).chmod(0o755)
+    kitted = {path: blob_of(text) for path, text in files.items() if path in LAID_KINDS}
+    if kitted:
+        write_laid(root, {**laid_of(root), **kitted}, repo)
+
+
+#: Пояснение в самом перечне: файл лежит у потребителя, и читает его человек.
+LAID_NOTE: Final = (
+    "Перечень положенного заходом подключения механизмов: путь → имя git-объекта "
+    "текста, положенного последним (без строки лицензии). По нему обновление "
+    "узнаёт неправленую копию. Руками не правится; удалённый — обновление судит "
+    "по истории поставщика, как прежде."
+)
+
+
+def laid_of(consumer: Path) -> dict[Path, str]:
+    """Перечень положенного у потребителя; нет файла — пусто, битый — `NotRun` (045)."""
+    where = consumer / paths.KIT_LAID
+    if not where.is_file():
+        return {}
+    try:
+        said = json.loads(where.read_text(encoding="utf-8"))
+        laid = said["laid"]
+        if not isinstance(laid, dict) or not all(
+            isinstance(one, str) and BLOB_NAME.fullmatch(one) for one in laid.values()
+        ):
+            raise ValueError("«laid» — не отображение путей в имена объектов")
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
+        raise NotRun(
+            f"`{paths.KIT_LAID}` не разобран: {exc} — удалите его, и обновление "
+            "будет судить копии по истории поставщика"
+        ) from exc
+    return {Path(path): blob for path, blob in laid.items()}
+
+
+def write_laid(consumer: Path, laid: dict[Path, str], repo: str) -> None:
+    """Пишет перечень положенного — по путям в порядке и с подписью, как прочие заготовки."""
+    (consumer / paths.KIT_LAID).parent.mkdir(parents=True, exist_ok=True)
+    body = {"_": LAID_NOTE, "laid": {str(path): laid[path] for path in sorted(laid)}}
+    text = json.dumps(body, ensure_ascii=False, indent=2) + "\n"
+    (consumer / paths.KIT_LAID).write_text(licensed(paths.KIT_LAID, text, repo), encoding="utf-8")
 
 
 def rulebook_kit(root: Path) -> dict[Path, str]:
@@ -969,6 +1009,9 @@ SKILLS_KITTED: Final = tuple(
         "work-the-plan",
     )
 )
+#: Что записывается в перечень положенного: то, что `plan_tree` судит как
+#: устаревшее или правленое, — хуки, настройки окна и навыки.
+LAID_KINDS: Final = frozenset({*TREE_KITTED, *SKILLS_KITTED})
 #: Команда скрипта в тексте навыка: у потребителя скриптов в дереве нет, и она
 #: зовётся запускателем (`paths.LAUNCHER`).
 SKILL_CALL: Final = re.compile(r"\bpython3? scripts/([A-Za-z0-9_]+\.py)")
@@ -1228,6 +1271,10 @@ def unsigned(path: Path, text: str) -> str:
     return first + body.partition("\n")[2]
 
 
+#: Имя git-объекта: сорок шестнадцатеричных знаков.
+BLOB_NAME: Final = re.compile(r"[0-9a-f]{40}")
+
+
 def blob_of(text: str) -> str:
     """Имя git-объекта для текста — как `git hash-object`, без вызова git."""
     data = text.encode("utf-8")
@@ -1317,10 +1364,16 @@ def plan_tree(update: Update, consumer: Path, tree: dict[Path, str], root: Path,
 
     Без этого однажды положенный страж толчка не обновлялся бы никогда: `--update`
     кладёт заготовки данных только в свободное, и починка стража до потребителя
-    не дошла бы (214). Устаревшая — та, чьё содержимое было нашим в какой-то
-    момент истории. Настройки окна — файл проекта (`of_the_project`) и здесь
-    не судятся.
+    не дошла бы (214). Устаревшая — та, что совпала с записью перечня
+    положенного (`paths.KIT_LAID`), либо та, чьё содержимое было нашим в какой-то
+    момент истории. ПЕРЕЧЕНЬ ПЕРВЕЕ ИСТОРИИ (находка `f7e5ee4`): история
+    пропускается через НЫНЕШНЮЮ подстановку `skill_kit`, и копия, положенная до
+    её правки, ни с одной версией не совпала бы — `--update` отказал бы целиком
+    на неправленом. Перечень хранит то, что положено на самом деле; копии,
+    положенные до перечня, по-прежнему узнаёт история. Настройки окна — файл
+    проекта (`of_the_project`) и здесь не судятся.
     """
+    laid = laid_of(consumer)
     for path, ours in sorted(tree.items()):
         target = consumer / path
         if of_the_project(path) or not target.is_file():
@@ -1328,7 +1381,9 @@ def plan_tree(update: Update, consumer: Path, tree: dict[Path, str], root: Path,
         mine = unsigned(path, target.read_text(encoding="utf-8"))
         if mine == ours:
             update.current.append(path)
-        elif blob_of(mine) in blobs_in_history(root, path, shape_of(path, repo)):
+        elif blob_of(mine) == laid.get(path) or blob_of(mine) in blobs_in_history(
+            root, path, shape_of(path, repo)
+        ):
             update.write[path] = ours
         else:
             update.edited[path] = "".join(
