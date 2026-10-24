@@ -2459,6 +2459,18 @@ def test_a_copy_the_history_no_longer_shapes_is_stale_by_the_record(tmp_path: Pa
     assert name in plan.edited, "правленая копия перечнем не прощается"
 
 
+def test_write_laid_keeps_the_record_sorted_and_signed(tmp_path: Path) -> None:
+    """`write_laid` пишет пути по порядку и с подписью; `laid_of` читает то же (`f7e5ee4`)."""
+    hook, skill = module.paths.HOOKS / "b.py", module.paths.HOOKS / "a.py"
+    record = {hook: "1" * 40, skill: "2" * 40}
+    module.write_laid(tmp_path, record, "o/r")
+    said = json.loads((tmp_path / module.paths.KIT_LAID).read_text(encoding="utf-8"))
+    assert list(said) == ["_license", "_", "laid"] and list(said["laid"]) == sorted(
+        str(one) for one in record
+    )
+    assert module.laid_of(tmp_path) == record
+
+
 def test_a_broken_record_is_not_run(tmp_path: Path) -> None:
     """Битый перечень — «не отработал» с выходом, а не тихая история (045)."""
     (tmp_path / module.paths.KIT_LAID).parent.mkdir(parents=True)

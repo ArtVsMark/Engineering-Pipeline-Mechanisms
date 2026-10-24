@@ -48,6 +48,8 @@ paths = load_script("paths.py")
 WINDOW_DATA: Final = frozenset(one.as_posix() for one in paths.WINDOW_DATA)
 #: Адреса только дерева потребителя — у якоря; у нас лежит их заготовка (#1553).
 CONSUMER_ONLY: Final = frozenset(one.as_posix() for one in paths.CONSUMER_ONLY)
+#: Адреса, которые пишет заход подключения у потребителя, — у якоря (`f7e5ee4`).
+CONSUMER_WRITTEN: Final = frozenset(one.as_posix() for one in paths.CONSUMER_WRITTEN)
 #: Где лежат заготовки данных потребителя (`onboard.DATA_KIT`).
 DATA_KIT: Final = ROOT / paths.KIT / "data"
 
@@ -121,6 +123,7 @@ def test_every_path_named_by_a_message_exists() -> None:
         if said not in WINDOW_DATA
         and not (ROOT / said).exists()
         and not (said in CONSUMER_ONLY and (DATA_KIT / said).is_file())
+        and said not in CONSUMER_WRITTEN
     ]
     assert not dead, (
         "сообщение механизма называет путь, которого нет (076):\n  "
@@ -153,6 +156,20 @@ def test_window_data_is_kept_out_of_the_tree() -> None:
             f"{said} объявлен данными окна, но `.gitignore` его не покрывает — "
             "это мёртвый адрес, а не данные (076)"
         )
+
+
+def test_a_consumer_written_path_is_ours_to_write_not_to_keep() -> None:
+    """Адрес, который пишет заход у потребителя, у нас не лежит, а пишется (`f7e5ee4`).
+
+    Обратная сторона границы: лежи он в нашем дереве — это уже не отчёт о
+    кладке, а данные, и судить его надо существованием. Пишущий у него один —
+    `onboard.write_laid`, и он называет якорь, а не литерал.
+    """
+    assert CONSUMER_WRITTEN, "записываемых у потребителя якорь не объявляет — граница пуста"
+    writer = (ROOT / "scripts" / "onboard.py").read_text(encoding="utf-8")
+    for said in sorted(CONSUMER_WRITTEN):
+        assert not (ROOT / said).exists(), f"{said} лежит у нас — это данные, а не отчёт"
+    assert "paths.KIT_LAID" in writer, "у перечня положенного нет пишущего"
 
 
 def test_a_dead_path_in_prose_is_not_judged() -> None:

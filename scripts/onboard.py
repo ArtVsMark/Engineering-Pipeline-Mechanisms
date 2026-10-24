@@ -119,6 +119,7 @@ from typing import Any, Final
 import check_env
 import check_rulebook_fresh
 import check_shipped
+import check_workflow_forms
 import gitcall
 import paths
 import pipeline_checks as policy
@@ -904,8 +905,10 @@ def laid_of(consumer: Path) -> dict[Path, str]:
     try:
         said = json.loads(where.read_text(encoding="utf-8"))
         laid = said["laid"]
+        # Имя объекта — полный sha: образец один на дерево (214), у гейта форм.
         if not isinstance(laid, dict) or not all(
-            isinstance(one, str) and BLOB_NAME.fullmatch(one) for one in laid.values()
+            isinstance(one, str) and check_workflow_forms.SHA_RE.fullmatch(one)
+            for one in laid.values()
         ):
             raise ValueError("«laid» — не отображение путей в имена объектов")
     except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
@@ -1269,10 +1272,6 @@ def unsigned(path: Path, text: str) -> str:
         return text
     first, body = split_head(text)
     return first + body.partition("\n")[2]
-
-
-#: Имя git-объекта: сорок шестнадцатеричных знаков.
-BLOB_NAME: Final = re.compile(r"[0-9a-f]{40}")
 
 
 def blob_of(text: str) -> str:

@@ -358,6 +358,7 @@ ALL: Final = (
     ATTRIBUTION_SINCE,
     PREFLIGHT_LOADER,
     LAUNCHER,
+    KIT_LAID,
     HOOKS,
     SETTINGS,
     FLOOR,
@@ -376,3 +377,9 @@ WINDOW_DATA: Final = (SKILL_RUNS,)
 #: сообщений (`tests/test_messages_point_somewhere.py`) судит их заготовкой, а
 #: не существованием. Список закрытый (068).
 CONSUMER_ONLY: Final = (PREFLIGHT_LOADER, LAUNCHER)
+
+#: Адреса, которые ПИШЕТ заход подключения у потребителя, — без заготовки: у
+#: нас их нет, а содержимое — отчёт о кладке (`onboard.write_laid`). Гейт
+#: сообщений судит их тем, что пишущий у якоря назван, а не существованием.
+#: Список закрытый (068): первый такой адрес — перечень положенного (`f7e5ee4`).
+CONSUMER_WRITTEN: Final = (KIT_LAID,)

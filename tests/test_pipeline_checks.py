@@ -842,6 +842,18 @@ def test_a_tag_call_at_the_consumer_is_named_from_the_supplier(
     assert set(policy.declared_jobs(directory)) == named
 
 
+def test_running_repo_is_the_platform_then_the_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Свой репозиторий: площадка первее, вне её — `origin`; регистр не важен (`68511bc`)."""
+    monkeypatch.setenv("GITHUB_REPOSITORY", "Owner/Consumer")
+    assert policy.running_repo() == "owner/consumer"
+    monkeypatch.delenv("GITHUB_REPOSITORY")
+    clone = cloned(tmp_path / "свой", "https://github.com/Some/Where")
+    monkeypatch.chdir(clone)
+    assert policy.running_repo() == "some/where"
+
+
 def test_a_trunk_call_to_a_file_the_consumer_also_has_reads_the_supplier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
