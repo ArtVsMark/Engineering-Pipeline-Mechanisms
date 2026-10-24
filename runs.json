@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-23T09:12:45+00:00",
+  "updated": "2026-10-24T08:46:26+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -7727,6 +7727,341 @@
         }
       },
       "coverage": 93.9
+    },
+    "2026-10-24": {
+      "runs": {
+        "verify-queue": {
+          "runs": 79,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 1704,
+          "timed": 79,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 171,
+          "red": 0,
+          "cancelled": 96,
+          "seconds": 4514,
+          "timed": 171,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 243,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 98,
+          "red": 0,
+          "cancelled": 6,
+          "seconds": 1165,
+          "timed": 98,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 559,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 21,
+          "seconds": 2114,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 21,
+          "seconds": 1832,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 85,
+          "red": 0,
+          "cancelled": 26,
+          "seconds": 3333,
+          "timed": 85,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete": {
+          "runs": 82,
+          "red": 4,
+          "cancelled": 62,
+          "seconds": 12710,
+          "timed": 82,
+          "red_jobs": {
+            "ci-complete": 4
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 4
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 3
+          },
+          "red_whose": {
+            "свой": 4
+          }
+        },
+        "ci": {
+          "runs": 84,
+          "red": 4,
+          "cancelled": 58,
+          "seconds": 14272,
+          "timed": 84,
+          "red_jobs": {
+            "lint / lint": 1,
+            "journal / journal": 2,
+            "test": 1,
+            "test-matrix (3.14)": 1,
+            "test-matrix (3.15)": 1
+          },
+          "red_steps": {
+            "lint / lint · типы": 1,
+            "journal / journal · новое приезжает со своим прогоном": 2,
+            "test · вердикт матрицы": 1,
+            "test-matrix (3.14) · тесты": 1,
+            "test-matrix (3.15) · тесты": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 6
+          }
+        },
+        "claude": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 29,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+24)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 148,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 367,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 658,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 4512,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Отказ сборщика плана виден в самом плане и красным прогоном": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2584,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 32,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 36,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 146,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+23)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1444,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+22)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 102,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+21)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 191,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Сверка числа в заголовке скелета — целыми словами, а не подстрокой (+10)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 71,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+20)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1830,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Сверка числа в заголовке скелета — целыми словами, а не подстрокой (+9)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2620,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Запускатель механизмов у потребителя: любой скрипт поставщика против его дерева (+4)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 531,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Запускатель механизмов у потребителя: любой скрипт поставщика против его дерева (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 136,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Запускатель механизмов у потребителя: любой скрипт поставщика против его дерева (+2)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 853,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 94.3
     }
   }
 }
