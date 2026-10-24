@@ -953,6 +953,70 @@ def fresh_build(
     )
 
 
+#: Блок отказа в шапке плана (#1621): его кладёт отказ сборки, снимает следующая
+#: успешная. Границы — скрытые строки разметки, их читатель не видит.
+REFUSAL_OPEN: Final = "<!-- plan-refused -->"
+REFUSAL_CLOSE: Final = "<!-- /plan-refused -->"
+
+
+def without_refusal(body: str) -> str:
+    """Тело плана без блока отказа: успешная сборка снимает его сама."""
+    start = body.find(REFUSAL_OPEN)
+    end = body.find(REFUSAL_CLOSE, start)
+    if start == -1 or end == -1:
+        return body
+    tail = body[end + len(REFUSAL_CLOSE) :]
+    return body[:start].rstrip("\n") + "\n" + tail.lstrip("\n")
+
+
+def with_refusal(body: str, reason: str, run: str) -> str:
+    """Тело плана с блоком отказа сразу под строкой маркера — остальное как было.
+
+    ТЕЛО НЕ ПЕРЕСОБИРАЕТСЯ: отказ мог родиться в нём самом (строка раздела 4
+    без адреса), и сборка заново упала бы тем же. Поэтому блок встаёт поверх
+    прежнего текста, а разделы остаются, какими их оставил последний успех.
+    """
+    clean = without_refusal(body)
+    first, _, rest = clean.partition("\n")
+    block = (
+        f"{REFUSAL_OPEN}\n> ⛔ **План не собран, разделы ниже — прежние.** {reason}. "
+        f"Прогон: {run}. Блок снимет следующая успешная сборка.\n{REFUSAL_CLOSE}"
+    )
+    return f"{first}\n{block}\n{rest}"
+
+
+def run_address() -> str:
+    """Адрес прогона площадки или честное «не назван» вне неё."""
+    server = os.environ.get("GITHUB_SERVER_URL", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    number = os.environ.get("GITHUB_RUN_ID", "")
+    if server and repo and number:
+        return f"{server}/{repo}/actions/runs/{number}"
+    return "не назван — заход вне площадки"
+
+
+def announce_refusal(repo: str, token: str, reason: str) -> None:
+    """Отказ сборки — строкой в самом плане, а не только в журнале прогона (#1621).
+
+    Предупреждение прогона никто не читает (замер 23.10.2026: план стоял с
+    15:46, выполненное не уходило, нашёл владелец вопросом). Сбой самой записи
+    называется, но кода не меняет: отказ уже назван исходом 2.
+    """
+    try:
+        number, body = findings.live_issue(repo, token, MARKER)
+        if number is None:
+            return
+        ghrest.request(
+            "PATCH",
+            f"repos/{repo}/issues/{number}",
+            token,
+            {"body": with_refusal(body, reason, run_address())},
+        )
+        print(f"отказ сборки назван в плане #{number}", file=sys.stderr)
+    except ghrest.TransportError as exc:
+        print(f"отказ сборки в план не записан: {exc}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: собирает план и кладёт его в живую задачу."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1037,8 +1101,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (NotRun, ghrest.TransportError) as exc:
         print(f"сборщик не отработал: {exc}", file=sys.stderr)
+        if args.apply:
+            announce_refusal(args.repo, token, str(exc))
         return EXIT_BROKEN
 
+    said = without_refusal(said)
     gone = sum(
         1
         for one in HELD
