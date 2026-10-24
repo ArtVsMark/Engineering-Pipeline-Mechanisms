@@ -559,3 +559,13 @@ beyond_the_change:
     class: advisory
     why: зовёт шаг `pipeline` внешним путём по тегу выпуска — так же, как потребитель; красное значит, что подключение не заработает
     addressee: "#782"
+
+  probe-attribution-history:
+    class: advisory
+    why: зовёт шаг `attribution-history` внешним путём по тегу выпуска — так же, как потребитель; красное значит, что подключение не заработает
+    addressee: "#782"
+
+  probe-python-next:
+    class: advisory
+    why: зовёт шаг `python-next` внешним путём по тегу выпуска — так же, как потребитель; красное значит, что подключение не заработает
+    addressee: "#782"
