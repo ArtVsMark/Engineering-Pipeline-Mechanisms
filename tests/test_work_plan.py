@@ -318,6 +318,28 @@ def test_a_silent_neighbour_does_not_make_a_section_look_full(
     assert "3" in broken, "молчащий источник не назван в исходе"
 
 
+def test_an_empty_open_list_is_a_refusal_not_nothing_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Пустой список открытых — «не прочитаны», а не «открытых нет» (#1580, находка `8d1f790`).
+
+    `quiet_platform` подменяет `findings.open_listed` целиком, и поведение
+    настоящего читателя не держал ни один тест: откат строки, где сборщик зовёт
+    его, ничего не краснил. Здесь читатель настоящий, площадка отвечает пустым
+    списком на каждой попытке — находки остаются долгом, и слепота названа.
+    """
+    real = module.findings.open_listed
+    quiet_platform(monkeypatch)
+    # Пустой ответ на каждой попытке: `quiet_platform` уже гасит `paginate`.
+    monkeypatch.setattr(module.findings, "open_listed", real)
+    monkeypatch.setattr(module.findings, "OPEN_PAUSE", 0)
+    monkeypatch.setattr(
+        module.debt, "findings_debt", lambda *_: [("abc1234", 635, "дефект", "находка")]
+    )
+    built, _, _ = module.sources("o/r", "t")
+    said = "\n".join(module.render(3, built[3], "01.01.2026"))
+    assert "abc1234" in said, "находка пропала вместо того, чтобы остаться долгом"
+    assert "открытые изменения не прочитаны" in said, said
+
+
 def test_the_registry_is_read_once_per_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     """Реестр находок читается ОДИН раз за заход.
 
