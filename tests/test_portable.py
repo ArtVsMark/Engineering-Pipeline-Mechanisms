@@ -921,15 +921,17 @@ def named_paths(skill: Path) -> set[str]:
 RELATIVE_TARGET: Final = re.compile(r"\]\((\.\.?/[^)\s#]+)")
 
 
-#: Как подстановка навыка называет ссылку на дерево поставщика: путь в
-#: обратных кавычках и «поставщика» сразу за ним.
-SUPPLIER_MARK: Final = "` поставщика"
+#: Как подстановка навыка называет файл поставщика: путь в обратных кавычках и
+#: сразу адрес на дерево поставщика (#1637). Подпись «поставщика» за ним не
+#: обязательна: у ссылки, которую подстановка переписала из относительной, её
+#: нет, а адрес доказывает больше слова.
+SUPPLIER_MARK: Final = re.compile(r"`\]\(https://github\.com/[^)\s]+\)")
 
 
 def supplier_named(rest: str) -> bool:
-    """За путём до закрывающей кавычки — только хвост имени (`::функция`) и «поставщика»."""
+    """За путём до закрывающей кавычки — только хвост имени (`::функция`) и адрес поставщика."""
     tail, mark, after = rest.partition("`")
-    return bool(mark) and " " not in tail and f"`{after}".startswith(SUPPLIER_MARK)
+    return bool(mark) and " " not in tail and SUPPLIER_MARK.match(f"`{after}") is not None
 
 
 def consumer_has(said: str, answers: dict[str, Any]) -> bool:

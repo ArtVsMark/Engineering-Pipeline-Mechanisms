@@ -15,6 +15,7 @@
 
 import itertools
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Final
@@ -2443,10 +2444,15 @@ def test_the_skills_kit_is_every_as_is_skill_answer() -> None:
         ("`python scripts/work_plan.py`", "`bash .claude/mechanisms.sh work_plan.py`"),
         ("python3 scripts/scope.py --x", "bash .claude/mechanisms.sh scope.py --x"),
         ("python scripts/preflight.py --push", "bash .claude/preflight.sh --push"),
-        ("держит `tests/test_x.py`.", "держит `tests/test_x.py` поставщика."),
+        (
+            "держит `tests/test_x.py`.",
+            "держит [`tests/test_x.py`](https://github.com/o/r/blob/main/tests/test_x.py)"
+            " поставщика.",
+        ),
         (
             "`docs/dev/gaps.md` и `docs/agent/roles.md`",
-            "`docs/dev/gaps.md` поставщика и `docs/agent/roles.md`",
+            "[`docs/dev/gaps.md`](https://github.com/o/r/blob/main/docs/dev/gaps.md) поставщика"
+            " и `docs/agent/roles.md`",
         ),
         ("решение владельца, #639; ## 5", "решение владельца, o/r#639; ## 5"),
         ("уже o/r#12 и x/y#7 и issues/12#c", "уже o/r#12 и x/y#7 и issues/12#c"),
@@ -2462,7 +2468,7 @@ def test_the_skills_kit_is_every_as_is_skill_answer() -> None:
     ],
 )
 def test_skill_kit_calls_through_the_launcher_and_names_supplier_refs(said: str, laid: str) -> None:
-    """Команда навыка у потребителя — запускателем, ссылка на наше — «поставщика»."""
+    """Команда навыка у потребителя — запускателем, наше — ссылкой на дерево поставщика."""
     assert module.skill_kit(said, "o/r") == laid
     assert module.skill_kit(laid, "o/r") == laid, "подстановка не идемпотентна"
 
@@ -2589,3 +2595,38 @@ def test_the_bindings_note_reads_the_consumers_path_table(tmp_path: Path) -> Non
     assert module.bindings_note(tmp_path) == ""
     (tmp_path / ".pipeline.yml").write_text("paths:\n  bindings: /a.json\n", encoding="utf-8")
     assert "не проверен" in module.bindings_note(tmp_path)
+
+
+def test_a_kitted_skill_names_no_supplier_file_without_its_address() -> None:
+    """Наш файл в навыке потребителя — ссылкой на дерево поставщика, а не именем (#1637)."""
+    bare = re.compile(r"(?<!\[)`([^`\s]+)` поставщика")
+    left = {
+        str(skill): bare.findall(
+            module.skill_kit((ROOT / skill).read_text(encoding="utf-8"), "o/r")
+        )
+        for skill in module.SKILLS_KITTED
+    }
+    assert {skill: names for skill, names in left.items() if names} == {}
+
+
+@pytest.mark.parametrize(
+    ("said", "laid"),
+    [
+        (
+            "гейт `scripts/check_x.py` держит",
+            "гейт [`scripts/check_x.py`](https://github.com/o/r/blob/main/scripts/check_x.py)"
+            " поставщика держит",
+        ),
+        (
+            "`tests/test_x.py::test_y` поставщика",
+            "[`tests/test_x.py::test_y`](https://github.com/o/r/blob/main/tests/test_x.py)"
+            " поставщика",
+        ),
+        ("[`docs/x.md`](https://a/b) уже адрес", "[`docs/x.md`](https://a/b) уже адрес"),
+        ("`docs/agent/roles.md` свой", "`docs/agent/roles.md` свой"),
+    ],
+    ids=["имя", "хвост-функции-и-подпись", "уже-ссылка", "кладётся-потребителю"],
+)
+def test_a_supplier_name_becomes_a_link_to_its_file(said: str, laid: str) -> None:
+    """Имя — ссылкой на файл, хвост `::функция` — на свой файл; адрес и своё не трогаются."""
+    assert module.skill_kit(said, "o/r") == laid
