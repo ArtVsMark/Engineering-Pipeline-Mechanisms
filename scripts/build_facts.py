@@ -59,7 +59,6 @@ from facts_common import release_series as release_series
 from facts_common import rules_facts as rules_facts
 
 VERSION_FILE: Final = paths.VERSION
-BINDINGS: Final = paths.BINDINGS
 FACTS: Final = "facts.json"
 #: Коммит фактов — ПОЛНЫЙ хэш: так его пишет сборка (`git rev-parse HEAD`).
 #: Строгое правило вместо перечня плохих форм (находка `0a6fab3`, правило 210):
