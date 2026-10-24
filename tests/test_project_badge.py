@@ -370,3 +370,9 @@ def test_the_answer_is_read_where_the_table_puts_it(tmp_path: Path) -> None:
     (root / ".pipeline.yml").write_text("paths:\n  bindings: cfg/answer.json\n", encoding="utf-8")
     _, greys = pb.build(root, zones, family, fetch=lambda _url: export("001"))
     assert greys == []
+    (root / "cfg" / "answer.json").write_text("не json", encoding="utf-8")
+    _, greys = pb.build(root, zones, family, fetch=lambda _url: export("001"))
+    assert any("cfg/answer.json" in one for one in greys), greys
+    (root / ".pipeline.yml").write_text("paths:\n  bindings: /a.json\n", encoding="utf-8")
+    _, greys = pb.build(root, zones, family, fetch=lambda _url: export("001"))
+    assert any("таблица путей не разобрана" in one for one in greys), greys

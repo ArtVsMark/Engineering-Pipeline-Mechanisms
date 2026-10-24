@@ -103,14 +103,17 @@ def grey(label: str, why: str) -> Zones:
     return [[(label, python_badge.LABEL, ""), ("n/a", GREY, why)]]
 
 
-def rules_zones(answer: object, active: set[str] | None) -> tuple[Zones, str]:
+def rules_zones(
+    answer: object, active: set[str] | None, where: Path | str = ANSWER
+) -> tuple[Zones, str]:
     """Зона «rules»: сколько действующих правил держится механизмом, из них свои и взятые.
 
-    `active` None — выгрузка не прочитана, и зона серая с причиной.
+    `active` None — выгрузка не прочитана, и зона серая с причиной. `where` —
+    адрес, по которому ответ читался (таблица путей, #1632), а не умолчание.
     """
     rules = answer.get("rules") if isinstance(answer, dict) else None
     if not isinstance(rules, dict):
-        why = f"ответа каталогу {ANSWER} нет или он не той формы"
+        why = f"ответа каталогу {where} нет или он не той формы"
         return grey("rules", why), why
     if active is None:
         why = "выгрузка каталога не прочитана — действующих не отличить"
@@ -202,12 +205,20 @@ def build(
 ) -> tuple[str, list[str]]:
     """Картинка в две строки и причины серого."""
     top, why_top = state_zones(python_zones)
+    # Битая таблица путей — серое С ЕЁ причиной, а не «ответа нет»: `BadPaths`
+    # наследует `ValueError` и иначе растворился бы в отказе чтения (взгляд на
+    # #1633, 045).
     try:
-        where = policy.project_path("bindings", root)
-        answer: object = json.loads((root / where).read_text(encoding="utf-8"))
-    except OSError, ValueError:
-        answer = None
-    rules, why_rules = rules_zones(answer, active_of(fetch))
+        where: Path | str = policy.project_path("bindings", root)
+    except paths.BadPaths as exc:
+        where = f"(таблица путей не разобрана: {exc})"
+        answer: object = None
+    else:
+        try:
+            answer = json.loads((root / where).read_text(encoding="utf-8"))
+        except OSError, ValueError:
+            answer = None
+    rules, why_rules = rules_zones(answer, active_of(fetch), where)
     family, why_family = family_zones(family_json)
     bottom = rules + family
     stretch_top, stretch_bottom = align(top, bottom)
