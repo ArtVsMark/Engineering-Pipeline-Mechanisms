@@ -181,7 +181,7 @@ def steps(root: Path) -> list[str]:
     """
     found = [
         Path(said).stem[len(STEP_PREFIX) :]
-        for said in check_shipped.shipped(root)
+        for said in check_shipped.shipped_here(root)
         if Path(said).name.startswith(STEP_PREFIX) and Path(said).suffix in {".yml", ".yaml"}
     ]
     return sorted(found)
@@ -2209,7 +2209,7 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         print(
             f"прибивка «{pin}» не несёт помеченного наружу: {len(missing)} из "
-            f"{len(check_shipped.shipped(args.root))} — {', '.join(missing)}.\n"
+            f"{len(check_shipped.shipped_here(args.root))} — {', '.join(missing)}.\n"
             "Заготовка с такой прибивкой отказала бы у потребителя, а не у нас (045).\n"
             f"Выход: нарезать выпуск, содержащий эти файлы, и позвать заход заново (158).",
             file=sys.stderr,

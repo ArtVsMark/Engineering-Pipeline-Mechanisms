@@ -330,3 +330,29 @@ def test_a_broken_section_is_named_by_the_gate_and_the_answer_check(
     assert why in capsys.readouterr().err
     with pytest.raises(shipped_form.NotRun, match=why):
         shipped_form.form_of(pipeline_checks.yaml.safe_load(section)["shipped"])
+
+
+def test_the_release_check_reads_the_trees_own_mark(tmp_path: Path) -> None:
+    """Сверка выпуска судит маркером из ответа дерева, а не нашим (взгляд на #1646).
+
+    Прежде `unreleased` звала `shipped(root)` с «ОТДАЁТСЯ НАРУЖУ», и у проекта
+    со своим маркером помеченного было ноль — выпуск «нёс всё».
+    """
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path)]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "CONNECT.md").write_text("пусто\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "первый"], check=True)
+    subprocess.run([*git, "tag", "v1"], check=True)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "sync.py").write_text(
+        '"""ОТДАЁТСЯ ПОТРЕБИТЕЛЮ: зовите из своего прогона."""\n', encoding="utf-8"
+    )
+    (tmp_path / ".pipeline.yml").write_text(
+        "shipped:\n  entry: CONNECT.md\n  marker: ОТДАЁТСЯ ПОТРЕБИТЕЛЮ\n", encoding="utf-8"
+    )
+    assert module.shipped_here(tmp_path) == ["scripts/sync.py"]
+    assert module.unreleased("v1", tmp_path) == ["scripts/sync.py"]
+    (tmp_path / ".pipeline.yml").write_text("shipped: [CONNECT.md]\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="раздел shipped не разобран"):
+        module.shipped_here(tmp_path)

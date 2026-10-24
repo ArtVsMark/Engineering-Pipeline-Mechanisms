@@ -146,6 +146,21 @@ def shipped(root: Path, marker: str = MARK) -> list[str]:
     return sorted(seen)
 
 
+def shipped_here(root: Path) -> list[str]:
+    """Помеченное наружу в дереве `root` — маркером из ЕГО ответа (раздел `shipped:`, #1625).
+
+    Один вход для всех, кто спрашивает о дереве: гейт входа, сверка выпуска
+    (`unreleased`), дрейф и заход подключения. Порознь они читали бы разный
+    маркер, и проект со своим маркером получил бы ноль помеченного у одного и
+    настоящее число у другого (взгляд на #1646, 090).
+    """
+    try:
+        form = policy.shipped_form_at(root / paths.PIPELINE)
+    except shipped_form.NotRun as exc:
+        raise NotRun(f"раздел {shipped_form.SECTION} не разобран: {exc}") from exc
+    return shipped(root, form.marker)
+
+
 def at_ref(ref: str, root: Path) -> set[str] | None:
     """Пути, которые несёт названная ссылка истории; ``None`` — её тут нет.
 
@@ -194,7 +209,7 @@ def unreleased(ref: str, root: Path) -> list[str]:
             f"ссылки «{ref}» в истории не видно: достижимость помеченного проверить нечем. "
             "На обрезанном клоне теги не выкачиваются — дайте полную историю (045)"
         )
-    return [one for one in shipped(root) if one not in carried]
+    return [one for one in shipped_here(root) if one not in carried]
 
 
 def entrance(root: Path, entry: Path = paths.ENTRANCE) -> str:
