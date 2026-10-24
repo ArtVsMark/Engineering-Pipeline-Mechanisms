@@ -111,6 +111,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.present == 'yes' && steps.who.outputs.allowed == 'yes'
         with:
+          persist-credentials: true # claude-code-action зовёт git против ветки изменения; у закрытого потребителя без учётных данных выборка не пройдёт
           fetch-depth: 1
       # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
       # потребителя нашего `scripts/` нет: дерево вызывающего — ЕГО, и в нём
