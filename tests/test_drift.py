@@ -1285,7 +1285,8 @@ def test_foreign_contracts_are_not_ours(tmp_path: Path) -> None:
     Требовать от себя чужой номер значило бы краснеть на том, чего у нас нет
     и быть не должно (051).
     """
-    assert {name for name, _ in module.OUR_CONTRACTS} == {"bindings", "proposals", "showcase"}
+    assert set(module.OUR_CONTRACTS) == {"bindings", "proposals", "showcase"}
+    assert set(module.OUR_CONTRACTS) <= set(module.paths.PROJECT), "контракт без ключа таблицы"
 
 
 def test_an_empty_queue_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
