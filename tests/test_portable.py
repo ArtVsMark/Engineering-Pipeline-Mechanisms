@@ -899,10 +899,11 @@ def named_paths(skill: Path) -> set[str]:
         # Судится текст, который ляжет у потребителя (#1552): команда там —
         # запускателем, а ссылка, названная «поставщика», ведёт к нему, а не в
         # дерево потребителя.
-        text = laid_text(one, inventory())
+        data = inventory()
+        text = laid_text(one, data)
         for match in NAMED_PATH.finditer(text):
             said = match.group(1).rstrip(".")
-            if supplier_named(text[match.end() :]):
+            if supplier_named(text[match.end() :], data["own"][0]):
                 continue
             if (ROOT / said).exists() and said != own and not said.startswith(f"{own}/"):
                 found.add(said)
@@ -921,17 +922,21 @@ def named_paths(skill: Path) -> set[str]:
 RELATIVE_TARGET: Final = re.compile(r"\]\((\.\.?/[^)\s#]+)")
 
 
-#: Как подстановка навыка называет файл поставщика: путь в обратных кавычках и
-#: сразу адрес на дерево поставщика (#1637). Подпись «поставщика» за ним не
-#: обязательна: у ссылки, которую подстановка переписала из относительной, её
-#: нет, а адрес доказывает больше слова.
-SUPPLIER_MARK: Final = re.compile(r"`\]\(https://github\.com/[^)\s]+\)")
+def supplier_mark(repo: str) -> re.Pattern[str]:
+    """Как подстановка навыка называет файл поставщика `repo`: путь в кавычках и его адрес (#1637).
+
+    Адрес — на дерево САМОГО поставщика, а не любой `github.com/…`: ссылку на
+    чужое дерево сразу за путём гейт иначе принял бы за нашу (взгляд на #1639).
+    Подпись «поставщика» за адресом не обязательна: у ссылки, которую
+    подстановка переписала из относительной, её нет, а адрес доказывает больше.
+    """
+    return re.compile(rf"`\]\(https://github\.com/{re.escape(repo)}/blob/[^)\s]+\)")
 
 
-def supplier_named(rest: str) -> bool:
+def supplier_named(rest: str, repo: str) -> bool:
     """За путём до закрывающей кавычки — только хвост имени (`::функция`) и адрес поставщика."""
     tail, mark, after = rest.partition("`")
-    return bool(mark) and " " not in tail and SUPPLIER_MARK.match(f"`{after}") is not None
+    return bool(mark) and " " not in tail and supplier_mark(repo).match(f"`{after}") is not None
 
 
 def consumer_has(said: str, answers: dict[str, Any]) -> bool:
@@ -1149,3 +1154,11 @@ def test_an_as_is_script_is_reached_at_the_consumer() -> None:
         if one.get("answer") == "ours" and one.get("why") == "@window-path" and name in reached
     )
     assert not called, f"причина «звать нечем», а у потребителя скрипт зовут: {called}"
+
+
+def test_the_supplier_mark_takes_only_the_suppliers_tree() -> None:
+    """Адрес поставщика — его дерево; ссылка на чужое за путём — не «наша» (взгляд на #1639)."""
+    own = "Me/Project"
+    assert supplier_named("`](https://github.com/Me/Project/blob/main/x.py) поставщика", own)
+    assert not supplier_named("`](https://github.com/Other/Tree/blob/main/x.py)", own)
+    assert not supplier_named("` голое имя", own)
