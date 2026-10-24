@@ -175,7 +175,11 @@ def test_the_procedure_and_table_come_from_the_base(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(review_map.ghrest, "token_from_env", lambda: "t")
     monkeypatch.setattr(review_map, "changed_files", lambda repo, n, tok: ["scripts/x.py"])
     said = review_map.roles_section("FETCH_HEAD", "o/r", 7)
-    assert asked == [f"FETCH_HEAD:{paths.REVIEW_PROCEDURE}", f"FETCH_HEAD:{paths.REVIEW_ROLES}"]
+    assert [one for one in asked if not one.endswith(str(paths.PIPELINE))] == [
+        f"FETCH_HEAD:{paths.REVIEW_PROCEDURE}",
+        f"FETCH_HEAD:{paths.REVIEW_ROLES}",
+    ]
+    assert f"FETCH_HEAD:{paths.PIPELINE}" in asked
     assert "ПРОЦЕДУРА С БАЗЫ" in said and "**механик**" in said
 
 

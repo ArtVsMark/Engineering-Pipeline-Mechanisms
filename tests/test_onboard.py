@@ -1254,6 +1254,22 @@ def test_a_dormant_area_table_is_named_until_the_role_is_declared(tmp_path: Path
     assert module.dormant_areas_note(tmp_path) == ""
 
 
+def test_the_dormant_note_reads_the_consumers_path_table(tmp_path: Path) -> None:
+    """Потребитель переназначил таблицу ролей — спячку судят по ЕГО адресу (#1630)."""
+    module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
+    moved = Path("handbook/review-roles.json")
+    table = json.loads((tmp_path / module.paths.REVIEW_ROLES).read_text(encoding="utf-8"))
+    table["by_path"] = [{"paths": ["**/*"], "roles": [module.review_map.CATALOGUE_ROLE]}]
+    (tmp_path / moved).parent.mkdir()
+    (tmp_path / moved).write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
+    answer = tmp_path / module.paths.PIPELINE
+    kept = answer.read_text(encoding="utf-8") if answer.exists() else "schema: 4\nchecks: {}\n"
+    answer.write_text(kept + f"paths:\n  review-roles: {moved}\n", encoding="utf-8")
+    assert module.dormant_areas_note(tmp_path) == "", "роль объявлена по адресу потребителя"
+    answer.write_text(kept + "paths:\n  review-roles: /abs.json\n", encoding="utf-8")
+    assert "не проверена" in module.dormant_areas_note(tmp_path)
+
+
 def test_a_yaml_twin_takes_the_path(tmp_path: Path) -> None:
     """`dependabot.yaml` потребителя занимает место `dependabot.yml`: второго конфига нет."""
     (tmp_path / ".github").mkdir()

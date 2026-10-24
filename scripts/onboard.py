@@ -1371,22 +1371,29 @@ def dormant_areas_note(consumer: Path) -> str:
     отдачи (решение владельца 15.10.2026, #1277). Таблица областей ложится
     готовой, а действует только у проекта, объявившего роль, — и это
     говорится, а не выясняется пустой картой. Нечитаемая таблица ролей — «не
-    объявлена», как у карты (`review_map.role_declared`).
+    объявлена», как у карты (`review_map.role_declared`). Адреса — по таблице
+    путей ПОТРЕБИТЕЛЯ (#1630): переназначенную им таблицу карта читает там же.
     """
-    if not (consumer / paths.AREA_PATHS).exists():
+    try:
+        areas = policy.project_path("area-paths", consumer)
+        table = policy.project_path("review-roles", consumer)
+        profiles = policy.project_path("roles", consumer)
+    except paths.BadPaths as exc:
+        return f"Спячка таблицы областей не проверена: раздел путей не разобран — {exc}"
+    if not (consumer / areas).exists():
         return ""
     try:
-        roles = json.loads((consumer / paths.REVIEW_ROLES).read_text(encoding="utf-8"))
+        roles = json.loads((consumer / table).read_text(encoding="utf-8"))
         declared = review_map.declares_role(review_map.table_shape(roles))
     except OSError, ValueError, review_map.NotRun:
         declared = False
     if declared:
         return ""
     return (
-        f"`{paths.AREA_PATHS}` спит: карта взгляда отдаёт по ней правила роли "
-        f"«{review_map.CATALOGUE_ROLE}», а в `{paths.REVIEW_ROLES}` эта роль не объявлена. "
+        f"`{areas}` спит: карта взгляда отдаёт по ней правила роли "
+        f"«{review_map.CATALOGUE_ROLE}», а в `{table}` эта роль не объявлена. "
         "Таблица начнёт действовать, когда проект впишет роль в `required` или `by_path` и "
-        f"даст ей профиль в `{paths.ROLES}`. Роль в пилоте у поставщика: {ROLE_PILOT}"
+        f"даст ей профиль в `{profiles}`. Роль в пилоте у поставщика: {ROLE_PILOT}"
     )
 
 
