@@ -119,13 +119,13 @@ concurrency:
 jobs:
   probe-attribution-history:
     name: probe-attribution-history
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution-history.yml@v1.10.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution-history.yml@v1.11.0
     permissions:
       contents: read
 
   probe-python-next:
     name: probe-python-next
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-python-next.yml@v1.10.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-python-next.yml@v1.11.0
     # Внешний путь вызова, а не набор: наш код проба стирает (`strip-ours`), и
     # звать нашу установку и наши тесты на дереве без них нечего.
     with:
@@ -138,7 +138,7 @@ jobs:
 
   probe-attribution:
     name: probe-attribution
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.10.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.11.0
     permissions:
       contents: read
       checks: read
@@ -147,7 +147,7 @@ jobs:
 
   probe-contract:
     name: probe-contract
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.10.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.11.0
     with:
       strip-ours: true
     permissions:
@@ -158,7 +158,7 @@ jobs:
 
   probe-debt:
     name: probe-debt
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.10.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.11.0
     with:
       strip-ours: true
     permissions:
@@ -169,7 +169,7 @@ jobs:
 
   probe-lint:
     name: probe-lint
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.10.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.11.0
     permissions:
       contents: read
       checks: read
@@ -178,7 +178,7 @@ jobs:
 
   probe-pipeline:
     name: probe-pipeline
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.10.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.11.0
     with:
       strip-ours: true
     permissions:
