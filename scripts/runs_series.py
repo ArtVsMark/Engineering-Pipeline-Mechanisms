@@ -52,6 +52,7 @@ from typing import Any, Final
 import badges_read
 import ghrest
 import paths
+import pipeline_checks as policy
 import yaml
 from report import announce
 
@@ -882,7 +883,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--store", required=True, help="файл ряда (runs.json) — читается и пишется")
     parser.add_argument("--report", default="", help="куда положить отчёт по ряду")
-    parser.add_argument("--bounds", default=str(BOUNDS_FILE), help="объявление границ ряда")
+    parser.add_argument(
+        "--bounds", default="", help="объявление границ ряда; без ключа — по таблице путей"
+    )
     parser.add_argument("--apply", action="store_true", help="писать файлы, а не только считать")
     args = parser.parse_args(argv)
     announce(not args.apply)
@@ -891,7 +894,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not args.repo:
             raise NotRun("не сказано, чей ряд считать (--repo) — предмет не найден (075)")
-        bounds = Bounds.read(Path(args.bounds))
+        try:
+            where = Path(args.bounds) if args.bounds else policy.project_path("series")
+        except paths.BadPaths as exc:
+            raise NotRun(f"объявление границ ряда не найдено: {exc}") from exc
+        bounds = Bounds.read(where)
         token = ghrest.token_from_env()
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         known: dict[str, Any] = {}

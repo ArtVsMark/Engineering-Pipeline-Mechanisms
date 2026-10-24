@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Final
 
 import paths
+import pipeline_checks as policy
 import yaml
 
 DEFAULT_PATH: Final = paths.LABELS
@@ -61,8 +62,13 @@ class Label:
         return zone_named(self.name)
 
 
-def load(path: Path = DEFAULT_PATH) -> list[Label]:
-    """Читает состав меток, отвергая любой дефект входа."""
+def load(path: Path | None = None) -> list[Label]:
+    """Читает состав меток, отвергая любой дефект входа; путь — по таблице путей (#1632)."""
+    if path is None:
+        try:
+            path = policy.project_path("labels")
+        except paths.BadPaths as exc:
+            raise BadConfig(f"состав меток не найден: {exc}") from exc
     if not path.is_file():
         raise BadConfig(f"состав меток не найден: {path}")
 
@@ -83,7 +89,7 @@ def load(path: Path = DEFAULT_PATH) -> list[Label]:
         name = str(item.get("name", "")).strip()
         color = str(item.get("color", "")).strip().lstrip("#")
         description = str(item.get("description", "")).strip()
-        paths = item.get("paths", []) or []
+        globs = item.get("paths", []) or []
         kind = item.get("kind", False)
         if not isinstance(kind, bool):
             problems.append(f"{name or index}: kind — не да/нет, а «{kind}»")
@@ -105,11 +111,11 @@ def load(path: Path = DEFAULT_PATH) -> list[Label]:
             problems.append(f"{name or index}: цвет «{color}» не шесть шестнадцатеричных цифр")
         if not description:
             problems.append(f"{name or index}: пустое описание — метка без описания нечитаема")
-        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        if not isinstance(globs, list) or not all(isinstance(p, str) for p in globs):
             problems.append(f"{name or index}: paths — не список строк")
-            paths = []
+            globs = []
         if not problems:
-            labels.append(Label(name, color, description, tuple(paths), kind))
+            labels.append(Label(name, color, description, tuple(globs), kind))
 
     if problems:
         raise BadConfig("состав меток не проходит проверку:\n  " + "\n  ".join(problems))

@@ -1285,7 +1285,8 @@ def test_foreign_contracts_are_not_ours(tmp_path: Path) -> None:
     Требовать от себя чужой номер значило бы краснеть на том, чего у нас нет
     и быть не должно (051).
     """
-    assert {name for name, _ in module.OUR_CONTRACTS} == {"bindings", "proposals", "showcase"}
+    assert set(module.OUR_CONTRACTS) == {"bindings", "proposals", "showcase"}
+    assert set(module.OUR_CONTRACTS) <= set(module.paths.PROJECT), "контракт без ключа таблицы"
 
 
 def test_an_empty_queue_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2842,7 +2843,12 @@ def test_unread_proposals_do_not_silence_the_export_drift(
     proposals = tmp_path / "proposals.json"
     if written is not None:
         proposals.write_text(written, encoding="utf-8")
-    monkeypatch.setattr(module.paths, "PROPOSALS", proposals)
+    real = module.ours_path
+    monkeypatch.setattr(
+        module,
+        "ours_path",
+        lambda key, root=None: proposals if key == "proposals" else real(key, root),
+    )
     found = module.catalogue_asked({"rules": [], "count": 3, "candidates": []}, {"rules": {}})
     assert [one.source for one in found] == ["rules-count"], found
     if written is not None:
@@ -2861,7 +2867,12 @@ def test_a_broken_proposals_file_silences_only_its_own_source(
     """
     broken = tmp_path / "proposals.json"
     broken.write_text("{не json", encoding="utf-8")
-    monkeypatch.setattr(module.paths, "PROPOSALS", broken)
+    real = module.ours_path
+    monkeypatch.setattr(
+        module,
+        "ours_path",
+        lambda key, root=None: broken if key == "proposals" else real(key, root),
+    )
     monkeypatch.setattr(module, "fetch", lambda url: {"count": 0, "candidates": []})
     for name in (
         "family_summary",

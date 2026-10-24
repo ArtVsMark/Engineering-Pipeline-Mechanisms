@@ -430,7 +430,10 @@ def rerunnable(where: Path | None = None) -> dict[str, str]:
     Пустой список — законное состояние: до 15.09.2026 он был пуст, и это было
     ИЗМЕРЕНО, а не забыто (решения 013, 014, 025).
     """
-    path = where or paths.RERUN
+    try:
+        path = where or policy.project_path("rerun")
+    except paths.BadPaths as exc:
+        raise NotRun(f"разрешённый список перезапуска не найден: {exc}") from exc
     try:
         said = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

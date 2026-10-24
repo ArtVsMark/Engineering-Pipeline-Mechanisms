@@ -22,6 +22,7 @@ from typing import Any, Final
 
 import ghrest
 import paths
+import pipeline_checks as policy
 
 #: Слова, по которым живая задача узнаётся СВОИМ механизмом и отличается от
 #: задачи, которую ведёт человек. Тело такой задачи механизм переписывает
@@ -117,6 +118,23 @@ KINDS: Final = {
 #: лишь назвавшая файл ответов (`da1a2e0`), иначе снималась только его правкой.
 #: Как снимается находка об ответе сегодня — канон `review_findings.closable`.
 ANSWER_FILE: Final = paths.BINDINGS.as_posix()
+
+
+@cache
+def answer_file() -> str:
+    """Ответ каталогу по таблице путей дерева (#1632); битая таблица — умолчание с пометкой.
+
+    Род находки — разметка, а не допуск: битый раздел путей красит сверка
+    ответа (`check_pipeline`), а здесь он назван в журнале, а не проглочен (045).
+    """
+    try:
+        return policy.project_path("bindings").as_posix()
+    except paths.BadPaths as exc:
+        print(
+            f"::warning::таблица путей не разобрана, ответ — по умолчанию: {exc}", file=sys.stderr
+        )
+        return ANSWER_FILE
+
 
 #: Место в начале заголовка находки: путь латиницей, затем двоеточие и номер
 #: строки. Формы — с расширением, без него, с точкой в начале. Один разбор на
@@ -414,7 +432,7 @@ def kind_of(title: str, said: str = "") -> str:
     """
     if said.strip() == ANSWER_KIND or said.strip() == KIND_SAID:
         return ANSWER_KIND
-    return ANSWER_KIND if first_path(title) == ANSWER_FILE else CODE
+    return ANSWER_KIND if first_path(title) == answer_file() else CODE
 
 
 #: Как роль пишется в строке записи: «глазами <роль>».
@@ -426,7 +444,7 @@ PROFILES_HEAD: Final = "## Профили"
 
 
 @cache
-def roles(path: Path = paths.ROLES) -> frozenset[str]:
+def roles(path: Path | None = None) -> frozenset[str]:
     """Роли, глазами которых смотрит взгляд, — из профилей карты ролей (#763).
 
     СПИСОК НЕ ПИШЕТСЯ ВТОРОЙ РАЗ. Состав ролей живёт в `docs/agent/roles.md`, и
@@ -434,6 +452,15 @@ def roles(path: Path = paths.ROLES) -> frozenset[str]:
     молча (022). Карты нет — ролей нет, и пометка в скобке находки просто не
     узнаётся: запись ляжет без роли, а не упадёт.
     """
+    if path is None:
+        try:
+            path = policy.project_path("roles")
+        except paths.BadPaths as exc:
+            print(
+                f"::warning::таблица путей не разобрана, карта ролей не прочитана: {exc}",
+                file=sys.stderr,
+            )
+            return frozenset()
     if not path.is_file():
         return frozenset()
     text = path.read_text(encoding="utf-8")
