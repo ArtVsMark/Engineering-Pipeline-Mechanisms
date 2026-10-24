@@ -348,3 +348,27 @@ def test_an_interpreter_that_does_not_run_is_named(tmp_path: Path) -> None:
     assert done.returncode == 2, done.stderr
     assert "не запускается" in done.stderr, done.stderr
     assert "неполон" not in done.stderr, done.stderr
+
+
+def test_a_tree_without_mechanisms_is_named_and_not_cached(tmp_path: Path) -> None:
+    """По тегу выкачано не то дерево — названо отказом, кеш не занят (взгляд на #1642).
+
+    Прежде такая выкачка вставала на место кеша, отказ говорил «перенос
+    отказал», а следующий заход называл её «остатком прежнего запускателя».
+    """
+    origin = supplier(tmp_path)
+    repo = origin / "o" / "m.git"
+    git(repo, "rm", "-q", "scripts/preflight.py")
+    (repo / "README.md").write_text("не механизмы\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "не то дерево")
+    git(repo, "tag", "-f", "v1.2.3")
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-lint.yml@v1.2.3")
+    cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
+    for _ in range(2):
+        done = load(tree, tmp_path)
+        assert done.returncode == 2, done.stderr
+        assert "выкачаны не механизмы" in done.stderr, done.stderr
+        assert "остаток" not in done.stderr, done.stderr
+    assert not cache.exists(), "чужое дерево встало на место кеша"
+    assert not list(cache.parent.glob("*.part*")), "выкачка осталась рядом с кешем"

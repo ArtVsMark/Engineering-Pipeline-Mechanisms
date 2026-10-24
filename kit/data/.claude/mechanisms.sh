@@ -94,6 +94,11 @@ except OSError:
   rm -rf "$part"
   "$deadline" 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$part" \
     || { rm -rf "$part"; refuse "механизмы $supplier@$tag не выкачаны из $origin"; }
+  # Выкачка без `preflight.py` — не механизмы (ссылка `uses:` не на поставщика
+  # или тег не того дерева): на место кеша она не встаёт, иначе следующий заход
+  # назвал бы её «остатком прежнего запускателя» (взгляд на #1642).
+  [ -f "$part/scripts/preflight.py" ] \
+    || { rm -rf "$part"; refuse "в $supplier@$tag нет scripts/preflight.py — по тегу выкачаны не механизмы"; }
   swap "$part" "$cache" || rm -rf "$part"
   [ -f "$cache/scripts/preflight.py" ] \
     || refuse "кеш механизмов $cache не встал на место: перенос выкачки отказал"
