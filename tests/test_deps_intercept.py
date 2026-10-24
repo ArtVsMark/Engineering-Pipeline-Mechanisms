@@ -4,6 +4,7 @@
 дереву и исходы захода, а не площадку.
 """
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1008,3 +1009,20 @@ def test_every_watch_is_pinned_and_read() -> None:
         assert one["read_at"] in pins, f"{one['dep']}: `read_at` не среди закреплений {pins}"
         file, _, name = one["by"].partition("::")
         assert name in (ROOT / file).read_text(encoding="utf-8"), f"`by` в никуда: {one['by']}"
+
+
+def test_the_watch_file_is_read_where_the_table_puts_it(tmp_path: Path) -> None:
+    """Объявления слежки — по таблице путей корня; битый раздел — отказ, а не умолчание (#1632)."""
+    moved = Path("cfg/watch.json")
+    (tmp_path / "cfg").mkdir()
+    (tmp_path / moved).write_text(
+        json.dumps({"watched": [{"dep": "o/a", "path": "x.ts", "read_at": SHA_OLD}]}),
+        encoding="utf-8",
+    )
+    assert module.watches(tmp_path, "o/a") == []
+    (tmp_path / ".pipeline.yml").write_text(f"paths:\n  vendor-watch: {moved}\n", encoding="utf-8")
+    assert module.at_root("vendor-watch", tmp_path) == moved
+    assert [one["path"] for one in module.watches(tmp_path, "o/a")] == ["x.ts"]
+    (tmp_path / ".pipeline.yml").write_text("paths:\n  vendor-watch: /w.json\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="вне дерева"):
+        module.watches(tmp_path, "o/a")

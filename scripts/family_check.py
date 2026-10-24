@@ -358,7 +358,16 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
         links.append(Link("family", "?", "uses", None, None, why.split(":")[0], "unknown", why))
     eip = (publishers.get(catalogue.REPO.lower()) or {}).get("gives") or {}
     # Файл не объект — не та форма: сверять нечего, а не падение.
-    if isinstance(answer := _json(root / ANSWER), dict):
+    # Адрес ответа — по таблице путей дерева (#1632); битая таблица названа
+    # связью «unknown», а не подменена умолчанием молча (045).
+    try:
+        answer_at: Path | None = pipeline_checks.project_path("bindings", root)
+    except paths.BadPaths as exc:
+        links.append(
+            Link("family", catalogue.REPO, "bindings", None, None, str(ANSWER), "unknown", str(exc))
+        )
+        answer_at = None
+    if answer_at is not None and isinstance(answer := _json(root / answer_at), dict):
         links.append(
             compare(
                 "family",
@@ -366,7 +375,7 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
                 "bindings",
                 answer.get("schema"),
                 eip.get("bindings"),
-                str(ANSWER),
+                str(answer_at),
             )
         )
         links.append(
@@ -376,7 +385,7 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
                 "export",
                 answer.get("answers_to"),
                 eip.get("export"),
-                str(ANSWER),
+                str(answer_at),
             )
         )
     # ДОГОВОР ФАКТОВ — У МЕХАНИЗМОВ (взгляд на #1612, 195): номер у каталога —
