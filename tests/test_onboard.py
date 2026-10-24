@@ -2523,3 +2523,11 @@ def test_version_of_compares_numbers_not_strings() -> None:
 def test_skill_kit_points_foreign_links_at_the_supplier(said: str, laid: str) -> None:
     """Цель вне дерева потребителя — полный адрес поставщика, своя — как есть (взгляд на #1626)."""
     assert module.skill_kit(said, "o/r") == laid
+
+
+def test_laid_at_the_consumer_is_the_union_of_every_kit() -> None:
+    """Положенное потребителю — данные, хуки, навыки и свод; наше дерево сверх того — нет."""
+    laid = module.laid_at_the_consumer()
+    assert {*module.DATA_KITTED, *module.TREE_KITTED, *module.SKILLS_KITTED} <= laid
+    assert {Path("AGENTS.md"), Path("CLAUDE.md")} <= laid
+    assert Path("docs/dev/gaps.md") not in laid and module.paths.SCRIPTS not in laid
