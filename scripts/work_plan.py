@@ -1028,6 +1028,9 @@ def announce_refusal(repo: str, token: str, reason: str) -> None:
     try:
         number, body = findings.live_issue(repo, token, MARKER)
         if number is None:
+            # Плана нет — блока не будет, и это говорится, а не молчит: журнал
+            # иначе не отличал бы этот случай от записанного (`80c4703`).
+            print("отказ сборки в план не записан: живой задачи плана нет", file=sys.stderr)
             return
         ghrest.request(
             "PATCH",
