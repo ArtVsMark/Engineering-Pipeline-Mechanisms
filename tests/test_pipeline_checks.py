@@ -1316,3 +1316,65 @@ def test_areas_without_a_file_or_a_section_are_none(tmp_path: Path) -> None:
     broken.write_text("scopes: [\n", encoding="utf-8")
     with pytest.raises(policy.scope_areas.BadAreas, match="не прочитан"):
         policy.areas_for_tests(broken)
+
+
+# --- таблица путей проекта (#1630) -----------------------------------------
+
+
+def test_the_path_table_defaults_to_the_old_anchors() -> None:
+    """19 ключей, и умолчание каждого — прежняя константа якоря."""
+    anchors = policy.paths
+    assert len(anchors.PROJECT) == 19
+    assert anchors.PROJECT["roles"] == anchors.ROLES
+    assert anchors.PROJECT["review-roles"] == anchors.REVIEW_ROLES
+    assert anchors.table_of(None) == anchors.PROJECT
+
+
+@pytest.mark.parametrize(
+    ("section", "said"),
+    [
+        ({"rolez": "x.md"}, "такого ключа нет"),
+        ({"roles": "/abs/roles.md"}, "вне дерева"),
+        ({"roles": "../up/roles.md"}, "вне дерева"),
+        ({"roles": ""}, "непустая строка"),
+        (["roles"], "ожидалось отображение"),
+    ],
+    ids=["неизвестный-ключ", "абсолютный", "выше-корня", "пустой", "не-словарь"],
+)
+def test_a_bad_paths_section_is_refused_with_its_reason(section: object, said: str) -> None:
+    """Дефект раздела путей — отказ с причиной, а не тихое умолчание (045)."""
+    with pytest.raises(policy.paths.BadPaths, match=said):
+        policy.paths.table_of(section)
+
+
+def test_project_path_reads_the_override_and_falls_back_to_the_default(tmp_path: Path) -> None:
+    """Раздел `paths:` переопределяет адрес; без файла и без раздела — умолчание."""
+    anchors = policy.paths
+    assert policy.project_path("roles", tmp_path) == anchors.ROLES
+    (tmp_path / ".pipeline.yml").write_text("schema: 4\nchecks: {}\n", encoding="utf-8")
+    assert policy.project_path("roles", tmp_path) == anchors.ROLES
+    (tmp_path / ".pipeline.yml").write_text(
+        "schema: 4\nchecks: {}\npaths:\n  roles: handbook/roles.md\n", encoding="utf-8"
+    )
+    assert policy.project_path("roles", tmp_path) == Path("handbook/roles.md")
+    assert policy.project_path("labels", tmp_path) == anchors.LABELS
+    assert policy.project_paths(tmp_path / ".pipeline.yml")["roles"] == Path("handbook/roles.md")
+
+
+def test_project_paths_of_reads_text_and_names_a_broken_answer() -> None:
+    """Из текста ответа — та же таблица; не разобранный YAML — `BadPaths` с местом."""
+    said = policy.project_paths_of("paths:\n  review-roles: cfg/roles.json\n", "main:.pipeline.yml")
+    assert said["review-roles"] == Path("cfg/roles.json")
+    with pytest.raises(policy.paths.BadPaths, match=r"main:\.pipeline\.yml"):
+        policy.project_paths_of("paths: [\n", "main:.pipeline.yml")
+
+
+def test_the_answer_check_refuses_a_bad_paths_section_early(tmp_path: Path) -> None:
+    """Сверка ответа (`load`) отвергает битый раздел путей — раньше первого читателя."""
+    answer = tmp_path / ".pipeline.yml"
+    answer.write_text(
+        'schema: 4\ncontract: ">=0.1,<99"\nchecks:\n  lint: required\npaths:\n  rolez: x\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(policy.BadPolicy, match="такого ключа нет"):
+        policy.load(answer, supplier=None)

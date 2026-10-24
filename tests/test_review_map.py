@@ -378,3 +378,47 @@ def test_the_words_the_map_teaches_are_the_words_the_parser_reads() -> None:
     kinds = module.findings
     assert set(kinds.KINDS) == {kinds.CODE, kinds.ANSWER_KIND}
     assert kinds.DEFECT in kinds.WEIGHTS
+
+
+def test_the_map_reads_its_tables_where_the_base_answer_points(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Таблица ролей — по пути из ответа ОБЩЕЙ ветки, а не из головы (#1630).
+
+    Голову пишет тот, кого проверяют: путь, переназначенный в голове, увёл бы
+    карту к слабому файлу. Ответа на базе нет — умолчание.
+    """
+    shown = {
+        ".pipeline.yml": "schema: 4\nchecks: {}\npaths:\n  review-roles: cfg/roles.json\n",
+        "cfg/roles.json": '{"required": ["catalogue-rules"], "by_path": []}',
+    }
+
+    def from_base(_: str, path: Path) -> str:
+        if str(path) not in shown:
+            raise module.NotRun(f"{path} не прочитан из базы")
+        return shown[str(path)]
+
+    monkeypatch.setattr(module, "shown_from_base", from_base)
+    assert module.base_path("main", "review-roles") == Path("cfg/roles.json")
+    assert module.base_path("main", "roles") == module.paths.ROLES
+    del shown[".pipeline.yml"]
+    assert module.base_path("main", "review-roles") == module.paths.REVIEW_ROLES
+    shown[".pipeline.yml"] = "paths:\n  rolez: x\n"
+    with pytest.raises(module.NotRun, match="такого ключа нет"):
+        module.base_path("main", "review-roles")
+
+
+def test_the_fallback_names_the_roles_the_base_moved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Процедура не прочиталась — раздел зовёт профили ролей по адресу таблицы базы (#1630)."""
+    shown = {".pipeline.yml": "paths:\n  roles: handbook/roles.md\n"}
+
+    def from_base(_: str, path: Path) -> str:
+        if str(path) not in shown:
+            raise module.NotRun(f"{path} не прочитан из базы")
+        return shown[str(path)]
+
+    monkeypatch.setattr(module, "shown_from_base", from_base)
+    said = module.roles_section("main", "o/r", 7)
+    assert "`handbook/roles.md`" in said and str(module.paths.ROLES) not in said
+    shown[".pipeline.yml"] = "paths:\n  rolez: x\n"
+    assert f"`{module.paths.ROLES}`" in module.roles_section("main", "o/r", 7)

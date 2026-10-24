@@ -160,7 +160,10 @@ def test_the_table_comes_from_the_base(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(module, "shown_from_base", shown)
     assert module.area_table("origin/main") == {"gates": ["tests/*"]}
-    assert asked == [("origin/main", module.paths.AREA_PATHS)]
+    assert asked == [
+        ("origin/main", module.paths.PIPELINE),
+        ("origin/main", module.paths.AREA_PATHS),
+    ]
 
 
 @pytest.mark.parametrize(

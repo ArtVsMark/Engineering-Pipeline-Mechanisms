@@ -565,6 +565,31 @@ def planted_lines(tmp_path: Path) -> list[str]:
     return said
 
 
+def key_removal_lines(tmp_path: Path) -> list[str]:
+    """Различия на подделке «ключ таблицы путей снят»: два дерева с разными `PROJECT`."""
+    trees = {}
+    for name, keys in (("before", ("a", "b")), ("after", ("a",))):
+        where = tmp_path / "keys" / name / "scripts"
+        where.mkdir(parents=True)
+        table = ", ".join(f'"{key}": Path("x")' for key in keys)
+        (where / "paths.py").write_text(f"PROJECT = {{{table}}}\n", encoding="utf-8")
+        trees[name] = contract.surface(where.parent)
+    return list(contract.differences(trees["before"], trees["after"]))
+
+
+def test_path_keys_are_read_from_the_tree_not_the_import(tmp_path: Path) -> None:
+    """Ключи — из `paths.py` снимаемого дерева; без файла — пусто (#1630)."""
+    assert contract.path_keys(tmp_path) == []
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "paths.py").write_text(
+        'PROJECT: Final[dict[str, Path]] = {"b": Path("x"), "a": Path("y")}\n', encoding="utf-8"
+    )
+    assert contract.path_keys(tmp_path) == ["a", "b"]
+    assert contract.path_keys(ROOT) == sorted(load_script("paths.py").PROJECT)
+    said = key_removal_lines(tmp_path / "removal")
+    assert said == ["ключ путей снят: «b»"] and contract.breaking(said), said
+
+
 def test_every_breaking_mark_is_actually_printed(tmp_path: Path) -> None:
     """У каждой приметы несовместимого есть ПРАВКА, на которой она печатается.
 
@@ -579,7 +604,7 @@ def test_every_breaking_mark_is_actually_printed(tmp_path: Path) -> None:
     внешний взгляд на #242
     ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
     """
-    said = planted_lines(tmp_path)
+    said = planted_lines(tmp_path) + key_removal_lines(tmp_path / "keys-removal")
     orphans = [mark for mark in contract.BREAKING_MARKS if not any(mark in line for line in said)]
     assert not orphans, (
         f"приметы, которых не печатает ни одна подделанная правка: {orphans}. "

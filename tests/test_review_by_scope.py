@@ -104,6 +104,7 @@ def test_the_roles_section_drops_roles_on_a_text_change(monkeypatch: pytest.Monk
     shown = {
         module.paths.REVIEW_PROCEDURE: "процедура",
         module.paths.REVIEW_ROLES: json.dumps(TABLE, ensure_ascii=False),
+        module.paths.PIPELINE: "",
     }
     monkeypatch.setattr(module, "shown_from_base", lambda base, path: shown[path])
     said = module.roles_section("origin/main", "о/р", 7, files=["README.md"])
@@ -136,6 +137,7 @@ def test_an_uncounted_own_answer_keeps_every_role(monkeypatch: pytest.MonkeyPatc
     shown = {
         module.paths.REVIEW_PROCEDURE: "процедура",
         module.paths.REVIEW_ROLES: json.dumps(TABLE, ensure_ascii=False),
+        module.paths.PIPELINE: "",
     }
     monkeypatch.setattr(module, "shown_from_base", lambda base, path: shown[path])
     said = module.roles_section("origin/main", "о/р", 7, files=["README.md"])
