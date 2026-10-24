@@ -31,6 +31,7 @@ from typing import Any, Final
 import gitcall
 import journal
 import paths
+import pipeline_checks as policy
 import report
 
 EXIT_OK: Final = 0
@@ -110,12 +111,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        where = str(paths.BINDINGS)
+        try:
+            answer = policy.project_path("bindings")
+        except paths.BadPaths as exc:
+            raise NotRun(f"ответ каталогу не найден: {exc}") from exc
+        where = str(answer)
         # «ДО» — ТОЧКА ВЕТВЛЕНИЯ, А НЕ ВЕРШИНА БАЗЫ (взгляд на #1499, 195; тот же
         # приём, что у гейта поверхности, #1494). База, поправившая ответ после
         # ветвления, делала одиночный подъём номера «с тронутыми ответами».
         was = at(journal.common_ancestor(args.base or base_ref()), where)
-        now = json.loads(paths.BINDINGS.read_text(encoding="utf-8"))
+        now = json.loads(answer.read_text(encoding="utf-8"))
     except (NotRun, journal.NotRun, OSError, json.JSONDecodeError) as exc:
         print(f"гейт не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN

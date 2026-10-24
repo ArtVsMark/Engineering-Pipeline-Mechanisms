@@ -91,7 +91,9 @@ def sync(repo: str, token: str, declared: list[labels.Label], dry_run: bool) -> 
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: разбирает ключи, печатает исход, возвращает его код."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=labels.DEFAULT_PATH, help="состав меток")
+    parser.add_argument(
+        "--config", type=Path, default=None, help="состав меток; без ключа — по таблице путей"
+    )
     parser.add_argument(
         "--repo", default=os.environ.get("GITHUB_REPOSITORY", ""), help="владелец/имя"
     )

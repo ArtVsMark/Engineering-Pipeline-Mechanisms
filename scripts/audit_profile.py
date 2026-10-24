@@ -46,6 +46,7 @@ from typing import Any, Final
 import catalogue
 import finding_kinds
 import paths
+import pipeline_checks as policy
 import report
 
 EXIT_OK: Final = 0
@@ -224,7 +225,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        path = Path(args.answers) if args.answers else paths.BINDINGS
+        try:
+            path = Path(args.answers) if args.answers else policy.project_path("bindings")
+        except paths.BadPaths as exc:
+            raise NotRun(f"ответы проекта не найдены: {exc}") from exc
         if not path.is_file():
             raise NotRun(f"нет {path}: ответы проекта взять неоткуда (075)")
         # ПУТЬ ЛЮБОЙ, ПОЭТОМУ ФОРМА ПРОВЕРЯЕТСЯ: файл не из дерева `tests/test_bindings.py`

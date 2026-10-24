@@ -92,15 +92,16 @@ def from_base(base: str) -> dict[str, Any]:
     Не из рабочего дерева: дерево здесь — это голова изменения, то есть текст
     того, кого проверяют (085).
     """
-    shown = git(["show", f"{base}:{ANSWER}"])
+    where = base_path(base, "bindings")
+    shown = git(["show", f"{base}:{where}"])
     if shown.returncode != 0:
         raise NotRun(f"ответ каталогу не прочитан из {base}: {shown.stderr.strip()}")
     try:
         answer = json.loads(shown.stdout)
     except json.JSONDecodeError as exc:
-        raise NotRun(f"{base}:{ANSWER} не разбирается: {exc}") from exc
+        raise NotRun(f"{base}:{where} не разбирается: {exc}") from exc
     if not isinstance(answer, dict):
-        raise NotRun(f"{base}:{ANSWER}: ответ каталогу не словарь")
+        raise NotRun(f"{base}:{where}: ответ каталогу не словарь")
     return answer
 
 
@@ -640,7 +641,9 @@ def touches_the_answer(base: str, head: str = "HEAD") -> bool:
     try:
         # `-z` здесь не про удобство: без него имя с пробелом или кириллицей
         # приходит экранированным, и путь не разрешается молча (165).
-        shown = git(["diff", "--name-only", "-z", base, head, "--", str(ANSWER)])
+        shown = git(
+            ["diff", "--name-only", "-z", base, head, "--", str(base_path(base, "bindings"))]
+        )
     except NotRun:
         # Без git — та же сторона, что при отказе: «тронут» (ниже).
         return True
