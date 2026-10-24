@@ -2295,8 +2295,81 @@ def test_split_shebang_keeps_the_first_line_first(text: str, parts: tuple[str, s
 
 def test_settings_note_speaks_only_of_own_untouched_settings(tmp_path: Path) -> None:
     """Строка о неподключённых хуках — только когда настройки свои и не положены."""
-    assert module.settings_note(tmp_path, []) == ""
+    assert module.settings_note(tmp_path, [], "o/r", "v1.0.0") == ""
     (tmp_path / ".claude").mkdir()
     (tmp_path / module.paths.SETTINGS).write_text("{}\n", encoding="utf-8")
-    assert module.settings_note(tmp_path, [module.paths.SETTINGS]) == ""
-    assert "раздел `hooks`" in module.settings_note(tmp_path, [])
+    assert module.settings_note(tmp_path, [module.paths.SETTINGS], "o/r", "v1.0.0") == ""
+    said = module.settings_note(tmp_path, [], "o/r", "v1.0.0")
+    # Адрес — файл поставщика на прибивке: печать захода настроек не выводит
+    # (взгляд на #1619).
+    assert "https://github.com/o/r/blob/v1.0.0/.claude/settings.json" in said, said
+
+
+@pytest.mark.parametrize("name", ["push_guard.sh", "push_guard.py"])
+def test_unsigned_undoes_the_license_line(name: str) -> None:
+    """Подписанная копия без строки лицензии — снова наш файл, `#!` первой."""
+    path = module.paths.HOOKS / name
+    text = "#!/bin/sh\nтело\n" if name.endswith(".sh") else "тело\n"
+    assert module.unsigned(path, module.licensed(path, text, "o/r")) == text
+    assert module.unsigned(path, text) == text
+
+
+def test_blob_of_names_the_object_as_git_does(tmp_path: Path) -> None:
+    """Имя объекта считается как у `git hash-object`: иначе история не узнала бы копию."""
+    (tmp_path / "f").write_text("тело\n", encoding="utf-8")
+    done = subprocess.run(
+        ["git", "hash-object", str(tmp_path / "f")],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        timeout=30,
+    )
+    assert module.blob_of("тело\n") == done.stdout.strip()
+
+
+def commit_hook(root: Path, name: str, text: str) -> None:
+    """Новая версия нашего хука — коммитом: устаревшую копию узнаёт история."""
+    (root / module.paths.HOOKS / name).write_text(text, encoding="utf-8")
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "commit", "--quiet", "-am", "хук"], check=True, timeout=30)
+
+
+def test_update_lifts_a_stale_hook_from_our_history(tmp_path: Path) -> None:
+    """`--update` переписывает копию хука, бывшую нашей (взгляд на #1619, 214)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    commit_hook(root, "push_guard.py", "#!/bin/sh\n# страж, починенный\n")
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    laid = (consumer / module.paths.HOOKS / "push_guard.py").read_text(encoding="utf-8")
+    assert "починенный" in laid and module.LICENSE_ID in laid, laid
+
+
+def test_update_refuses_a_hand_edited_hook(tmp_path: Path) -> None:
+    """Правленая копия хука — отказ на всё обновление, файл не тронут (045)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    guard = consumer / module.paths.HOOKS / "push_guard.py"
+    guard.write_text("# свой страж\n", encoding="utf-8")
+    commit_hook(root, "push_guard.py", "#!/bin/sh\n# страж, починенный\n")
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_HAND_EDITED
+    assert guard.read_text(encoding="utf-8") == "# свой страж\n"
+
+
+def test_plan_tree_sorts_current_stale_and_edited(tmp_path: Path) -> None:
+    """Копия хука: своя — на месте, бывшая нашей — переписать, иная — правлена."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    name = module.paths.HOOKS / "push_guard.py"
+    old = (root / name).read_text(encoding="utf-8")
+    assert module.blob_of(old) in module.blobs_in_history(root, name)
+    commit_hook(root, "push_guard.py", "#!/bin/sh\n# новый\n")
+    ours = {name: "#!/bin/sh\n# новый\n"}
+    consumer = tmp_path / "потребитель"
+    for mine, where in ((ours[name], "current"), (old, "write"), ("свой\n", "edited")):
+        (consumer / name).parent.mkdir(parents=True, exist_ok=True)
+        (consumer / name).write_text(mine, encoding="utf-8")
+        plan = module.Update()
+        module.plan_tree(plan, consumer, ours, root)
+        assert name in getattr(plan, where), (mine, plan)

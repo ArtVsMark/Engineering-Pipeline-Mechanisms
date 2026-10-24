@@ -102,6 +102,7 @@ import argparse
 import ast
 import contextlib
 import difflib
+import hashlib
 import io
 import json
 import re
@@ -1055,19 +1056,85 @@ def tree_kit(root: Path) -> dict[Path, str]:
     return {path: (root / path).read_text(encoding="utf-8") for path in TREE_KITTED}
 
 
-def settings_note(consumer: Path, laid: list[Path]) -> str:
+def settings_note(consumer: Path, laid: list[Path], repo: str, pin: str) -> str:
     """Свои настройки окна у потребителя не тронуты — и хуки к ним не подключены.
 
     Сказано вслух (045): хуки лежат, но площадка их не зовёт, пока проект не
-    перенесёт раздел `hooks` из наших настроек в свои.
+    перенесёт раздел `hooks` из наших настроек в свои. Адрес — файл поставщика
+    на прибивке: печать захода настроек не выводит (взгляд на #1619).
     """
     if paths.SETTINGS in laid or not (consumer / paths.SETTINGS).exists():
         return ""
     return (
         f"`{paths.SETTINGS}` уже есть и не тронут: хуки окна в {paths.HOOKS}/ не "
         "подключены, пока вы не перенесёте в него раздел `hooks` из настроек "
-        "поставщика — заход без ключей печатает их целиком"
+        f"поставщика — https://github.com/{repo}/blob/{pin}/{paths.SETTINGS.as_posix()}"
     )
+
+
+def unsigned(path: Path, text: str) -> str:
+    """Заготовка без строки лицензии, которую поставил `licensed`: та, что лежит у нас."""
+    if not is_signed(path, text) or path.suffix == ".json":
+        return text
+    shebang, body = split_shebang(text)
+    return shebang + body.partition("\n")[2]
+
+
+def blob_of(text: str) -> str:
+    """Имя git-объекта для текста — как `git hash-object`, без вызова git."""
+    data = text.encode("utf-8")
+    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+
+
+def blobs_in_history(root: Path, path: Path) -> set[str]:
+    """Все содержимые нашего файла по истории поставщика: так узнаётся устаревшая копия.
+
+    Мелкий клон знает не все — тогда старая копия называется правленой: громкий
+    отказ, а не тихая перезапись (045).
+    """
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "log", "--format=", "--raw", "--no-abbrev", "--", str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=gitcall.LOCAL,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise NotRun(f"история {path} не прочитана: {exc}") from exc
+    if done.returncode:
+        raise NotRun(f"история {path} не прочитана: {done.stderr.strip() or done.returncode}")
+    return {line.split()[3] for line in done.stdout.splitlines() if line.startswith(":")}
+
+
+def plan_tree(update: Update, consumer: Path, tree: dict[Path, str], root: Path) -> None:
+    """Хуки окна как есть: устаревшая копия переписывается, правленая — отказ (взгляд на #1619).
+
+    Без этого однажды положенный страж толчка не обновлялся бы никогда: `--update`
+    кладёт заготовки данных только в свободное, и починка стража до потребителя
+    не дошла бы (214). Устаревшая — та, чьё содержимое было нашим в какой-то
+    момент истории. Настройки окна — файл проекта (`of_the_project`) и здесь
+    не судятся.
+    """
+    for path, ours in sorted(tree.items()):
+        target = consumer / path
+        if of_the_project(path) or not target.is_file():
+            continue
+        mine = unsigned(path, target.read_text(encoding="utf-8"))
+        if mine == ours:
+            update.current.append(path)
+        elif blob_of(mine) in blobs_in_history(root, path):
+            update.write[path] = ours
+        else:
+            update.edited[path] = "".join(
+                difflib.unified_diff(
+                    ours.splitlines(keepends=True),
+                    mine.splitlines(keepends=True),
+                    "поставщик",
+                    "ваш",
+                )
+            )
 
 
 #: Расширения YAML, которые площадка читает одинаково: `dependabot.yaml` занимает
@@ -1815,6 +1882,7 @@ def update(
     plan = Update()
     try:
         plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
+        plan_tree(plan, consumer, {path: data[path] for path in TREE_KITTED if path in data}, root)
         plan_ci(plan, consumer, pipeline, repo, pin)
         wanted = [check_name(one) for one in pipeline] + records
         plan_answer(plan, consumer, wanted, contract, pin)
@@ -1855,7 +1923,7 @@ def update(
         print(note)
     if laid:
         print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
-    if unwired := settings_note(consumer, laid):
+    if unwired := settings_note(consumer, laid, repo, pin):
         print(unwired)
     if unanswered := bindings_note(consumer):
         print(unanswered)
@@ -2039,7 +2107,7 @@ def main(argv: list[str] | None = None) -> int:
         laid = lay_free(args.write, kit, args.repo)
         if laid:
             print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
-        if unwired := settings_note(args.write, laid):
+        if unwired := settings_note(args.write, laid, args.repo, pin):
             print(unwired)
         if unanswered := bindings_note(args.write):
             print(unanswered)
