@@ -56,12 +56,10 @@
 # только на чтение. Их внешний путь подтвердит первое подключение проекта
 # семьи (#1191), а не эта проба.
 #
-# `step-attribution-history` и `step-python-next` НЕ ПИШУТ НИЧЕГО, И ПРИЧИНА
-# ЧЕТВЁРТАЯ: их нет в выпуске, к которому проба прибита. Шаги вынесены в
-# #1556, и позвать их внешним путём можно только с прибивкой на выпуск,
-# который их несёт.
-# Подъём прибивки принесёт дрейф `probe-behind`, и тогда проба назовёт их
-# своими джобами.
+# `step-attribution-history` и `step-python-next` — управляющие, но НЕ ПИШУТ
+# НИЧЕГО, и проба их ЗОВЁТ: вторая причина к ним не относится, а в выпуске,
+# к которому проба прибита, они есть (#1556, находка на #1622). Что они только
+# читают, держит набор (`READ_ONLY_MANAGED` в tests/test_handover_probe.py).
 #
 # `step-required-context` НЕ ПИШЕТ НИЧЕГО, И ПРИЧИНА ТРЕТЬЯ. Половину
 # «способ слияния» он читает токеном владельца, а проба этот секрет НЕ
@@ -119,6 +117,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  probe-attribution-history:
+    name: probe-attribution-history
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution-history.yml@v1.10.0
+    permissions:
+      contents: read
+
+  probe-python-next:
+    name: probe-python-next
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-python-next.yml@v1.10.0
+    # Внешний путь вызова, а не набор: наш код проба стирает (`strip-ours`), и
+    # звать нашу установку и наши тесты на дереве без них нечего.
+    with:
+      strip-ours: true
+      python: "3.16"
+      install: python -m pip install --quiet "pytest>=8,<10"
+      test: python --version
+    permissions:
+      contents: read
+
   probe-attribution:
     name: probe-attribution
     uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.10.0

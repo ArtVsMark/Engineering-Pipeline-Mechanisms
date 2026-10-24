@@ -8,8 +8,9 @@
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
+import pytest
 import yaml
 
 from tests.conftest import ROOT, load_script
@@ -40,6 +41,16 @@ def managed() -> set[str]:
     return set(onboard.own_callers(ROOT, onboard.steps(ROOT)))
 
 
+#: Управляющие шаги, которые ничего не пишут, — проба их зовёт (находка на #1622).
+#: Свой вызывающий прогон у них есть, но вторая причина исключения — «пишут
+#: живые задачи» — к ним не относится. Что они и правда только читают, держит
+#: `test_a_read_only_managed_step_takes_no_write_and_no_secret`.
+READ_ONLY_MANAGED: Final = {
+    "attribution-history": "сверяет атрибуцию по истории общей ветки и только печатает",
+    "python-next": "гоняет набор на следующей версии Python и только печатает",
+}
+
+
 def probe() -> dict[Any, Any]:
     """Разобранная проба: предмет берётся из дерева, а не из памяти."""
     said: dict[Any, Any] = yaml.safe_load(PROBE.read_text(encoding="utf-8"))
@@ -54,8 +65,26 @@ def test_the_probe_calls_every_step_it_can() -> None:
     Сосед у сужения назван списком выше, а не оставлен читателю (195).
     """
     called = {name.removeprefix(PREFIX) for name in probe()["jobs"]}
-    want = set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE) - managed()
+    want = set(onboard.steps(ROOT)) - set(NEEDS_A_CHANGE) - (managed() - set(READ_ONLY_MANAGED))
     assert called == want, "проба зовёт не тот состав, что отдаётся наружу"
+
+
+def writes(permissions: object) -> bool:
+    """Даёт ли объявление прав запись хоть на что-то."""
+    if permissions == "write-all":
+        return True
+    return isinstance(permissions, dict) and "write" in permissions.values()
+
+
+@pytest.mark.parametrize("name", sorted(READ_ONLY_MANAGED))
+def test_a_read_only_managed_step_takes_no_write_and_no_secret(name: str) -> None:
+    """Шаг из списка зовимых пробой не пишет: ни права записи, ни секрета на входе."""
+    assert name in managed(), f"{name} — не управляющий, и в списке ему не место"
+    said = yaml.safe_load((ROOT / f".github/workflows/step-{name}.yml").read_text(encoding="utf-8"))
+    call = (said.get(True) or said.get("on") or {}).get("workflow_call") or {}
+    assert not call.get("secrets"), f"{name} берёт секрет — может писать"
+    rights = [said.get("permissions"), *(job.get("permissions") for job in said["jobs"].values())]
+    assert not any(writes(one) for one in rights), f"{name} объявляет право записи"
 
 
 def test_the_gap_of_the_probe_is_named_not_silent() -> None:
@@ -66,7 +95,10 @@ def test_the_gap_of_the_probe_is_named_not_silent() -> None:
     """
     said = PROBE.read_text(encoding="utf-8")
     assert managed(), "управляющих механизмов нет — сужение пробы держит пустоту (075)"
-    for one in (*NEEDS_A_CHANGE, *(f"step-{name}" for name in sorted(managed()))):
+    for one in (
+        *NEEDS_A_CHANGE,
+        *(f"step-{name}" for name in sorted(managed() - set(READ_ONLY_MANAGED))),
+    ):
         assert one in said, f"пробел про «{one}» в пробе не назван"
     # Регистр не судится: шапки механизмов пишут признак прописными, и
     # требовать строчных значило бы проверять стиль, а не наличие.
