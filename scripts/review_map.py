@@ -57,8 +57,6 @@ EXIT_BROKEN: Final = 2
 MACHINE: Final = kinds.MACHINE
 
 EXPORT_URL: Final = catalogue.EXPORT_URL
-#: Файл ответа каталогу — он же предмет подделки, если читать его из головы.
-ANSWER: Final = paths.BINDINGS
 #: Ключ таблицы ролей: сценарий → обязательные роли, что остаются на нём (#1608).
 BY_SCOPE: Final = "by_scope"
 

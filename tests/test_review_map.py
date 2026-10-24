@@ -162,7 +162,7 @@ def test_the_answer_is_read_from_the_base_not_the_worktree(tmp_path: Path) -> No
     run("git", "init", "--quiet", "-b", "main")
     run("git", "config", "user.email", "test@example.com")
     run("git", "config", "user.name", "Тест")
-    answer = tmp_path / module.ANSWER
+    answer = tmp_path / module.paths.BINDINGS
     answer.parent.mkdir(parents=True, exist_ok=True)
     base = {"rules": {"003": {"status": "active", "mechanism": "document"}}}
     answer.write_text(json.dumps(base, ensure_ascii=False), encoding="utf-8")

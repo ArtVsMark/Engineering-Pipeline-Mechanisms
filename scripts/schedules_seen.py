@@ -41,9 +41,6 @@ import paths
 import pipeline_checks as policy
 import report
 
-#: Объявление расписаний — то же, по которому держится цена захода (022).
-DECLARED: Final = paths.SCHEDULES
-
 EXIT_OK: Final = 0
 EXIT_MISSED: Final = 1
 EXIT_BROKEN: Final = 2
