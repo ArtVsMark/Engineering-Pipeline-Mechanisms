@@ -413,3 +413,11 @@ def test_the_gaps_are_named_together_and_decide_the_outcome(
     assert code == (module.EXIT_UNREAD if said else module.EXIT_OK)
     out = capsys.readouterr()
     assert out.out.splitlines() == said and not out.err
+
+
+def test_a_repeat_with_other_fields_is_refused(tmp_path: Path) -> None:
+    """Повтор реестра с другими `since`/`why` — отказ, а не молча первая запись (#1603)."""
+    first = {"repo": "Owner/Repo", "since": "2026-09-19", "why": "берёт линтер"}
+    root = registry_with(tmp_path, first, {**first, "repo": "owner/repo", "why": "иное"})
+    with pytest.raises(module.NotRun, match="дважды с разными полями"):
+        module.registry(root)

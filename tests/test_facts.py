@@ -143,7 +143,8 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / facts.VERSION_FILE).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / facts.VERSION_FILE).write_text("0.7.3\n", encoding="utf-8")
-    assert facts.manifest_facts(tmp_path) == {"release": None, "gives": {"steps": "0.7"}}
+    gives = {"steps": "0.7", "facts": facts.facts_number()}
+    assert facts.manifest_facts(tmp_path) == {"release": None, "gives": gives}
     git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "add", "."], check=True)
     subprocess.run([*git, "commit", "-qm", "c"], check=True)
@@ -157,7 +158,16 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
     # вместо тега прошло бы зелёным (находка `46a0c7f` на #1395).
     (tmp_path / facts.VERSION_FILE).write_text("2.4.1\n", encoding="utf-8")
     subprocess.run([*git, "commit", "-qam", "d"], check=True)
-    assert facts.manifest_facts(tmp_path)["gives"] == {"steps": "0.7"}
+    assert facts.manifest_facts(tmp_path)["gives"] == gives
+
+
+def test_facts_number_is_read_from_the_contract_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Номер договора фактов — из его тега; тег не той формы — отказ (взгляд на #1612)."""
+    monkeypatch.setattr(facts.common, "CONTRACT_TAG", "facts-v2.1.0")
+    assert facts.facts_number() == "2.1"
+    monkeypatch.setattr(facts.common, "CONTRACT_TAG", "v2.1")
+    with pytest.raises(facts.NotRun, match="не формы"):
+        facts.facts_number()
 
 
 #: Разрезы витрины, публикующие ДОЛЮ, и два числа, из которых она сделана.

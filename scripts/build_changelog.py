@@ -281,6 +281,17 @@ def parse_fragments(paths: list[Path], form: journal.FragmentForm | None = None)
     return fragments
 
 
+def fragments_said(mine: list[Fragment], paths: list[str]) -> str:
+    """Строка итога: сколько фрагментов разобрано и чьи они.
+
+    При тронутом `.pipeline.yml` `fragments_of` судит все копящиеся, и «фрагменты
+    изменения: N» называло бы чужие своими (взгляд на #1603, 215).
+    """
+    if pipeline_checks.DEFAULT_PATH.as_posix() in paths:
+        return f"тронут ответ проекта — разобраны все копящиеся фрагменты: {len(mine)}"
+    return f"фрагменты изменения разбираются: {len(mine)}"
+
+
 def fragments_of(paths: list[str]) -> list[Fragment]:
     """Разбирает фрагменты, которые тронуло ИЗМЕНЕНИЕ; тронут ответ проекта — все копящиеся.
 
@@ -677,7 +688,8 @@ def main(argv: list[str] | None = None) -> int:
             # пуст — гейт валился третьим исходом на первом же изменении, хотя
             # своё оно принесло. Ни версия, ни собранный файл здесь не нужны:
             # их спрашивает выпуск, а изменение отвечает за свой фрагмент.
-            mine = fragments_of(journal.changed_files(journal.base_from_env(args.base)))
+            changed = journal.changed_files(journal.base_from_env(args.base))
+            mine = fragments_of(changed)
             if not mine:
                 # Законное состояние, а не «нечего проверять»: нужен ли
                 # изменению фрагмент вообще, решает `check_journal.py` — он и
@@ -685,7 +697,7 @@ def main(argv: list[str] | None = None) -> int:
                 # значило бы завести второй источник того же решения (022).
                 print("изменение не несёт фрагментов — их наличие спрашивает check_journal")
                 return EXIT_OK
-            print(f"фрагменты изменения разбираются: {len(mine)}")
+            print(fragments_said(mine, changed))
             return EXIT_OK
 
         if args.release:

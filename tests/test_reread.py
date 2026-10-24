@@ -144,3 +144,26 @@ def test_the_gate_passes_a_raise_that_carries_its_work(
     )
     done = run_script("check_reread.py", "--base", "main", cwd=root)
     assert done.code == module.EXIT_OK, done.text
+
+
+def test_a_base_that_moved_after_the_fork_does_not_lend_its_work(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """База поправила ответ после ветвления — одиночный подъём ветки всё равно отвергнут.
+
+    «До» берётся от точки ветвления, а не с вершины базы (взгляд на #1499).
+    """
+    root = repo_with(tmp_path, answers("1.6"))
+    git = ["git", "-C", str(root)]
+    subprocess.run([*git, "branch", "work"], check=True, capture_output=True)
+    (root / ".rules" / "bindings.json").write_text(
+        json.dumps(answers("1.6", {"001": {"status": "off"}}), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    subprocess.run([*git, "commit", "-qam", "база"], check=True, capture_output=True)
+    subprocess.run([*git, "checkout", "-q", "work"], check=True, capture_output=True)
+    (root / ".rules" / "bindings.json").write_text(
+        json.dumps(answers("1.7"), ensure_ascii=False), encoding="utf-8"
+    )
+    done = run_script("check_reread.py", "--base", "main", cwd=root)
+    assert done.code == module.EXIT_REJECTED, done.text

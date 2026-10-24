@@ -196,6 +196,9 @@ def test_a_consumers_own_contract_is_not_the_suppliers(
     tree.mkdir()
     (tree / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     monkeypatch.setenv("GITHUB_REPOSITORY", running)
+    # Каталог запуска — дерево без `origin`: без имени прогона своя сторона
+    # иначе читалась бы у того клона, откуда позван набор (среда прогона, 018).
+    monkeypatch.chdir(tree)
     supplier = cloned(tmp_path / "mechanisms", origin)
     assert policy.contract_of(tree, supplier) == (FAKE_VERSION if taken == "tag" else "0.1.0")
 

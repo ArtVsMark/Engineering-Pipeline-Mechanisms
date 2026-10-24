@@ -357,7 +357,12 @@ def installing_steps(*directories: Path) -> frozenset[str]:
     installs: set[str] = set()
     works: set[str] = set()
     for path in sorted(path for folder in folders for path in folder.glob("*.y*ml")):
-        document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        # Не UTF-8 или не разбирается — «не отработал», а не трасса (взгляд на #1593,
+        # класс #1567): каталог поставщика читается тем же путём.
+        try:
+            document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise NotRun(f"{path}: прогон не прочитан: {exc}") from exc
         for job in (document.get("jobs") or {}).values():
             for step in (job or {}).get("steps") or []:
                 said = str((step or {}).get("name") or "").strip()

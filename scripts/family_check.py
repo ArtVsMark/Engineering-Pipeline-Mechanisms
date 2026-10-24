@@ -100,9 +100,9 @@ SIGN: Final = {
 }
 
 #: Издатели контрактов семьи и их короткие имена на значке. Список закрытый и
-#: с причиной (068): правила, ответы и договор фактов (каталог), шаги конвейера
-#: (механизмы). Парный издатель (глоссарий) сюда не входит: его связь видна в
-#: сегменте `pairs`.
+#: с причиной (068): правила и ответы (каталог), шаги конвейера и с
+#: `facts-v2.1.0` договор фактов (механизмы, #1563). Парный издатель
+#: (глоссарий) сюда не входит: его связь видна в сегменте `pairs`.
 PUBLISHERS: Final = {catalogue.REPO: "EIP", family_uptake.OURS: "EPM"}
 #: Чем издатель узнаётся в сводке, когда его имя разошлось с умолчанием:
 #: механизмы — тот, кто отдаёт `steps`.
@@ -203,7 +203,7 @@ def compare(
 
 def compare_facts(mine: str | None, latest: str | None) -> Link:
     """Номер своих фактов против договора; переезд 1 → 2 — серый с причиной."""
-    link = compare("family", catalogue.REPO, "facts", mine, latest, str(FACTS))
+    link = compare("family", family_uptake.OURS, "facts", mine, latest, str(FACTS))
     # не проза: номер версии «мажор.минор».
     majors = (str(mine).split(".")[0], str(latest).split(".")[0])
     if link.state == "behind" and majors == FACTS_MOVE:
@@ -379,8 +379,18 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
                 str(ANSWER),
             )
         )
+    # ДОГОВОР ФАКТОВ — У МЕХАНИЗМОВ (взгляд на #1612, 195): номер у каталога —
+    # прежний держатель, и наш 2.1 против его 2.0 читался бы «сводка отстала».
+    # Издатель — по той же роли, что у сверки шагов (`family_publishers`), а не
+    # по имени по умолчанию: переименованный иначе дал бы серые факты молча
+    # (взгляд на #1628).
+    mechanisms = next(
+        (repo for repo, code in family_publishers(summary).items() if code == "EPM"),
+        family_uptake.OURS,
+    )
+    epm = (publishers.get(mechanisms.lower()) or {}).get("gives") or {}
     if isinstance(facts := _json(root / FACTS), dict):
-        links.append(compare_facts(facts.get("schema"), eip.get("facts")))
+        links.append(compare_facts(facts.get("schema"), epm.get("facts")))
     return links + steps_links(root, summary)
 
 

@@ -569,3 +569,31 @@ def test_a_minor_notice_carries_its_own_title(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(module.ghrest, "paginate", issues_of([]))
     said = module.notify("o/взял", "v1.7.0", "тело", "т", "владелец", dry_run=True, title="свой")
     assert "«свой»" in said
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [lambda: module.ghrest.NotFound("404"), lambda: module.consumers.BadAnswer("битый")],
+    ids=["нет-файла", "не-разбирается"],
+)
+def test_a_missing_or_broken_answer_is_the_neighbours_state(
+    monkeypatch: pytest.MonkeyPatch, refusal: Any
+) -> None:
+    """Нет `.pipeline.yml` или он не разбирается — окна нет, сосед оповещается (взгляд на #1591)."""
+
+    def answer_of(repo: str, token: str) -> dict[str, str]:
+        raise refusal()
+
+    monkeypatch.setattr(module.consumers, "answer_of", answer_of)
+    assert module.window_of(took("o/взял", None), "т") is None
+
+
+def test_an_unread_answer_stays_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Сбой чтения, а не состояние соседа, — по-прежнему `NotRun`: повтор хвоста может помочь."""
+
+    def answer_of(repo: str, token: str) -> dict[str, str]:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.consumers, "answer_of", answer_of)
+    with pytest.raises(module.NotRun, match="не прочитано"):
+        module.window_of(took("o/взял", None), "т")
