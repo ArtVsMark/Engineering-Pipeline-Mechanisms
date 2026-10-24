@@ -157,13 +157,31 @@ def test_the_skeleton_heading_matches_its_own_table() -> None:
     assert names(heading, SPELLED[len(files)]), f"{heading}: файлов в таблице {len(files)}"
 
 
+def spoken(text: str) -> list[str]:
+    """Слова текста в нижнем регистре, «ё» как «е»: так их сравнивает `names`."""
+    return re.findall(r"[а-яa-z0-9]+", text.lower().replace("ё", "е"))
+
+
 def names(heading: str, count: str) -> bool:
     """Называет ли заголовок число словами — с «ё» или через «е», без разницы.
 
     Тем же правилом, что набор слов счёта (`count_words`): написание через «е»
     — то же слово, а не другое (взгляд на #1489, `6717da0`).
+
+    ЧИСЛО — ЦЕЛЫМИ СЛОВАМИ ПОДРЯД, А НЕ ПОДСТРОКОЙ (взгляд на #1489, `fb4a992`).
+    Подстрока принимала «семнадцать» внутри «восемнадцать» и «десяти» внутри
+    «пятидесяти». Число, стоящее началом составного («двадцати» перед
+    «двадцати трёх»), тоже не годится: за ним в заголовке идёт ещё слово счёта.
     """
-    return count.replace("ё", "е") in heading.lower().replace("ё", "е")
+    wanted, said = spoken(count), spoken(heading)
+    for at in range(len(said) - len(wanted) + 1):
+        if said[at : at + len(wanted)] != wanted:
+            continue
+        after = said[at + len(wanted)] if at + len(wanted) < len(said) else ""
+        before = said[at - 1] if at else ""
+        if after not in COUNT_WORDS and before not in COUNT_WORDS:
+            return True
+    return False
 
 
 @pytest.mark.parametrize(
@@ -172,12 +190,28 @@ def names(heading: str, count: str) -> bool:
         ("## Скелет: двадцать три шага в двадцати трёх файлах", True),
         ("## Скелет: двадцать три шага в двадцати трех файлах", True),
         ("## Скелет: двадцать три шага в двадцати четырёх файлах", False),
+        ("## Скелет: двадцать три шага в сорока двадцати трёх файлах", False),
     ],
-    ids=["с-ё", "через-е", "другое-число"],
+    ids=["с-ё", "через-е", "другое-число", "внутри-составного"],
 )
 def test_the_heading_count_is_read_with_ye_as_with_yo(heading: str, said: bool) -> None:
     """Заголовок через «е» называет то же число, что и с «ё»."""
     assert names(heading, SPELLED[23]) is said
+
+
+@pytest.mark.parametrize(
+    ("heading", "count", "said"),
+    [
+        ("## Скелет: восемнадцать шагов", "семнадцать", False),
+        ("## Скелет: в пятидесяти файлах", "десяти", False),
+        ("## Скелет: в двадцати трёх файлах", "двадцати", False),
+        ("## Скелет: семнадцать шагов", "семнадцать", True),
+    ],
+    ids=["внутри-слова", "хвост-слова", "начало-составного", "целое-слово"],
+)
+def test_the_heading_count_is_a_whole_word_sequence(heading: str, count: str, said: bool) -> None:
+    """Число в заголовке — целыми словами, не частью слова и не началом составного (`c5cba4f`)."""
+    assert names(heading, count) is said
 
 
 def skeleton_counts(text: str) -> tuple[str, set[int], set[str]]:
@@ -447,6 +481,10 @@ def hand_counts(prose: str) -> list[str]:
     неопределённого количества вне набора («много», «мало»). Совпадение формы с
     другим словом («семью» — и «семь», и «семья»; «сорок» — и птица) гейт
     считает счётом: в прозе под заголовком лишний отказ дешевле пропущенного числа.
+    Адрес правила законен ТОЛЬКО в двух формах: номер в скобках, один или через
+    запятую (`(005)`, `(005, 127)`), и ссылка `[005](…)`. Формы «(005 и 127)» и
+    «(правило 210)» — отказ по числу: их надо переписать в законную (взгляд на
+    #1484, `a62cdd6`).
     """
     bare = NOT_PROSE_RE.sub(" ", prose)
     words = re.findall(r"[а-яёa-z0-9]+", bare.lower())
@@ -1240,6 +1278,12 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
         ("держит правило ([005](https://x/rules/ru/005-hand-written-numbers-rot.md))", False),
         ("см. [журнал](https://x/issues/1234)", False),
         ("много строк", False),
+        ("в двадцати двух файлах", True),
+        ("в пятистах строках", True),
+        ("их четверо", True),
+        ("трем строкам", True),
+        ("правила (005 и 127)", True),
+        ("держит (правило 210)", True),
     ],
     ids=[
         "падеж-два",
@@ -1264,6 +1308,12 @@ def test_both_gates_walk_docs_deep(tmp_path: Path) -> None:
         "адрес-правила-ссылкой",
         "адрес-ссылки",
         "неопределённое",
+        "составное",
+        "сотни-предложный",
+        "собирательное-кроме-двое",
+        "малое-через-е",
+        "адрес-через-и-не-законен",
+        "адрес-со-словом-не-законен",
     ],
 )
 def test_hand_counts_sees_every_form_and_spares_addresses(prose: str, counted: bool) -> None:
