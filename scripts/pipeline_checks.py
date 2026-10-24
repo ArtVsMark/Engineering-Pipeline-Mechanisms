@@ -135,6 +135,8 @@ FOREIGN_CALL: Final = re.compile(
 
 #: Раздел ответа по прогонам за пределами изменения.
 BEYOND: Final = "beyond_the_change"
+#: Раздел ответа, где проект переопределяет пути данных таблицы `paths.PROJECT` (#1630).
+PATHS_SECTION: Final = "paths"
 #: Классы, допустимые во втором разделе. `required` отсутствует по построению:
 #: держать слияние нечем — записи на голове изменения такой прогон не даёт.
 #: Защита ветки при этом сверяет ИМЯ записи, а не исход (187), и объявленное
@@ -573,6 +575,12 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
         scope_areas.areas_of(raw.get(scope_areas.SECTION))
     except scope_areas.BadAreas as exc:
         problems.append(str(exc))
+    # Раздел путей — тем же приёмом (#1630): битый ключ отвергается сверкой
+    # ответа, раньше, чем на нём споткнётся первый читатель таблицы.
+    try:
+        paths.table_of(raw.get(PATHS_SECTION))
+    except paths.BadPaths as exc:
+        problems.append(str(exc))
 
     if problems:
         raise BadPolicy("ответ по проверкам не проходит проверку:\n  " + "\n  ".join(problems))
@@ -594,6 +602,40 @@ def fragment_form(path: Path = DEFAULT_PATH) -> journal.FragmentForm:
     except (BadPolicy, yaml.YAMLError) as exc:
         raise journal.NotRun(f"{path} не прочитан: {exc}") from exc
     return journal.form_of(raw.get(journal.SECTION) if isinstance(raw, dict) else None)
+
+
+def project_paths(path: Path = DEFAULT_PATH) -> dict[str, Path]:
+    """Таблица путей проекта: умолчания `paths.PROJECT`, поверх — раздел `paths:` (#1630).
+
+    Читается здесь, как форма фрагмента и области тестов: YAML ответа разбирает
+    один модуль (090). Нет файла или раздела — умолчания; отказ чтения и битый
+    раздел — `paths.BadPaths` с причиной.
+    """
+    if not path.is_file():
+        return dict(paths.PROJECT)
+    try:
+        said = file_text(path, "ответ проекта")
+    except BadPolicy as exc:
+        raise paths.BadPaths(f"{path} не прочитан: {exc}") from exc
+    return project_paths_of(said, str(path))
+
+
+def project_paths_of(text: str, where: str) -> dict[str, Path]:
+    """Таблица путей из ТЕКСТА ответа — для читателя, берущего файл не с диска.
+
+    Карта взгляда читает ответ с общей ветки (`git show`), а не с головы: голову
+    пишет тот, кого проверяют, и переназначенный им путь ослабил бы взгляд.
+    """
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise paths.BadPaths(f"{where} не разбирается: {exc}") from exc
+    return paths.table_of(raw.get(PATHS_SECTION) if isinstance(raw, dict) else None)
+
+
+def project_path(key: str, root: Path = Path()) -> Path:
+    """Путь данных проекта по ключу таблицы — от корня `root`; нет ключа — `KeyError`."""
+    return project_paths(root / paths.PIPELINE)[key]
 
 
 def areas_for_tests(path: Path = DEFAULT_PATH) -> tuple[scope_areas.Area, ...]:

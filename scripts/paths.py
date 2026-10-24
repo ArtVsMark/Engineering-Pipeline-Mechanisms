@@ -206,6 +206,68 @@ PIPELINE_DOC: Final = Path("docs/use/pipeline.md")
 #: Первое знакомство подключающего.
 ONBOARDING: Final = Path("docs/use/onboarding.md")
 
+#: ПУТИ ДАННЫХ ПРОЕКТА ПО КЛЮЧУ (#1630, эпик #1623). Умолчание — константа выше,
+#: проект переопределяет адрес разделом `paths:` в `.pipeline.yml`. Здесь только
+#: то, что проект ведёт сам: заготовки захода и данные, которые он заводит. Пути,
+#: которые площадка читает по имени (прогоны, `dependabot.yml`, `.claude/`), и
+#: адреса самого поставщика в таблицу не идут — их место решает не проект.
+#: Ключи — поверхность договора: снимок `contract.surface` их называет.
+PROJECT: Final[dict[str, Path]] = {
+    "review-roles": REVIEW_ROLES,
+    "review-procedure": REVIEW_PROCEDURE,
+    "roles": ROLES,
+    "labels": LABELS,
+    "finding-kinds": FINDING_KINDS,
+    "proposals": PROPOSALS,
+    "protection": PROTECTION,
+    "series": SERIES,
+    "rerun": RERUN,
+    "area-paths": AREA_PATHS,
+    "attribution-since": ATTRIBUTION_SINCE,
+    "authors": AUTHORS,
+    "bindings": BINDINGS,
+    "schedules": SCHEDULES,
+    "showcase": SHOWCASE,
+    "vendor-watch": VENDOR_WATCH,
+    "behaviour": BEHAVIOUR,
+    "release-doc": RELEASE_DOC,
+    "decisions": DECISIONS,
+}
+
+
+class BadPaths(ValueError):
+    """Раздел путей проекта не той формы: ключ, значение или путь вне дерева."""
+
+
+def table_of(section: object) -> dict[str, Path]:
+    """Таблица путей проекта: умолчания, поверх — раздел `paths:`; дефект — `BadPaths`.
+
+    Разбирает уже прочитанное значение раздела, а не файл: YAML ответа читает
+    один модуль, `pipeline_checks` (214). Нет раздела — умолчания.
+    """
+    table = dict(PROJECT)
+    if section is None:
+        return table
+    if not isinstance(section, dict):
+        raise BadPaths(f"раздел путей: ожидалось отображение, пришло {type(section).__name__}")
+    problems: list[str] = []
+    for key, value in section.items():
+        if key not in PROJECT:
+            problems.append(f"«{key}» — такого ключа нет; ключи: {', '.join(sorted(PROJECT))}")
+            continue
+        if not isinstance(value, str) or not value.strip():
+            problems.append(f"«{key}»: путь — непустая строка, пришло {value!r}")
+            continue
+        path = Path(value.strip())
+        if path.is_absolute() or ".." in path.parts:
+            problems.append(f"«{key}»: «{value}» вне дерева — путь от корня без `..`")
+            continue
+        table[key] = path
+    if problems:
+        raise BadPaths("раздел путей: " + "; ".join(problems))
+    return table
+
+
 #: Всё, что объявлено здесь. Список разрешительный (068): путь, которого в нём
 #: нет, механизм строить не должен. Полноту держит
 #: `tests/test_settings_anchor.py::test_the_declared_list_covers_every_address` —

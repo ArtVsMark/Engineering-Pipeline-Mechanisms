@@ -31,6 +31,7 @@
 ([049](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/049-derive-state-from-live-artifacts.md)).
 """
 
+import ast
 import json
 from pathlib import Path
 from typing import Any, Final
@@ -111,7 +112,36 @@ def surface(root: Path = Path()) -> dict[str, Any]:
     return {
         "workflows": workflows_surface(root / paths.WORKFLOWS),
         "answer": checks_surface(root / paths.PIPELINE),
+        # Ключи таблицы путей проекта (#1630): проект называет их в разделе
+        # `paths:` своего ответа, и снятый или переименованный ключ ломает его.
+        "paths": path_keys(root),
     }
+
+
+def path_keys(root: Path) -> list[str]:
+    """Ключи таблицы путей проекта — из `paths.py` СНИМАЕМОГО дерева, а не из импорта.
+
+    Импортированный модуль — всегда голова, и база сравнивалась бы с ней же: снятый
+    ключ прошёл бы гейт молча. Дерева без механизмов (потребитель) ключей не несёт —
+    пустой список. Не разобранный файл — `BadPolicy`: снимок без ключей соврал бы.
+    """
+    where = root / paths.SCRIPTS / Path(paths.__file__).name
+    if not where.is_file():
+        return []
+    try:
+        tree = ast.parse(where.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+        raise policy.BadPolicy(f"{where} не разобран: {exc}") from exc
+    for node in tree.body:
+        target: ast.expr | None = None
+        value: ast.expr | None = None
+        if isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        if isinstance(target, ast.Name) and target.id == "PROJECT" and isinstance(value, ast.Dict):
+            return sorted(str(key.value) for key in value.keys if isinstance(key, ast.Constant))
+    return []
 
 
 def as_text(shape: dict[str, Any]) -> str:
@@ -146,6 +176,9 @@ BREAKING_MARKS: Final = (
     # его слияние. Договор объявлял это несовместимым, а примет таких слов не
     # было — и переход проходил молча. Нашёл внешний взгляд на #276.
     "проверка стала обязательной",
+    # Ключ таблицы путей, который проект называет в разделе `paths:`, исчез:
+    # ответ проекта отказывает неизвестным ключом (#1630).
+    "ключ путей снят",
 )
 
 
@@ -276,4 +309,12 @@ def differences(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
             found.append(f"проверка стала обязательной: «{name}»")
             continue
         found.append(f"проверка «{name}»: {was_checks[name]} → {now_checks[name]}")
+    # КЛЮЧИ ТАБЛИЦЫ ПУТЕЙ (#1630). Снимок до этой правки ключей не нёс: тогда
+    # «до» — пустой список, и все ключи впервые — добавлены, а не сняты.
+    was_keys = set(before.get("paths") or [])
+    now_keys = set(after.get("paths") or [])
+    for key in sorted(was_keys - now_keys):
+        found.append(f"ключ путей снят: «{key}»")
+    if fresh_keys := sorted(now_keys - was_keys):
+        found.append(f"ключи путей добавлены: {fresh_keys}")
     return found

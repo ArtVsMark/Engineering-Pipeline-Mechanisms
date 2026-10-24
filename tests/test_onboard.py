@@ -1324,7 +1324,16 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
     # (находки `5f1a15d`, `72d2c49`). Скелет роль не объявляет — её пилот у
     # механизмов (#1277), — и таблица спит; объявленная роль будит её.
     shown = dict(kit)
-    monkeypatch.setattr(review_map, "shown_from_base", lambda _, path: shown[Path(path)])
+
+    def shown_from_base(_: str, path: Path) -> str:
+        # Как настоящий `git show`: файла нет на базе — отказ, а не `KeyError`.
+        # Ответа `.pipeline.yml` заготовка не кладёт, и таблица путей берёт
+        # умолчания (#1630).
+        if Path(path) not in shown:
+            raise review_map.NotRun(f"{path} не прочитан из базы")
+        return str(shown[Path(path)])
+
+    monkeypatch.setattr(review_map, "shown_from_base", shown_from_base)
     assert not review_map.role_declared("main"), "скелет объявил роль до раскатки (#1277)"
     declared = {**table, "required": [*table["required"], review_map.CATALOGUE_ROLE]}
     shown[Path(".rules/review-roles.json")] = json.dumps(declared, ensure_ascii=False)

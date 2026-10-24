@@ -118,6 +118,23 @@ def shown_from_base(base: str, path: Path) -> str:
     return shown.stdout
 
 
+def base_path(base: str, key: str) -> Path:
+    """Путь данных проекта по ключу таблицы — по ответу ОБЩЕЙ ветки (#1630).
+
+    Таблица путей читается с той же базы, что и сами таблицы взгляда: голову
+    пишет тот, кого проверяют, и путь, переназначенный в голове, увёл бы карту к
+    слабому файлу. Ответа на базе нет — умолчания; битый раздел — отказ (045).
+    """
+    try:
+        said = shown_from_base(base, paths.PIPELINE)
+    except NotRun:
+        return paths.PROJECT[key]
+    try:
+        return pipeline_checks.project_paths_of(said, f"{base}:{paths.PIPELINE}")[key]
+    except paths.BadPaths as exc:
+        raise NotRun(str(exc)) from exc
+
+
 def strings(value: Any) -> bool:
     """Список строк — единственная форма списков в таблице ролей."""
     return isinstance(value, list) and all(isinstance(one, str) for one in value)
@@ -429,7 +446,7 @@ def role_declared(base: str) -> bool:
     карта называет своим разделом (`roles_section`).
     """
     try:
-        table = table_shape(json.loads(shown_from_base(base, paths.REVIEW_ROLES)))
+        table = table_shape(json.loads(shown_from_base(base, base_path(base, "review-roles"))))
     except NotRun, json.JSONDecodeError:
         return False
     return declares_role(table)
@@ -452,20 +469,21 @@ def area_table(base: str) -> dict[str, list[str]]:
     Голову пишет тот, кого проверяют: изменение, сузившее таблицу, само убрало
     бы правила из-под взгляда.
     """
+    where = base_path(base, "area-paths")
     try:
-        said = json.loads(shown_from_base(base, paths.AREA_PATHS))
+        said = json.loads(shown_from_base(base, where))
     except json.JSONDecodeError as exc:
-        raise NotRun(f"{paths.AREA_PATHS} не разбирается: {exc}") from exc
+        raise NotRun(f"{where} не разбирается: {exc}") from exc
     areas = said.get("areas") if isinstance(said, dict) else None
     if not isinstance(areas, dict) or not areas:
-        raise NotRun(f"{paths.AREA_PATHS}: нет словаря `areas`")
+        raise NotRun(f"{where}: нет словаря `areas`")
     table: dict[str, list[str]] = {}
     for name, one in areas.items():
         masks = one.get("paths") if isinstance(one, dict) else None
         if not strings(masks):
-            raise NotRun(f"{paths.AREA_PATHS}: у области «{name}» `paths` не список строк")
+            raise NotRun(f"{where}: у области «{name}» `paths` не список строк")
         if not masks and not str(one.get("why") or "").strip():
-            raise NotRun(f"{paths.AREA_PATHS}: у области «{name}» пустой `paths` без причины")
+            raise NotRun(f"{where}: у области «{name}» пустой `paths` без причины")
         table[str(name)] = [str(mask) for mask in masks or []]
     return table
 
@@ -862,14 +880,15 @@ def roles_section(
     одного списка могло бы разойтись с первым (022).
     """
     try:
-        procedure = shown_from_base(base, paths.REVIEW_PROCEDURE)
-        table = table_shape(json.loads(shown_from_base(base, paths.REVIEW_ROLES)))
+        procedure = shown_from_base(base, base_path(base, "review-procedure"))
+        table = table_shape(json.loads(shown_from_base(base, base_path(base, "review-roles"))))
     except (NotRun, json.JSONDecodeError) as exc:
         print(f"процедура взгляда не прочитана: {exc}", file=sys.stderr)
         return (
             "\n## Процедура взгляда и роли этого изменения\n\n"
             f"> Процедура не прочитана с общей ветки ({exc}). Смотри ролями из "
-            f"`{paths.ROLES}`, чей вопрос изменение задевает, и назови это первой строкой. "
+            f"`{paths.PROJECT['roles']}`, чей вопрос изменение задевает, и назови это "
+            "первой строкой. "
             f"Раздела «{SUBJECT.removeprefix('## ')}» нет: предмет проекта читай по "
             "`AGENTS.md`.\n"
         )
