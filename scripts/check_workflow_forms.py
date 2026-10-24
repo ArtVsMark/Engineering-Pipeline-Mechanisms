@@ -64,7 +64,9 @@ PERSIST: Final = "persist-credentials"
 #: репозитория, а владелец семьи тот же.
 FAMILY_OWNER: Final = catalogue.REPO.partition("/")[0].lower()
 SHA_RE: Final = re.compile(r"[0-9a-f]{40}")
-RELEASE_RE: Final = re.compile(r"v\d+(\.\d+)*")
+#: Тег выпуска — полная версия `vN.N.N`: мажорный алиас `@v1` подвижен, как ветка.
+#: Один признак на гейт и на `tests/test_family_pinning.py` (находка на #1634).
+RELEASE_RE: Final = re.compile(r"v\d+\.\d+\.\d+")
 #: `true` у ключа в любой записи — блочной, в кавычках, в строку `{…: true}`.
 TRUE_RE: Final = re.compile(rf"{PERSIST}[\"']?\s*:\s*[\"']?true\b", re.IGNORECASE)
 #: Причина — комментарий со словами после значения, а не голый `#` (взгляд на #1634).
