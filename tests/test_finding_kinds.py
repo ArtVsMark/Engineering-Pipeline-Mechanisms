@@ -951,8 +951,14 @@ def test_a_mark_of_the_wrong_form_is_a_refusal(said: str) -> None:
         module.since_of({module.SINCE: said})
 
 
-def test_every_mark_of_the_dictionary_names_a_born_rule() -> None:
-    """Отметка стоит только у рода, из которого правило родилось: «есть — N» или «породил»."""
+def test_every_mark_of_the_dictionary_names_its_rule() -> None:
+    """Отметка стоит только у рода с правилом: «есть — N» или «породил».
+
+    ИМЯ — ПО ТОМУ, ЧТО ПРОВЕРЕНО (взгляд на #1611). Прежде тест звался «правило
+    родилось из рода», а пропускал любое «есть — N», в том числе правило,
+    существовавшее до рода. Родилось ли правило из рода, машине не видно:
+    судится только, что у отметки есть правило. ГРАНИЦА НАЗВАНА (057).
+    """
     marked = {name: body for name, body in kinds().items() if module.SINCE in body}
     assert marked, "отметок в словаре нет — гейт ничего не проверил (075)"
     for name, body in marked.items():
