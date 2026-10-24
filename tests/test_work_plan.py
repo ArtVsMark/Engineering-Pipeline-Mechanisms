@@ -1432,6 +1432,10 @@ def test_the_red_step_promises_the_block_only_on_a_refusal() -> None:
     step = text[text.index("- name: отказ сборки плана виден") :]
     assert 'if [ "${RC:-}" = "2" ]' in step
     assert "блока в шапке плана нет" in step
+    # И на коде 2 блок не обещается: задачи плана может не быть, запись —
+    # упасть; сообщение отсылает к строке журнала (взгляд на #1650).
+    assert "причина строкой в шапке плана" not in step
+    assert "отказ сборки назван в плане" in step
 
 
 def test_a_successful_build_drops_the_refusal_block(monkeypatch: pytest.MonkeyPatch) -> None:
