@@ -532,6 +532,12 @@
         ".rules/showcase.json"
       ]
     },
+    ".rules/workflow-forms.json": {
+      "answer": "configured",
+      "where": [
+        ".rules/workflow-forms.json"
+      ]
+    },
     ".rules/vendor-watch.json": {
       "answer": "configured",
       "where": [
@@ -669,6 +675,12 @@
     },
     "scripts/check_invisible.py": {
       "answer": "as-is"
+    },
+    "scripts/check_workflow_forms.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/workflow-forms.json"
+      ]
     },
     "scripts/check_journal.py": {
       "answer": "as-is"
