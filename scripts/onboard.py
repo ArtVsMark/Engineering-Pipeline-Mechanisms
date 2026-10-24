@@ -113,6 +113,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
+import check_env
 import check_shipped
 import gitcall
 import paths
@@ -741,7 +742,19 @@ LICENSE_FORMS: Final = {
     # Загрузчик зовётся `bash <путь>`, а не как исполняемый: строка лицензии
     # первой не отнимает у него `#!` (#1553).
     ".sh": "# {line}\n",
+    ".py": "# {line}\n",
 }
+#: Первая строка исполняемого файла: строка лицензии идёт ПОСЛЕ неё (#1554) —
+#: хук, который площадка зовёт как исполняемый, без `#!` первой не запустится.
+SHEBANG: Final = "#!"
+
+
+def split_shebang(text: str) -> tuple[str, str]:
+    """`#!`-строка (с переводом строки) и остальное; без неё — пустая и весь текст."""
+    if not text.startswith(SHEBANG):
+        return "", text
+    first, _, rest = text.partition("\n")
+    return first + "\n", rest
 
 
 def is_signed(path: Path, text: str) -> bool:
@@ -762,7 +775,7 @@ def is_signed(path: Path, text: str) -> bool:
         first = next(iter(data), None) if isinstance(data, dict) else None
         return first == "_license" and str(data[first]).startswith(LICENSE_ID)
     form = LICENSE_FORMS.get(path.suffix)
-    head = text.split("\n", 1)[0]
+    head = split_shebang(text)[1].split("\n", 1)[0]
     return form is not None and head.startswith(form.split("{line}", 1)[0] + LICENSE_ID)
 
 
@@ -791,14 +804,17 @@ def licensed(path: Path, text: str, repo: str) -> str:
             f"{path}: строку лицензии в файл рода «{path.suffix}» класть нечем — "
             "заготовка ушла бы к потребителю без неё (#1470)"
         )
-    return form.format(line=line) + text
+    shebang, body = split_shebang(text)
+    return shebang + form.format(line=line) + body
 
 
 #: Что заход кладёт, но что становится файлом ПРОЕКТА, а не нашей заготовкой:
 #: тонкий `ci.yml`, куда проект дописывает свои джобы (поздний взгляд на #1487,
 #: `a4c2cc0`). Строку лицензии поставщика он не несёт ни при первой кладке, ни
 #: при обновлении, ни двойником `.yaml` (`of_the_project`).
-OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW})
+#: Настройки окна — туда же (#1554): проект дописывает в них свои разрешения, а
+#: JSON настроек поля лицензии не ждёт.
+OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW, paths.SETTINGS})
 
 
 def of_the_project(path: Path) -> bool:
@@ -839,6 +855,10 @@ def lay(root: Path, files: dict[Path, str], repo: str) -> None:
     for path, text in signed_all(files, repo).items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
+        # Файл с `#!` площадка зовёт как исполняемый (`.claude/settings.json`):
+        # без права на исполнение хук не запустился бы (#1554).
+        if text.startswith(SHEBANG):
+            (root / path).chmod(0o755)
 
 
 def rulebook_kit(root: Path) -> dict[Path, str]:
@@ -879,7 +899,26 @@ DATA_KITTED: Final = (
     paths.RERUN,
     # #1553: предполётная у потребителя — загрузчик, а не копии скриптов (090).
     paths.PREFLIGHT_LOADER,
+    # #1554: хуки с ответом `configured` — заготовкой со слотом, а не нашим
+    # наполнением: число планки ставит заход, окружение проверки — проект.
+    paths.FLOOR,
+    paths.SESSION_START,
 )
+#: Что кладётся из НАШЕГО дерева как есть (#1554): хуки окна с ответом `as-is`
+#: и настройки, что подключают их к событиям площадки. Копия в `kit/data/` была
+#: бы второй реализацией (214) — кладётся сам файл. Совпадение с ответами
+#: `as-is` под `.claude/` держит `tests/test_onboard.py`.
+TREE_KITTED: Final = (
+    paths.SETTINGS,
+    paths.HOOKS / "push_guard.py",
+    paths.HOOKS / "push_guard.sh",
+    paths.HOOKS / "skill_log.py",
+    paths.HOOKS / "skill_log.sh",
+    paths.HOOKS / "install_floor.sh",
+)
+#: Слот планки в заготовке `floor.sh`: число ставит заход из НАШЕГО
+#: `requires-python` — код хуков наш и исполняется на нашей планке (#1554).
+FLOOR_SLOT: Final = "@floor@"
 #: Данные потребителя, которым заготовки НЕТ, — с причиной (#1557). Каждый путь
 #: `consumer_data` стоит либо в `DATA_KITTED`, либо здесь; держит это
 #: `tests/test_onboard.py`, и путь, исчезнувший из перечня, здесь не переживает.
@@ -980,7 +1019,55 @@ def data_kit(root: Path, repo: str) -> dict[Path, str]:
             f"--repo «{repo}» не «владелец/имя» — владельца семьи для {paths.DEPENDABOT} не взять"
         )
     found[paths.DEPENDABOT] = said.replace(f'"{FAMILY_SLOT}"', f'"{shaped["owner"]}/*"')
-    return found | {paths.AREA_PATHS: area_kit(root)}
+    found[paths.FLOOR] = floor_kit(root, found[paths.FLOOR])
+    return found | {paths.AREA_PATHS: area_kit(root)} | tree_kit(root)
+
+
+def floor_kit(root: Path, said: str) -> str:
+    """Заготовка `floor.sh` с числом НАШЕЙ планки на месте слота (#1554).
+
+    Планка читается тем же разборщиком, что у хука старта и предполётной, —
+    `check_env.python_floor` (214). Нет слота — отказ: заготовка ушла бы с
+    чужим или пустым числом, и страж закрыл бы каждый толчок потребителя.
+    """
+    if FLOOR_SLOT not in said:
+        raise NotRun(f"в заготовке {paths.FLOOR} нет слота планки «{FLOOR_SLOT}»")
+    try:
+        major, minor = check_env.python_floor(root)
+    except check_env.NotRun as exc:
+        raise NotRun(f"планка для {paths.FLOOR} не прочитана: {exc}") from exc
+    return said.replace(FLOOR_SLOT, f"{major}.{minor}")
+
+
+def tree_kit(root: Path) -> dict[Path, str]:
+    """Хуки окна и настройки из нашего дерева — как есть (`TREE_KITTED`, #1554).
+
+    Недостающий файл — отказ, а не тихий пропуск (045): настройки звали бы хук,
+    которого у потребителя нет.
+    """
+    missing = [path for path in TREE_KITTED if not (root / path).is_file()]
+    if missing:
+        raise NotRun(
+            "хуков окна нет в нашем дереве: "
+            + ", ".join(str(one) for one in missing)
+            + f" — {paths.SETTINGS} у потребителя звал бы отсутствующее"
+        )
+    return {path: (root / path).read_text(encoding="utf-8") for path in TREE_KITTED}
+
+
+def settings_note(consumer: Path, laid: list[Path]) -> str:
+    """Свои настройки окна у потребителя не тронуты — и хуки к ним не подключены.
+
+    Сказано вслух (045): хуки лежат, но площадка их не зовёт, пока проект не
+    перенесёт раздел `hooks` из наших настроек в свои.
+    """
+    if paths.SETTINGS in laid or not (consumer / paths.SETTINGS).exists():
+        return ""
+    return (
+        f"`{paths.SETTINGS}` уже есть и не тронут: хуки окна в {paths.HOOKS}/ не "
+        "подключены, пока вы не перенесёте в него раздел `hooks` из настроек "
+        "поставщика — заход без ключей печатает их целиком"
+    )
 
 
 #: Расширения YAML, которые площадка читает одинаково: `dependabot.yaml` занимает
@@ -1768,6 +1855,8 @@ def update(
         print(note)
     if laid:
         print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
+    if unwired := settings_note(consumer, laid):
+        print(unwired)
     if unanswered := bindings_note(consumer):
         print(unanswered)
     if dormant := dormant_areas_note(consumer):
@@ -1950,6 +2039,8 @@ def main(argv: list[str] | None = None) -> int:
         laid = lay_free(args.write, kit, args.repo)
         if laid:
             print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
+        if unwired := settings_note(args.write, laid):
+            print(unwired)
         if unanswered := bindings_note(args.write):
             print(unanswered)
         if dormant := dormant_areas_note(args.write):

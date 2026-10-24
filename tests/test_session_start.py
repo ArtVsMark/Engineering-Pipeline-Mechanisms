@@ -19,6 +19,10 @@ FLOOR_FILE: Final = ROOT / ".claude" / "hooks" / "floor.sh"
 #: Обёртка стража толчка: второй, кто читает `FLOOR_FILE`.
 GUARD_WRAPPER: Final = ROOT / ".claude" / "hooks" / "push_guard.sh"
 SETTINGS: Final = ROOT / ".claude" / "settings.json"
+#: Установка интерпретатора планки — общая с заготовкой хука потребителя (#1554).
+INSTALL_FILE: Final = ROOT / ".claude" / "hooks" / "install_floor.sh"
+#: Заготовка хука старта, которую заход подключения кладёт потребителю.
+KIT_HOOK: Final = ROOT / "kit" / "data" / ".claude" / "hooks" / "session-start.sh"
 
 
 def test_outside_the_cloud_the_hook_does_nothing(tmp_path: Path) -> None:
@@ -119,6 +123,8 @@ SNIPPET: Final = re.compile(r'(\S+) -c "\n(.*?)\n" "\$1"', re.S)
 WANT: Final = re.compile(r"^want=(\S+)$", re.M)
 #: Как хук читает `floor.sh`: точкой от своего каталога, а не от рабочего.
 SOURCED: Final = '. "$here/floor.sh"'
+#: Как хук ставит интерпретатор планки: точкой из общего файла (#1554).
+INSTALLED: Final = '. "$here/install_floor.sh"'
 #: Каталог хука — абсолютным путём: строка одна на оба хука (`9fda04b`).
 ABSOLUTE_HERE: Final = 'here=$(cd "$(dirname "$0")" && pwd)'
 
@@ -214,7 +220,7 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     found = SNIPPET.search(code)
     assert found, "встроенного разбора дерева в хуке нет — сверять нечего (075)"
     assert found[1] == '"python$want"', f"хук читает дерево {found[1]}, а не python$want"
-    install = code.index('uv python install "$want"')
+    install = code.index(INSTALLED)
     read = code.index("$(read_tree floor)")
     assert sourced < install, "floor.sh читается после того, как want понадобился"
     assert code.index(ABSOLUTE_HERE) < code.index('cd "$CLAUDE_PROJECT_DIR"'), (
@@ -235,7 +241,21 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     assert fix in unread, "отказ чтения планки не называет want"
     head = said.splitlines()[1]
     assert floor not in head, "шапка хука вписывает число планки рукой — разойдётся с want молча"
-    assert 'ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"' in code
+    shared = code_of(INSTALL_FILE)
+    assert 'uv python install "$want"' in shared, "общий файл не ставит python$want"
+    assert 'ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"' in shared
+
+
+def test_both_start_hooks_install_through_one_file() -> None:
+    """Установка одна на хук старта и заготовку потребителя (#1554, 214).
+
+    Обе зовут `install_floor.sh` точкой после `floor.sh`, и ни одна не несёт
+    своей копии установщика: смена установщика правила бы одну из двух.
+    """
+    for hook in (HOOK, KIT_HOOK):
+        code = code_of(hook)
+        assert "uv python install" not in code, f"{hook.name}: своя копия установки"
+        assert code.index(SOURCED) < code.index(INSTALLED), f"{hook}: установка до планки"
 
 
 def test_the_hook_installs_local_packages_editable_and_skips_a_fit_env() -> None:
@@ -333,3 +353,35 @@ def test_the_hook_turns_signing_off_and_keeps_the_author(tmp_path: Path) -> None
 
     assert local("commit.gpgsign") == "false"
     assert (local("user.name"), local("user.email")) == ("Владелец", "owner@example.org")
+
+
+@pytest.mark.parametrize(
+    ("floor", "said"),
+    [("# want не задан\n", "не задаёт want"), ("want=9.99\n", "ставить нечем")],
+    ids=["пустая-планка", "нет-установки"],
+)
+def test_the_kit_hook_warns_and_starts_the_window(tmp_path: Path, floor: str, said: str) -> None:
+    """Заготовка хука старта на отказе называет шаг и выходит 0 (045, #1554).
+
+    Окно открывается всегда: молча не собрать интерпретатор значило бы закрыть
+    каждый толчок стражем без названной причины.
+    """
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    shutil.copy2(KIT_HOOK, hooks / KIT_HOOK.name)
+    (hooks / FLOOR_FILE.name).write_text(floor, encoding="utf-8")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    dirname = shutil.which("dirname")
+    assert dirname, "без dirname хук не позвать"
+    (tools / "dirname").symlink_to(dirname)
+    done = subprocess.run(
+        ["/bin/bash", str(hooks / KIT_HOOK.name)],
+        env={"PATH": str(tools), "CLAUDE_CODE_REMOTE": "true", "CLAUDE_PROJECT_DIR": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert said in done.stderr, done.stderr

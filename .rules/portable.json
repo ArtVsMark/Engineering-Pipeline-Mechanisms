@@ -80,6 +80,9 @@
         ".claude/hooks/floor.sh"
       ]
     },
+    ".claude/hooks/install_floor.sh": {
+      "answer": "as-is"
+    },
     ".claude/hooks/push_guard.py": {
       "answer": "as-is"
     },
@@ -97,7 +100,7 @@
       "where": [
         ".claude/hooks/session-start.sh"
       ],
-      "seam": "хук собирает окружение проверки по `check_env` из нашего `scripts/` и ставит `packages/transport` из дерева; у потребителя их нет (запись 037), и хук промолчал бы предупреждением, не собрав ничего. Заготовки хука для потребителя нет (#995)"
+      "seam": "хук собирает окружение проверки по `check_env` из нашего `scripts/` и ставит `packages/transport` из дерева; у потребителя их нет (запись 037). Потребителю заход кладёт заготовку `kit/data/.claude/hooks/session-start.sh`: она ставит интерпретатор планки общим `install_floor.sh`, а окружение проверки — слот проекта (#1554)"
     },
     ".claude/settings.json": {
       "answer": "as-is"

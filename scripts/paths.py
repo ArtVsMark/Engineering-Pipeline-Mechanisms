@@ -156,6 +156,15 @@ ATTRIBUTION_SINCE: Final = Path(".github/attribution-since")
 #: Загрузчик предполётной у потребителя (#1553): выкачивает механизмы по тегу из
 #: `uses:` его прогонов и зовёт их `scripts/preflight.py` против его дерева.
 PREFLIGHT_LOADER: Final = Path(".claude/preflight.sh")
+#: Хуки окна (#1554): заход подключения кладёт их потребителю — свои как есть,
+#: `floor.sh` и хук старта заготовкой из `kit/data/`.
+HOOKS: Final = Path(".claude/hooks")
+#: Настройки окна: подключают хуки к событиям площадки.
+SETTINGS: Final = Path(".claude/settings.json")
+#: Число планки хуков — одно на хук старта и обёртки (#1058).
+FLOOR: Final = HOOKS / "floor.sh"
+#: Хук старта облачного окна.
+SESSION_START: Final = HOOKS / "session-start.sh"
 #: Где факты и значки лежат в ветке `badges` — по контракту фактов семьи (#759).
 #: Это адрес ПРОИЗВОДНОГО в ветке `badges`, а не файл общей ветки.
 BADGES_DIR: Final = Path(".github/badges")
@@ -270,6 +279,10 @@ ALL: Final = (
     ONBOARDING,
     ATTRIBUTION_SINCE,
     PREFLIGHT_LOADER,
+    HOOKS,
+    SETTINGS,
+    FLOOR,
+    SESSION_START,
 )
 
 #: Адреса ДАННЫХ ОКНА: в дереве их нет по построению — файл появляется при

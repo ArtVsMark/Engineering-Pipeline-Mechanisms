@@ -55,10 +55,20 @@ DATA = {
         # Заготовка `dependabot.yml` несёт слот семьи: без него заход отказывает.
         else f'заготовка {one.name}\n- "{module.FAMILY_SLOT}"\n'
         if one == module.paths.DEPENDABOT
+        # Заготовка `floor.sh` несёт слот планки: без него заход отказывает.
+        else f"want={module.FLOOR_SLOT}\n"
+        if one == module.paths.FLOOR
         else f"заготовка {one.name}\n"
     )
     for one in module.DATA_KITTED
 }
+#: Хуки окна и настройки поддельного дерева: заход кладёт их как есть (#1554).
+TREE = {
+    str(one): "{}\n" if one.suffix == ".json" else f"#!/bin/sh\n# хук {one.name}\n"
+    for one in module.TREE_KITTED
+}
+#: Планка поддельного дерева: из неё заход ставит число в `floor.sh`.
+PYPROJECT = '[project]\nname = "x"\nrequires-python = ">=3.14"\n'
 #: Наша таблица областей: из неё заготовка берёт имена областей.
 AREAS = '{"areas": {"gates": {"paths": ["tests/*"]}, "docs": {"paths": ["docs/*"]}}}\n'
 
@@ -90,6 +100,10 @@ def tree(tmp_path: Path, *, tagged: str = "v2.5.0", **runs: str) -> Path:
     for name, text in DATA.items():
         (tmp_path / module.DATA_KIT / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / module.DATA_KIT / name).write_text(text, encoding="utf-8")
+    for name, text in TREE.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
     (tmp_path / ".rules").mkdir(exist_ok=True)
     (tmp_path / ".rules" / "area-paths.json").write_text(AREAS, encoding="utf-8")
     run = ["git", "-C", str(tmp_path)]
@@ -1138,7 +1152,7 @@ def test_data_kit_reads_the_tree_and_derives_the_areas(tmp_path: Path) -> None:
     """Состав — файлы `kit/data/`, таблица областей — из наших областей с пустыми путями."""
     root = tree(tmp_path, **{"step-пример": MARKED})
     kit = module.data_kit(root, "o/r")
-    assert sorted(map(str, kit)) == sorted([*DATA, ".rules/area-paths.json"])
+    assert sorted(map(str, kit)) == sorted([*DATA, *TREE, ".rules/area-paths.json"])
     assert module.paths.BINDINGS not in kit, "ответ каталогу ушёл заготовкой"
 
 
@@ -2159,3 +2173,130 @@ def test_the_kinds_kit_carries_no_meetings_of_ours() -> None:
     assert set(kit["kinds"]) == set(ours["kinds"])
     assert all(body["встречен"] == [] for body in kit["kinds"].values())
     assert not any({"каталогу", "породил", "правило с"} & set(b) for b in kit["kinds"].values())
+
+
+# --- хуки окна и настройки (#1554) -------------------------------------------
+
+
+def test_write_lays_the_hooks_and_the_settings(tmp_path: Path) -> None:
+    """`--write` кладёт хуки как есть, `floor.sh` — с нашей планкой, настройки — без лицензии.
+
+    Исполняемый хук сохраняет `#!` первой строкой и право на исполнение:
+    площадка зовёт его по пути из настроек, и строка лицензии впереди
+    `#!` или файл без `+x` молча не запустились бы.
+    """
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    for one in module.TREE_KITTED:
+        assert (consumer / one).is_file(), f"{one} не положен"
+    floor = (consumer / module.paths.FLOOR).read_text(encoding="utf-8")
+    assert "want=3.14" in floor and module.FLOOR_SLOT not in floor, floor
+    guard = consumer / module.paths.HOOKS / "push_guard.sh"
+    lines = guard.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "#!/bin/sh", lines[:2]
+    assert lines[1].startswith(f"# {module.LICENSE_ID}"), lines[:2]
+    assert guard.stat().st_mode & 0o111, "хук положен без права на исполнение"
+    assert not (consumer / module.paths.FLOOR).stat().st_mode & 0o111, "floor.sh стал исполняемым"
+    settings = json.loads((consumer / module.paths.SETTINGS).read_text(encoding="utf-8"))
+    assert "_license" not in settings, "в настройки окна легло поле лицензии"
+
+
+def test_own_settings_stay_and_the_unwired_hooks_are_named(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Свои настройки потребителя не тронуты, а неподключённые хуки названы вслух (045)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    (consumer / ".claude").mkdir(parents=True)
+    (consumer / module.paths.SETTINGS).write_text('{"свои": 1}\n', encoding="utf-8")
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    assert (consumer / module.paths.SETTINGS).read_text(encoding="utf-8") == '{"свои": 1}\n'
+    assert "раздел `hooks`" in capsys.readouterr().out
+
+
+def test_update_lays_a_missing_hook(tmp_path: Path) -> None:
+    """`--update` возвращает удалённый хук: та же дверь заготовок данных."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    (consumer / module.paths.HOOKS / "skill_log.py").unlink()
+    assert module.main(["--root", str(root), "--update", str(consumer)]) == module.EXIT_OK
+    assert (consumer / module.paths.HOOKS / "skill_log.py").is_file()
+
+
+def test_a_floor_kit_without_the_slot_is_refused(tmp_path: Path) -> None:
+    """Заготовка `floor.sh` без слота — отказ, а не файл с чужим числом."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    with pytest.raises(module.NotRun, match="слота планки"):
+        module.floor_kit(root, "want=3.12\n")
+
+
+def test_a_missing_hook_of_the_tree_is_refused(tmp_path: Path) -> None:
+    """Хука нашего дерева нет — отказ: настройки звали бы отсутствующее (045)."""
+    root = tree(tmp_path, **{"step-пример": MARKED})
+    (root / module.paths.HOOKS / "push_guard.py").unlink()
+    with pytest.raises(module.NotRun, match=r"push_guard\.py"):
+        module.tree_kit(root)
+
+
+def test_the_tree_kit_is_every_as_is_answer_under_claude() -> None:
+    """Как есть кладётся ровно то, что перепись под `.claude/` зовёт `as-is` (#1554).
+
+    Ответ `as-is` без кладки — обещание переноса, которого заход не держит;
+    кладка без ответа — перенос того, о чём перепись не спрашивали.
+    """
+    answers = json.loads((ROOT / module.paths.PORTABLE).read_text(encoding="utf-8"))["answers"]
+    as_is = {
+        Path(path)
+        for path, said in answers.items()
+        if path.startswith(".claude/hooks/") or path == str(module.paths.SETTINGS)
+        if said["answer"] == "as-is"
+    }
+    assert as_is == set(module.TREE_KITTED)
+
+
+def test_the_live_hook_kit_runs_and_names_its_floor(tmp_path: Path) -> None:
+    """Живая заготовка: `floor.sh` получает нашу планку, хук старта вне облака молчит."""
+    kit = module.data_kit(ROOT, "o/r")
+    major, minor = load_script("check_env.py").python_floor(ROOT)
+    assert f"want={major}.{minor}\n" in kit[module.paths.FLOOR]
+    consumer = tmp_path / "потребитель"
+    module.lay(consumer, kit, "o/r")
+    hook = consumer / module.paths.SESSION_START
+    done = subprocess.run(
+        [str(hook)],
+        env={
+            "PATH": "/usr/bin:/bin",
+            "CLAUDE_CODE_REMOTE": "",
+            "CLAUDE_PROJECT_DIR": str(consumer),
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert done.returncode == 0 and not done.stderr, done.stderr
+
+
+@pytest.mark.parametrize(
+    ("text", "parts"),
+    [
+        ("#!/bin/sh\nтело\n", ("#!/bin/sh\n", "тело\n")),
+        ("тело\n", ("", "тело\n")),
+        ("#!/bin/sh", ("#!/bin/sh\n", "")),
+    ],
+    ids=["с-шебангом", "без", "одна-строка"],
+)
+def test_split_shebang_keeps_the_first_line_first(text: str, parts: tuple[str, str]) -> None:
+    """`#!` отделяется целой строкой: лицензия встанет после неё, а не перед."""
+    assert module.split_shebang(text) == parts
+
+
+def test_settings_note_speaks_only_of_own_untouched_settings(tmp_path: Path) -> None:
+    """Строка о неподключённых хуках — только когда настройки свои и не положены."""
+    assert module.settings_note(tmp_path, []) == ""
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / module.paths.SETTINGS).write_text("{}\n", encoding="utf-8")
+    assert module.settings_note(tmp_path, [module.paths.SETTINGS]) == ""
+    assert "раздел `hooks`" in module.settings_note(tmp_path, [])
