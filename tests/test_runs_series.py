@@ -901,6 +901,30 @@ def test_two_copies_of_one_repository_answer_as_one(tmp_path: Path) -> None:
     assert module.installing_steps(work, mechanisms) == one
 
 
+def test_without_arguments_both_copies_are_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Без доводов читаются рабочее дерево и выкачка из `MECHANISMS` — настоящий случай шага.
+
+    Тест двух копий выше передаёт каталоги явно; путь, которым ряд зовётся в
+    шаге, — `paths.WORKFLOWS` плюс `supplier_workflows()` — не проверялся
+    (находка `c0e8543`). Имя, работающее только в выкачке, выбывает из
+    служебных и в рабочем дереве: значит, выкачка действительно прочитана.
+    """
+    work = tmp_path / "work"
+    mechanisms = tmp_path / "mechanisms"
+    ours, theirs = work / module.paths.WORKFLOWS, mechanisms / module.paths.WORKFLOWS
+    flow(ours, "ci.yml", [("поставить проверки", "python -m pip install ./x")])
+    flow(theirs, "ci.yml", [("поставить проверки", "python -m pip install ./x")])
+    flow(theirs, "step-x.yml", [("поставить разбор", "pip install y"), ("гоняет", "pytest")])
+    flow(ours, "b.yml", [("гоняет", "python -m pip install ./z")])
+    monkeypatch.chdir(work)
+    monkeypatch.setenv(module.SUPPLIER_ENV, str(mechanisms))
+    assert module.installing_steps() == {"поставить проверки", "поставить разбор"}
+    monkeypatch.delenv(module.SUPPLIER_ENV)
+    assert module.installing_steps() == {"поставить проверки", "гоняет"}
+
+
 def test_supplier_workflows_is_named_by_the_step_or_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

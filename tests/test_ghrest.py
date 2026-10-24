@@ -1041,24 +1041,34 @@ def test_the_debt_names_a_time_without_zone_instead_of_a_trace() -> None:
         left.when_of(issue, "created_at")
 
 
-#: Разборы ISO вне `ghrest.moment` — не время площадки, и у каждого причина. Число —
-#: вызовов в файле: новая копия в уже названном файле краснеет так же, как в новом,
-#: а снятая оставляет строку висеть — и тоже краснеет (взгляд на #1519, 220).
+#: Разборы ISO вне `ghrest.moment` — не время площадки, и у каждого причина. Ключ —
+#: ФУНКЦИЯ, а не файл, число — вызовов в ней (взгляд на #1519, находка `e148b02`).
+#: При ключе-файле новый разбор времени площадки в уже названном файле проходил,
+#: стоило поднять число, а причина файла к нему не относилась. Теперь новая копия
+#: — новая функция без причины или лишний вызов в названной, и краснеет; снятая
+#: оставляет строку висеть — и тоже краснеет (220).
 NOT_PLATFORM_TIME: Final[dict[str, tuple[int, str]]] = {
-    "scripts/audit_profile.py": (1, "дата строкой, а не время"),
-    "scripts/drift.py": (1, "дата выпуска из манифеста, берётся только день"),
-    "scripts/items_left.py": (3, "время коммита из git log — пояс у git есть всегда"),
-    "scripts/runs_series.py": (2, "полночь дня, собранная здесь же с поясом"),
-    "scripts/trunk_log.py": (1, "время коммита из git log — пояс у git есть всегда"),
-    "scripts/unlooked.py": (2, "даты дня, берётся только день"),
-    "scripts/window.py": (1, "время коммита из git log (%cI) — пояс у git есть всегда"),
+    "scripts/audit_profile.py::is_iso_day": (1, "дата строкой, а не время"),
+    "scripts/drift.py::measured_day": (1, "дата выпуска из манифеста, берётся только день"),
+    "scripts/items_left.py::born": (1, "время коммита из git log — пояс у git есть всегда"),
+    "scripts/items_left.py::born_symbol": (1, "время коммита из git log — пояс у git есть всегда"),
+    "scripts/items_left.py::tests_born": (1, "время коммита из git log — пояс у git есть всегда"),
+    "scripts/runs_series.py::merge": (1, "полночь дня, собранная здесь же с поясом"),
+    "scripts/runs_series.py::since_day": (1, "полночь дня, собранная здесь же с поясом"),
+    "scripts/trunk_log.py::merge_dates": (1, "время коммита из git log — пояс у git есть всегда"),
+    "scripts/unlooked.py::stalled": (2, "даты дня, берётся только день"),
+    "scripts/window.py::commits": (1, "время коммита из git log (%cI) — пояс у git есть всегда"),
 }
 #: Единственное место разбора времени площадки.
 PLATFORM_PARSER: Final = "packages/transport/ghrest.py"
 
 
 def iso_parses(root: Path = ROOT) -> dict[str, int]:
-    """Вызовы `fromisoformat(` в коде вне разборщика площадки — по файлам."""
+    """Вызовы `fromisoformat(` в коде вне разборщика площадки — по функциям.
+
+    Вызов вне функции — ключ `файл::<модуль>`. Вложенная функция судится
+    своим именем: вызов засчитывается ближайшей объемлющей функции.
+    """
     found: dict[str, int] = {}
     for path in code_files():
         if path.suffix != ".py":
@@ -1066,9 +1076,22 @@ def iso_parses(root: Path = ROOT) -> dict[str, int]:
         where = path.relative_to(root).as_posix()
         if where == PLATFORM_PARSER:
             continue
-        count = path.read_text(encoding="utf-8").count("fromisoformat(")
-        if count:
-            found[where] = count
+
+        def visit(node: ast.AST, owner: str, where: str = where) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                    visit(child, child.name)
+                    continue
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "fromisoformat"
+                ):
+                    key = f"{where}::{owner}"
+                    found[key] = found.get(key, 0) + 1
+                visit(child, owner)
+
+        visit(ast.parse(path.read_text(encoding="utf-8")), "<модуль>")
     return found
 
 
@@ -1079,6 +1102,10 @@ def test_platform_time_is_parsed_in_one_place() -> None:
     искал замену `Z` в той же строке, и копия без неё — как в `skill_runs` —
     проходила мимо (взгляд на #1519). Отличить время площадки от времени git
     по тексту нельзя, поэтому прочие разборы — закрытым перечнем с числом.
+    ГРАНИЦА НАЗВАНА (057): вызов, записанный не атрибутом (`from datetime
+    import datetime as d; d.fromisoformat`), — тоже атрибут и виден; голое
+    имя после `from … import fromisoformat` не виден — замер 24.10.2026: таких
+    импортов в коде 0.
     """
     expected = {path: count for path, (count, _) in NOT_PLATFORM_TIME.items()}
     assert iso_parses() == expected

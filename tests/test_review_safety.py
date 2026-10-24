@@ -2467,21 +2467,23 @@ def test_a_look_task_leaves_the_full_set_to_ci() -> None:
         )
 
 
-def test_the_agent_on_mention_names_the_tests_it_ran() -> None:
-    """Агент по обращению называет прогнанные тесты; объём задаёт позвавший (#1540).
+def test_every_agent_with_pytest_names_the_tests_it_ran() -> None:
+    """Каждый заход агента, которому разрешён pytest, называет прогнанные тесты (#1540).
 
-    Полный набор ему не запрещён: объём прогона там задаёт человек, а не
-    решение 18.10.2026 о заходах взгляда. Назвать прогнанное обязан и он —
-    вердикт по прогону и вердикт по чтению выглядят одинаково.
+    Вердикт по прогону и вердикт по чтению выглядят одинаково. ПРЕДМЕТ —
+    ЗАМЕР `AGENT_WORKFLOWS`, А НЕ ДВА ФАЙЛА РУКОЙ (находка `fa4a8bf`, урок
+    #1209): новый шаг агента с pytest в другом прогоне спросят и здесь. Объём
+    прогона по обращению задаёт позвавший — полный набор ему не запрещён.
     """
     asked = [
-        one for one in commands_and_task(ON_MENTION_BODY) if any("pytest" in c for c in one[1])
+        (path, name, task)
+        for path in AGENT_WORKFLOWS
+        for name, commands, task in commands_and_task(path)
+        if any("pytest" in c for c in commands)
     ]
-    assert asked, f"{ON_MENTION_BODY.name}: заходов с pytest нет — предмета у проверки нет (075)"
-    for name, _, task in asked:
-        assert NAME_THE_TESTS in task, (
-            f"{ON_MENTION_BODY.name}, «{name}»: прогнанное не велено назвать"
-        )
+    assert {path for path, _, _ in asked} >= {LOOK_BODY, ON_MENTION_BODY}, asked
+    for path, name, task in asked:
+        assert NAME_THE_TESTS in task, f"{path.name}, «{name}»: прогнанное не велено назвать"
 
 
 #: Где действие кладёт головную версию путей, возвращённых к базе.
@@ -2504,6 +2506,17 @@ RESTORED_PATHS: Final = (
 )
 
 
+#: Закрепление действия агента в шаге взгляда — один разбор на все проверки.
+ACTION_PIN: Final = re.compile(r"anthropics/claude-code-action@([0-9a-f]{40})", re.IGNORECASE)
+#: Имя действия в слежке; перехватчик сравнивает его без учёта регистра.
+ACTION_DEP: Final = "anthropics/claude-code-action"
+
+
+def action_pins() -> set[str]:
+    """Закрепления действия агента в шаге взгляда (находка `2325e34`: разбор был дважды)."""
+    return set(ACTION_PIN.findall(LOOK_BODY.read_text("utf-8")))
+
+
 def restored_from_pin() -> str:
     """Закрепление, с которого снят `RESTORED_PATHS`, — из слежки, а не литералом."""
     said = json.loads((ROOT / ".rules" / "vendor-watch.json").read_text(encoding="utf-8"))
@@ -2521,12 +2534,12 @@ def test_every_watch_of_the_action_sits_at_its_pin() -> None:
     сдвигает перехватчик одним `compare` (`deps_intercept.follow`).
     """
     said = json.loads((ROOT / ".rules" / "vendor-watch.json").read_text(encoding="utf-8"))
-    mine = [one for one in said["watched"] if one.get("dep") == "anthropics/claude-code-action"]
+    # Без учёта регистра, как `deps_intercept`: запись другим регистром он
+    # сдвинет, и проверка обязана её видеть (находка `2325e34`).
+    mine = [one for one in said["watched"] if str(one.get("dep")).lower() == ACTION_DEP]
     paths = {one["path"] for one in mine}
     assert {"src/github/operations/restore-config.ts", "src/entrypoints/run.ts"} <= paths, paths
-    pins = set(
-        re.findall(r"anthropics/claude-code-action@([0-9a-f]{40})", LOOK_BODY.read_text("utf-8"))
-    )
+    pins = action_pins()
     assert len(pins) == 1, f"действие взгляда закреплено не одним sha: {pins}"
     assert {one["read_at"] for one in mine} == pins, (mine, pins)
 
@@ -2541,9 +2554,7 @@ def test_the_restored_paths_are_read_from_the_pinned_action() -> None:
     нетронутом файле поставщика (#1522).
     """
     pinned_at = restored_from_pin()
-    pins = set(
-        re.findall(r"anthropics/claude-code-action@([0-9a-f]{40})", LOOK_BODY.read_text("utf-8"))
-    )
+    pins = action_pins()
     assert pins, f"{LOOK_BODY.name}: закреплений действия не найдено — предмета нет (075)"
     assert pins == {pinned_at}, (
         f"действие закреплено на {sorted(pins)}, а перечень путей снят с {pinned_at}: "
@@ -2559,9 +2570,12 @@ def test_the_look_names_the_paths_restored_to_the_base() -> None:
     соседей к общей ветке — голова недоверенная — и кладёт её версию в
     `.claude-pr/`. Задание об этом молчало, и дважды на #1500 и раз на #1507
     взгляд видел «обратную правку» в рабочем дереве, а тест по `.claude/`
-    покраснел у него на версии `main`. Предмет — заход на изменение (джоб
-    `review`). Соседи названы (195): верификатор зовётся вручную, а поздний
-    взгляд смотрит уже слитое — головы, отличной от базы, у них нет.
+    покраснел у него на версии `main`. Предмет — заходы на голову изменения:
+    джоб `review` взгляда и ответ на обращение (`step-claude.yml`) — то же
+    действие на той же версии, и на изменении он работает на голове (находка
+    `853df9d`). Соседи названы (195): верификатор зовётся вручную, поздний
+    взгляд смотрит уже слитое, разбор пунктов (`step-task-items.yml`) — слитое
+    в общей ветке: головы, отличной от базы, у них нет.
     """
     review = [
         step
@@ -2569,10 +2583,15 @@ def test_the_look_names_the_paths_restored_to_the_base() -> None:
         if "claude_args" in (step.get("with") or {})
     ]
     assert review, f"{LOOK_BODY.name}: у джоба review нет шага агента — предмета нет (075)"
-    for step in review:
-        task = str(step["with"].get("prompt") or "")
+    tasks = [
+        (LOOK_BODY.name, str(s.get("name")), str(s["with"].get("prompt") or "")) for s in review
+    ]
+    asked = commands_and_task(ON_MENTION_BODY)
+    assert asked, f"{ON_MENTION_BODY.name}: шага агента нет — предмета нет (075)"
+    tasks += [(ON_MENTION_BODY.name, name, task) for name, _, task in asked]
+    for path, name, task in tasks:
         missing = [one for one in (HEAD_OF_RESTORED, *RESTORED_PATHS) if one not in task]
-        assert not missing, f"{LOOK_BODY.name}, «{step.get('name')}»: задание не называет {missing}"
+        assert not missing, f"{path}, «{name}»: задание не называет {missing}"
 
 
 #: Имя нашего скрипта в тексте задания: `check_version.py` и подобные.

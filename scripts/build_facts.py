@@ -347,6 +347,20 @@ def ci_facts(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
 FAMILY_SCHEMA: Final = "1.1"
 #: Имя отдаваемого контракта шагов: номер — MAJOR.MINOR из `CONTRACT_VERSION`.
 GIVES_STEPS: Final = "steps"
+#: Имя отдаваемого договора фактов: с `facts-v2.1.0` его держат механизмы (#1563),
+#: номер — MAJOR.MINOR из `facts_common.CONTRACT_TAG`. Без него сводке семьи
+#: неоткуда взять номер у нового держателя (взгляд на #1612, 195).
+GIVES_FACTS: Final = "facts"
+#: Номер договора фактов в его теге: `facts-v2.1.0` → `2.1`.
+FACTS_TAG_RE: Final = re.compile(r"^facts-v(\d+\.\d+)\.\d+$")
+
+
+def facts_number() -> str:
+    """MAJOR.MINOR договора фактов, которым судится файл, — из его тега."""
+    found = FACTS_TAG_RE.match(common.CONTRACT_TAG)
+    if found is None:
+        raise NotRun(f"тег договора фактов «{common.CONTRACT_TAG}» не формы facts-vX.Y.Z")
+    return found[1]
 
 
 def manifest_facts(root: Path) -> dict[str, Any]:
@@ -371,7 +385,7 @@ def manifest_facts(root: Path) -> dict[str, Any]:
     major_minor = ".".join(full.split(".")[:2])
     return {
         "release": {"tag": released, "sha": sha} if released else None,
-        "gives": {GIVES_STEPS: major_minor},
+        "gives": {GIVES_STEPS: major_minor, GIVES_FACTS: facts_number()},
     }
 
 

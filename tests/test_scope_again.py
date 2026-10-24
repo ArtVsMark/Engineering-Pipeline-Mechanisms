@@ -113,6 +113,33 @@ def test_a_moved_base_runs_the_intersection(tmp_path: Path) -> None:
     assert scope.choose(root, "origin/main", since).tests == ("tests/test_a.py",)
 
 
+def pull_merge(root: Path) -> None:
+    """HEAD прогона: коммит слияния головы ветки в базу, как `refs/pull/N/merge` площадки."""
+    git(root, "checkout", "-q", "--detach", "origin/main")
+    git(root, "-c", "core.editor=true", "merge", "-q", "--no-ff", "--no-edit", "agent/x")
+
+
+@pytest.mark.parametrize("moved", [False, True], ids=["база-на-месте", "база-сдвинута"])
+def test_the_pull_merge_head_is_judged_like_the_branch(tmp_path: Path, moved: bool) -> None:
+    """В прогоне HEAD — коммит слияния, а не голова ветки: выбор тот же (находка `f1e891a`, 107).
+
+    Повтор правит `b`. База на месте — гонится тест `b`; база сдвинула `c`,
+    который зовёт тронутый `a`, — к нему добавляется пересечение, тест `a`.
+    """
+    root = tree(tmp_path)
+    since = green_head(root)
+    write(root, "scripts/b.py", "B = 2\n")
+    commit(root, "починка находки")
+    if moved:
+        git(root, "checkout", "-q", "main")
+        write(root, "scripts/c.py", "C = 2\n")
+        commit(root, "чужое в базе")
+        git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    pull_merge(root)
+    want = ("tests/test_a.py", "tests/test_b.py") if moved else ("tests/test_b.py",)
+    assert scope.choose(root, "origin/main", since).tests == want
+
+
 @pytest.mark.parametrize(
     ("left", "right", "both"),
     [

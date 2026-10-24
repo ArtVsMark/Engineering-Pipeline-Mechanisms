@@ -638,3 +638,24 @@ def test_a_declaration_in_the_title_counts_like_the_gate(monkeypatch: pytest.Mon
     change = {**linked_change("текст\n"), "title": NO_TASK_BODY.strip()}
     monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: change)
     assert module.main(["--repo", "o/r", "--fate", "--pr", "7"]) == module.EXIT_NOTHING
+
+
+def test_a_declaration_in_a_commit_message_counts_like_the_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Объявление в сообщении коммита — «нечего»: гейт его читает, шаг — так же (#1594)."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+
+    def answer(method: str, path: str, token: str, body: Any = None) -> Any:
+        if path.endswith("/commits") or "/commits?" in path:
+            return [{"commit": {"message": f"починка\n\n{NO_TASK_BODY}"}}]
+        return linked_change("текст\n")
+
+    monkeypatch.setattr(module.ghrest, "request", answer)
+    assert module.main(["--repo", "o/r", "--fate", "--pr", "7"]) == module.EXIT_NOTHING
+    assert module.commit_messages("o/r", 7, "t") == (f"починка\n\n{NO_TASK_BODY}",)
+
+
+def test_no_task_is_not_a_failure_to_run() -> None:
+    """`NoTask` — не `NotRun`: ловец отказа не прочтёт объявление поломкой (#1594)."""
+    assert not issubclass(module.NoTask, module.NotRun)

@@ -30,7 +30,11 @@
 ТЕЛО `try` — ТО, ЧТО ИСПОЛНЯЕТСЯ В НЁМ (находка `f7d1815`). Вызов внутри
 `def`, `lambda` или выражения-генератора `(f() for _ in x)`, вложенных в
 тело, исполнится позже — при вызове или обходе — и вне этого `try`: такой
-вызов поимкой внешнего блока не считается (находка `c97d776`). Списковое,
+вызов поимкой внешнего блока не считается (находка `c97d776`). Исключение —
+генератор, который тут же обходит встроенный из `CONSUMERS` (`all`, `any`,
+`list` и соседи): он исполняется у места вызова, в `try`, и засчитывается
+(взгляд на #1603). Генератор, отданный иному вызову, судится строго: тот
+вправе обойти его позже, и это предел, а не дыра. Списковое,
 множественное и словарное включения исполняются сразу и судятся как тело.
 Предел назван: тело вложенного `class`, довод по умолчанию и декоратор
 вложенного `def`, первый итерируемый выражения-генератора исполняются сразу,
@@ -55,7 +59,12 @@
 `from m import *` — модуль взят целиком, все его функции внешние. Модули с
 одним именем в разных местах (`scripts/x.py`, `.claude/hooks/x.py`) делят
 один перечень взятых имён: какой из них берёт импорт, разбор не знает, и
-засчёт снимается у обоих (находка `4936ee9`). Граница названа: импорт
+засчёт снимается у обоих (находка `4936ee9`). Реального входа у редких форм
+нет (взгляд на #1603, 228): замер 24.10.2026 по `scripts/` и `.claude/hooks/`
+у нас и у каталога — `from . import`, `from .m import`, `import p.m` над своим
+модулем и `*` встречаются 0 раз, кроме этой шапки. Они разобраны на дерево
+потребителя, которого гейт ещё не видел, а не по встреченному случаю: круги по
+ним — по подделкам, и это предел, а не покрытие. Граница названа: импорт
 строкой (`importlib.import_module`, `__import__`) не виден. Генератор и `async def`
 не засчитываются вовсе: их тело исполняется при обходе или `await`, а не в
 месте вызова, и `try` вокруг `f()` их истечения не ловит. Граница названа:
@@ -135,6 +144,28 @@ SCOPES: Final = (
 )
 
 
+#: Встроенные, которые обходят переданное выражение-генератор СРАЗУ, у места
+#: вызова: `all(run(x, timeout=5) for x in xs)` в теле `try` исполняется в нём
+#: (взгляд на #1603). Список закрытый (068): генератор, отданный иному вызову,
+#: тот вправе сохранить и обойти позже — такой судится строго, как прежде.
+CONSUMERS: Final = frozenset(
+    {
+        "all",
+        "any",
+        "list",
+        "tuple",
+        "set",
+        "frozenset",
+        "dict",
+        "sorted",
+        "sum",
+        "min",
+        "max",
+        "next",
+    }
+)
+
+
 #: Глубина цепочки «пойман у вызывающего вызывающего». Предел — не догадка о
 #: дереве, а защита от разбора без конца: цикл вызовов засчёта не даёт вовсе.
 CALLER_DEPTH: Final = 8
@@ -163,7 +194,36 @@ def is_spawn(call: ast.Call, imported: set[str], modules: frozenset[str] = froze
     return isinstance(func, ast.Name) and func.id in imported
 
 
-def executed(statement: ast.AST) -> list[ast.AST]:
+def rebound(tree: ast.AST) -> frozenset[str]:
+    """Имена из `CONSUMERS`, которые модуль связывает сам: `def`, присваивание, импорт, довод.
+
+    Такое имя — не встроенный (взгляд на #1628): свой `sum` или `list = ...`
+    вправе сохранить генератор и обойти его позже, вне `try`.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, ast.alias):
+            names.add(node.asname or node.name.split(".", 1)[0])
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+    return frozenset(names & CONSUMERS)
+
+
+def consumes_here(call: ast.Call, shadowed: frozenset[str]) -> bool:
+    """Встроенный из `CONSUMERS` — голым именем, которое модуль не переопределил.
+
+    Метод с тем же именем (`cache.set(k, gen)`, `obj.list(gen)`) — не встроенный:
+    он вправе сохранить генератор (взгляд на #1628).
+    """
+    func = call.func
+    return isinstance(func, ast.Name) and func.id in CONSUMERS and func.id not in shadowed
+
+
+def executed(statement: ast.AST, shadowed: frozenset[str] = frozenset()) -> list[ast.AST]:
     """Узлы, исполняемые там, где написан `statement`: в тела `def`, `lambda`, `class` не входит."""
     found: list[ast.AST] = []
     todo = [statement]
@@ -172,6 +232,12 @@ def executed(statement: ast.AST) -> list[ast.AST]:
         found.append(node)
         if not isinstance(node, SCOPES):
             todo.extend(ast.iter_child_nodes(node))
+        if isinstance(node, ast.Call) and consumes_here(node, shadowed):
+            # Генератор, который встроенный обходит у места вызова, исполняется
+            # здесь же — его тело судится как тело `try` (взгляд на #1603).
+            for arg in node.args:
+                if isinstance(arg, ast.GeneratorExp):
+                    todo.extend(ast.iter_child_nodes(arg))
     return found
 
 
@@ -188,9 +254,12 @@ def caught(block: ast.Try) -> set[str]:
 def guarded(tree: ast.AST) -> set[int]:
     """Узлы в ТЕЛЕ `try` с поимкой истёкшего дедлайна — не в обработчике и не после."""
     inside: set[int] = set()
+    shadowed = rebound(tree)
     for block in ast.walk(tree):
         if isinstance(block, ast.Try) and caught(block) & CATCHES:
-            inside |= {id(node) for statement in block.body for node in executed(statement)}
+            inside |= {
+                id(node) for statement in block.body for node in executed(statement, shadowed)
+            }
     return inside
 
 

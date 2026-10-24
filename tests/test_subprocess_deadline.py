@@ -510,6 +510,23 @@ def test_a_generator_expression_runs_outside_the_try(source: str, bad: bool) -> 
     assert bool(undeadlined(source)) is bad
 
 
+@pytest.mark.parametrize(
+    ("wrap", "bad"),
+    [("all", False), ("any", False), ("list", False), ("next", False), ("keep", True)],
+)
+def test_a_generator_consumed_on_the_spot_runs_in_the_try(wrap: str, bad: bool) -> None:
+    """Генератор, тут же обойдённый встроенным, исполняется в `try` (взгляд на #1603).
+
+    Отданный иному вызову (`keep`) судится строго: тот вправе обойти его позже.
+    """
+    source = (
+        "import subprocess\ntry:\n"
+        f"    {wrap}(subprocess.run(['x'], timeout=5) for _ in 'a')\n"
+        "except subprocess.TimeoutExpired:\n    pass\n"
+    )
+    assert bool(undeadlined(source)) is bad
+
+
 HOOK = (
     "import subprocess\n\ndef f():\n" + SPAWN_BODY + "\n"
     "def main():\n    try:\n        f()\n    except subprocess.TimeoutExpired:\n"
@@ -573,3 +590,47 @@ def test_modules_with_one_name_share_the_taken_names(tmp_path: Path) -> None:
     assert [(name, what) for name, _, what in found] == [
         ("scripts/hook.py", "TimeoutExpired не пойман")
     ]
+
+
+@pytest.mark.parametrize(
+    ("source", "bad"),
+    [
+        ("cache.list(subprocess.run(['x'], timeout=5) for _ in 'a')", True),
+        ("def list(gen):\n    return gen\n", True),
+        ("list = keep\n", True),
+        ("from helpers import keep as list\n", True),
+        ("", False),
+    ],
+    ids=["метод-того-же-имени", "свой-def", "присваивание", "импорт-под-именем", "встроенный"],
+)
+def test_only_the_builtin_consumes_on_the_spot(source: str, bad: bool) -> None:
+    """Встроенный — голым именем, не переопределённым модулем (взгляд на #1628).
+
+    Метод того же имени и своё `list` вправе сохранить генератор и обойти позже.
+    """
+    if source.startswith("cache."):
+        body = f"    {source}\n"
+        prefix = ""
+    else:
+        body = "    list(subprocess.run(['x'], timeout=5) for _ in 'a')\n"
+        prefix = source
+    text = f"import subprocess\n{prefix}try:\n{body}except subprocess.TimeoutExpired:\n    pass\n"
+    assert bool(undeadlined(text)) is bad
+
+
+def test_rebound_names_the_consumers_the_module_binds_itself() -> None:
+    """`def`, присваивание, импорт и довод связывают имя; чужое имя не в счёт."""
+    tree = ast.parse(
+        "def list(x):\n    return x\nsorted = 1\nfrom m import a as any\n"
+        "def f(next):\n    pass\nkeep = 2\n"
+    )
+    assert gate.rebound(tree) == frozenset({"list", "sorted", "any", "next"})
+
+
+def test_consumes_here_takes_the_bare_unshadowed_builtin_only() -> None:
+    """Голое имя встроенного — да; метод того же имени и переопределённое — нет."""
+    bare, method = (ast.parse(one, mode="eval").body for one in ("list(g)", "obj.list(g)"))
+    assert isinstance(bare, ast.Call) and isinstance(method, ast.Call)
+    assert gate.consumes_here(bare, frozenset())
+    assert not gate.consumes_here(bare, frozenset({"list"}))
+    assert not gate.consumes_here(method, frozenset())

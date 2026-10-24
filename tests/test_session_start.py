@@ -385,3 +385,31 @@ def test_the_kit_hook_warns_and_starts_the_window(tmp_path: Path, floor: str, sa
     )
     assert done.returncode == 0, done.stderr
     assert said in done.stderr, done.stderr
+
+
+def test_without_a_repository_the_hook_names_the_signing_left_on(tmp_path: Path) -> None:
+    """Каталог проекта не репозиторий — отказ назван в stderr, старт не роняется (`5bc0da0`)."""
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    shutil.copy2(HOOK, hooks / HOOK.name)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    environment = {
+        **os.environ,
+        "CLAUDE_CODE_REMOTE": "true",
+        "CLAUDE_PROJECT_DIR": str(plain),
+        "CLAUDE_ENV_FILE": str(tmp_path / "env"),
+        # Без потолка git поднялся бы к репозиторию над временным каталогом.
+        "GIT_CEILING_DIRECTORIES": str(tmp_path),
+    }
+    done = subprocess.run(
+        [str(hooks / HOOK.name)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "подпись коммитов не выключена" in done.stderr, done.stderr
+    assert "выключена — автор" not in done.stdout, done.stdout

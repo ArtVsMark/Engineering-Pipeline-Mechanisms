@@ -372,14 +372,22 @@ def test_a_skip_to_an_unknown_publisher_and_with_a_live_link(tmp_path: Path) -> 
 def test_facts_are_compared_with_the_deal(
     tmp_path: Path, mine: str, deal: str | None, state: str, why: str
 ) -> None:
-    """Номер своих фактов — с договором фактов издателя; переезд 1 → 2 — серый."""
+    """Номер своих фактов — с договором механизмов; номер каталога не в счёт (взгляд на #1612).
+
+    Каталог в сводке отдаёт прежний 2.0: держатель с `facts-v2.1.0` — механизмы,
+    и сверка с каталогом звала бы верную связь «сводка отстала».
+    """
     root = tree(tmp_path)
     facts_file(root, {"schema": mine})
     gives = {"facts": deal} if deal else {}
-    said = summary(publisher(CATALOGUE, **gives), publisher("ArtVsMark/ArtVsMark", facts="1.6"))
+    said = summary(
+        publisher(MECH, **gives),
+        publisher(CATALOGUE, facts="9.9"),
+        publisher("ArtVsMark/ArtVsMark", facts="1.6"),
+    )
     links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
     (link,) = [one for one in links if one["what"] == "facts"]
-    assert link["publisher"] == CATALOGUE
+    assert link["publisher"] == MECH
     assert link["state"] == state
     assert why in link["why"]
 
@@ -789,3 +797,17 @@ def test_steps_links_of_an_answer_not_in_utf8_is_grey(tmp_path: Path) -> None:
     (link,) = fc.steps_links(tmp_path, {"projects": []})
     assert link.state == "unknown"
     assert "не прочитан" in link.why
+
+
+def test_a_renamed_mechanisms_publisher_still_gives_the_facts_deal(tmp_path: Path) -> None:
+    """Издатель договора фактов — по роли (`steps`), а не по имени (взгляд на #1628).
+
+    Переименованные механизмы сверка шагов узнаёт по тому, кто отдаёт `steps`;
+    сверка фактов по жёсткому имени молча посерела бы.
+    """
+    root = tree(tmp_path)
+    facts_file(root, {"schema": "2.1"})
+    said = summary(publisher("New/Mechanisms", steps="0.11.0", facts="2.1"))
+    links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
+    (link,) = [one for one in links if one["what"] == "facts"]
+    assert link["state"] == "ok", link
