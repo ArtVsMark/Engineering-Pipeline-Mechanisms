@@ -62,6 +62,7 @@ from typing import Any, Final
 import changerefs
 import findings
 import paths
+import pipeline_checks as policy
 import trunk_log
 
 EXIT_OK: Final = 0
@@ -140,9 +141,17 @@ def kinds_in(text: str, where: str) -> dict[str, Any]:
     return dict(kinds)
 
 
+def table_path(key: str) -> Path:
+    """Файл данных проекта по таблице путей (#1632); битая таблица — отказ с причиной."""
+    try:
+        return policy.project_path(key)
+    except paths.BadPaths as exc:
+        raise NotRun(f"таблица путей не разобрана: {exc}") from exc
+
+
 def read(path: Path | None = None) -> dict[str, Any]:
     """Объявленные роды находок."""
-    where = path or paths.FINDING_KINDS
+    where = path or table_path("finding-kinds")
     if not where.is_file():
         raise NotRun(f"нет {where}: роды находок взять неоткуда (075)")
     try:
@@ -168,7 +177,7 @@ def queued(path: Path | None = None) -> str:
     «предложено» вставал строкой «без ответа», пока гейт в том же случае
     отказывал (`dd1da87`).
     """
-    where = path or paths.PROPOSALS
+    where = path or table_path("proposals")
     try:
         return where.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -515,7 +524,7 @@ def known_rules(path: Path | None = None) -> frozenset[str]:
     Файла нет или он не читается — пустое множество не выдаётся за «номеров
     нет»: это отказ (045).
     """
-    where = path or paths.BINDINGS
+    where = path or table_path("bindings")
     try:
         return rule_numbers(where.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:

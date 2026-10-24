@@ -368,7 +368,8 @@ def gather(
     if major_wanted > major_now and not acceptance:
         problems.append(
             f"мажор {major_now} → {major_wanted} поднимает не выпуск, а ЗАКРЫТАЯ приёмка: "
-            f"«0.x» значит «ещё не доделано здесь» ({paths.RELEASE_DOC}, decisions/009). "
+            "«0.x» значит «ещё не доделано здесь» "
+            f"({policy.named_path('release-doc')}, decisions/009). "
             "Назовите её: --acceptance <номер задачи>"
         )
     elif major_wanted > major_now and state == ACCEPTANCE_NOT_A_NUMBER:
@@ -630,6 +631,7 @@ def page_body(version: str, repo: str) -> str:
     at_tag = contract_at(f"v{version}")
     counted = Counter(one.kind for one in kept)
     tree = f"https://github.com/{repo}/blob/v{version}"
+    release_doc = policy.named_path("release-doc").as_posix()
     lines = [
         f"Записей в выпуске: **{len(kept)}**.",
         "",
@@ -648,7 +650,7 @@ def page_body(version: str, repo: str) -> str:
         f"[`changelog.d/released/{version}/`]({tree}/changelog.d/released/{version}).",
         "",
         f"Версия контракта на момент выпуска — `{at_tag}`; "
-        f"что означают её разряды, говорит [`{paths.RELEASE_DOC}`]({tree}/{paths.RELEASE_DOC}).",
+        f"что означают её разряды, говорит [`{release_doc}`]({tree}/{release_doc}).",
     ]
     return "\n".join(lines)
 

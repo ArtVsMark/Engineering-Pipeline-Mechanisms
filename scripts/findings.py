@@ -124,16 +124,9 @@ ANSWER_FILE: Final = paths.BINDINGS.as_posix()
 def answer_file() -> str:
     """Ответ каталогу по таблице путей дерева (#1632); битая таблица — умолчание с пометкой.
 
-    Род находки — разметка, а не допуск: битый раздел путей красит сверка
-    ответа (`check_pipeline`), а здесь он назван в журнале, а не проглочен (045).
+    Род находки — разметка, а не допуск (`policy.named_path`).
     """
-    try:
-        return policy.project_path("bindings").as_posix()
-    except paths.BadPaths as exc:
-        print(
-            f"::warning::таблица путей не разобрана, ответ — по умолчанию: {exc}", file=sys.stderr
-        )
-        return ANSWER_FILE
+    return policy.named_path("bindings").as_posix()
 
 
 #: Место в начале заголовка находки: путь латиницей, затем двоеточие и номер

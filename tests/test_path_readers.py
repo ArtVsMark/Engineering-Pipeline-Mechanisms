@@ -142,3 +142,47 @@ def test_a_broken_table_stops_the_script_with_a_reason(
     assert module.main(argv) != 0
     captured = capsys.readouterr()
     assert "вне дерева" in captured.out + captured.err
+
+
+pipeline_checks = load_script("pipeline_checks.py")
+finding_kinds = load_script("finding_kinds.py")
+review_findings = load_script("review_findings.py")
+
+
+def test_a_named_path_follows_the_table_and_warns_on_a_broken_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Названный путь — из таблицы; битая таблица — умолчание с пометкой, а не отказ."""
+    table(tmp_path, "paths:\n  release-doc: docs/our-release.md\n")
+    assert pipeline_checks.named_path("release-doc", tmp_path) == Path("docs/our-release.md")
+    table(tmp_path, "paths:\n  release-doc: /вне-дерева.md\n")
+    said = pipeline_checks.named_path("release-doc", tmp_path)
+    assert said == pipeline_checks.paths.PROJECT["release-doc"]
+    assert "::warning::таблица путей не разобрана, «release-doc»" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("key", ["finding-kinds", "proposals", "bindings"])
+def test_the_kinds_read_their_files_by_the_table(
+    key: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Словарь родов, очередь и ответ — по таблице; битая таблица — отказ родов с причиной."""
+    monkeypatch.chdir(tmp_path)
+    table(tmp_path, f"paths:\n  {key}: cfg/moved.data\n")
+    assert finding_kinds.table_path(key) == Path("cfg/moved.data")
+    table(tmp_path, f"paths:\n  {key}: /вне-дерева\n")
+    with pytest.raises(finding_kinds.NotRun, match="вне дерева"):
+        finding_kinds.table_path(key)
+
+
+def test_an_answer_finding_names_the_moved_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Предмет находки об ответе — ответ по таблице, тот же, что у пола рода (022)."""
+    monkeypatch.chdir(tmp_path)
+    table(tmp_path, "paths:\n  bindings: cfg/answer.json\n")
+    review_findings.findings.answer_file.cache_clear()
+    try:
+        entry = review_findings.findings.Entry(1, "замечание", "без места")
+        assert review_findings.subject_of(entry) == {"cfg/answer.json"}
+    finally:
+        review_findings.findings.answer_file.cache_clear()

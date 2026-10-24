@@ -49,6 +49,7 @@
 
 import os
 import re
+import sys
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -643,6 +644,24 @@ def project_paths_of(text: str, where: str) -> dict[str, Path]:
 def project_path(key: str, root: Path = Path()) -> Path:
     """Путь данных проекта по ключу таблицы — от корня `root`; нет ключа — `KeyError`."""
     return project_paths(root / paths.PIPELINE)[key]
+
+
+def named_path(key: str, root: Path = Path()) -> Path:
+    """Путь по таблице для того, кто его только НАЗЫВАЕТ или упорядочивает, а не читает (#1632).
+
+    Подсказка в отказе, ступень очереди, род находки: отказать из-за битого
+    раздела путей значило бы остановить работу, которую он не решает, — его и
+    так красит сверка ответа (`check_pipeline`). Поэтому умолчание `paths.PROJECT`,
+    но названное в журнале, а не проглоченное (045).
+    """
+    try:
+        return project_path(key, root)
+    except paths.BadPaths as exc:
+        print(
+            f"::warning::таблица путей не разобрана, «{key}» — по умолчанию: {exc}",
+            file=sys.stderr,
+        )
+        return paths.PROJECT[key]
 
 
 def areas_for_tests(path: Path = DEFAULT_PATH) -> tuple[scope_areas.Area, ...]:
