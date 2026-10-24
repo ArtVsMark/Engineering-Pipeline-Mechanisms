@@ -148,8 +148,7 @@
       ]
     },
     ".claude/skills/a-gate-obeys-every-rule": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/a-task-before-the-work": {
       "answer": "as-is"
@@ -170,8 +169,7 @@
       "answer": "as-is"
     },
     ".claude/skills/direction-coverage": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/propose-a-rule": {
       "answer": "as-is"
@@ -180,8 +178,7 @@
       "answer": "as-is"
     },
     ".claude/skills/role-profile": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/rulebook-keeps-how-to-work": {
       "answer": "as-is"
@@ -190,8 +187,7 @@
       "answer": "as-is"
     },
     ".claude/skills/what-the-graph-misses": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/work-the-plan": {
       "answer": "as-is"
@@ -475,8 +471,10 @@
       ]
     },
     ".rules/mechanism-rules.json": {
-      "answer": "ours",
-      "why": "перепись называет гейты этого дерева — tests/ и scripts/ поставщика, — а у потребителя их нет: его места судят его гейты, и перепись у него — своя работа, когда переедет навык a-gate-obeys-every-rule (ArtVsMark/Engineering-Pipeline-Mechanisms#1459)"
+      "answer": "configured",
+      "where": [
+        ".rules/mechanism-rules.json"
+      ]
     },
     ".rules/outcomes.json": {
       "answer": "configured",

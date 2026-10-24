@@ -2561,8 +2561,9 @@ def test_version_of_compares_numbers_not_strings() -> None:
             "[`build-a-gate`](../build-a-gate/SKILL.md)",
         ),
         (
-            "[`role-profile`](../role-profile/SKILL.md)",
-            "[`role-profile`](https://github.com/o/r/blob/main/.claude/skills/role-profile/SKILL.md)",
+            # Все навыки дерева отданы (#1645): неотданный — вымышленное имя.
+            "[`ещё-не-отданный`](../ещё-не-отданный/SKILL.md)",
+            "[`ещё-не-отданный`](https://github.com/o/r/blob/main/.claude/skills/ещё-не-отданный/SKILL.md)",
         ),
         (
             "[`roles`](../../../docs/agent/roles.md#раздел)",

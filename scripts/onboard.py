@@ -920,6 +920,10 @@ DATA_KITTED: Final = (
     paths.PROTECTION,
     paths.SERIES,
     paths.RERUN,
+    # #1645: карта направлений и перепись механизмов — форма с пустым
+    # наполнением: направления и правила общие, исходы и места — проекта.
+    paths.DIRECTIONS,
+    paths.MECHANISM_RULES,
     # #1553: предполётная у потребителя — загрузчик, а не копии скриптов (090).
     paths.PREFLIGHT_LOADER,
     # #1552: запускатель — общий вход к скриптам механизмов у потребителя.
@@ -941,22 +945,27 @@ TREE_KITTED: Final = (
     paths.HOOKS / "skill_log.sh",
     paths.HOOKS / "install_floor.sh",
 )
-#: Навыки окна, которые кладутся копией (#1552, решение владельца 24.10.2026).
-#: Остальные навыки отвечают `ours @skill-tree`: их предмет — то, чего у
-#: потребителя нет. Совпадение с ответами `as-is` держит `tests/test_onboard.py`.
+#: Навыки окна, которые кладутся копией (#1552, решение владельца 24.10.2026;
+#: четыре навыка `@skill-tree` добавлены по #1645 — их ссылки на наше дерево
+#: переводит подстановка, а карта направлений и перепись механизмов ложатся
+#: заготовкой). Совпадение с ответами `as-is` держит `tests/test_onboard.py`.
 SKILLS_KITTED: Final = tuple(
     paths.SKILLS / name / "SKILL.md"
     for name in (
+        "a-gate-obeys-every-rule",
         "a-task-before-the-work",
         "answer-a-rule",
         "audit-the-answers",
         "build-a-gate",
         "bundle-the-work",
         "close-a-finding",
+        "direction-coverage",
         "propose-a-rule",
         "retell-from-the-source",
+        "role-profile",
         "rulebook-keeps-how-to-work",
         "rulebook-reread",
+        "what-the-graph-misses",
         "work-the-plan",
     )
 )
