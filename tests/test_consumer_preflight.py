@@ -274,3 +274,53 @@ def test_a_half_cache_is_replaced_and_no_part_is_left(tmp_path: Path) -> None:
     assert load(tree, tmp_path).returncode == 0
     assert (cache / "scripts" / "preflight.py").is_file()
     assert not list(cache.parent.glob("*.part*")), "своя копия выкачки осталась рядом с кешем"
+
+
+def test_a_cache_won_by_a_neighbour_is_kept(tmp_path: Path) -> None:
+    """Сосед положил кеш, пока шла своя выкачка, — его кеш цел, своя копия брошена (066).
+
+    Сосед встаёт ровно в окно прежнего дефекта — после выкачки, до переноса:
+    `git` в пути — обёртка, которая после настоящей выкачки кладёт кеш соседа.
+    Прежний код стирал его `rm -rf` перед `mv` (находка на #1626).
+    """
+    origin = supplier(tmp_path)
+    repo = origin / "o" / "m.git"
+    (repo / "scripts" / "work_plan.py").write_text("print('свой')\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "скрипт")
+    git(repo, "tag", "-f", "v1.2.3")
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    real = shutil.which("git")
+    assert real, "git не найден"
+    (shims / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        f'"{real}" "$@" || exit $?\n'
+        'if [[ " $* " == *" clone "* ]]; then\n'
+        f'  mkdir -p "{cache}/scripts"\n'
+        f'  echo "print(\'сосед\')" > "{cache}/scripts/work_plan.py"\n'
+        f'  : > "{cache}/scripts/preflight.py"\n'
+        "fi\n",
+        encoding="utf-8",
+    )
+    (shims / "git").chmod(0o755)
+    done = subprocess.run(
+        ["bash", str(LAUNCHER), "work_plan.py"],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **{k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
+            "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}",
+            "XDG_CACHE_HOME": str(tmp_path / "cache"),
+            "MECHANISMS_ORIGIN": (tmp_path / "origin").as_uri(),
+            "PYTHON": sys.executable,
+        },
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "сосед" in done.stdout, "кеш соседа подменён своей копией"
+    assert not list(cache.parent.glob("*.part.*")), "своя выкачка не убрана"

@@ -63,20 +63,30 @@ if [ ! -f "$cache/scripts/preflight.py" ]; then
     refuse "нет ни timeout, ни gtimeout — выкачку нечем ограничить по времени; на macOS: brew install coreutils"
   fi
   # ОКОН-ПИСАТЕЛЕЙ МОЖЕТ БЫТЬ ДВА (066, взгляд на #1618): рабочие копии одного
-  # окна делят кеш. Поэтому выкачка идёт в СВОЙ каталог (`.part.<pid>`), а
-  # готовый кеш не стирается никогда: кто выкачал вторым, бросает свою копию.
-  # Остаток — недокачанный кеш без `preflight.py` — заменяется; окно между
-  # проверкой и `mv` названо, а не закрыто: блокировки переносимой у оболочки нет.
+  # окна делят кеш. Поэтому выкачка идёт в СВОЙ каталог (`.part.<pid>`), а на
+  # место кеша встаёт ОДНИМ переименованием, которое на занятом месте
+  # отказывает: первый побеждает, второй бросает свою копию. Готовый кеш не
+  # стирается и не подменяется — подмены живой цели нет, и блокировать нечего.
+  # Прежде здесь стояло `rm -rf "$cache"; mv`, и второй писатель между проверкой
+  # и `mv` стирал кеш под скриптом первого (находка на #1626). `os.rename`, а не
+  # `mv`: `mv` на занятый каталог кладёт копию ВНУТРЬ него.
+  swap() { "${PYTHON:-python3}" -c 'import os, sys; os.rename(sys.argv[1], sys.argv[2])' "$1" "$2" 2>/dev/null; }
   part="$cache.part.$$"
   rm -rf "$part"
   "$deadline" 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$part" \
     || { rm -rf "$part"; refuse "механизмы $supplier@$tag не выкачаны из $origin"; }
-  if [ -f "$cache/scripts/preflight.py" ]; then
-    rm -rf "$part"
-  else
-    rm -rf "$cache"
-    mv "$part" "$cache"
+  # ОСТАТОК — недокачанный кеш без `preflight.py` (`3341be3`) — уходит в сторону
+  # тем же переименованием и стирается уже там. Оказался готовым — его положил
+  # сосед между проверкой и переносом, — он возвращается, а не стирается.
+  if [ -d "$cache" ] && [ ! -f "$cache/scripts/preflight.py" ]; then
+    stale="$cache.stale.$$"
+    if swap "$cache" "$stale"; then
+      if [ -f "$stale/scripts/preflight.py" ]; then swap "$stale" "$cache" || true; else rm -rf "$stale"; fi
+    fi
   fi
+  swap "$part" "$cache" || rm -rf "$part"
+  [ -f "$cache/scripts/preflight.py" ] \
+    || refuse "кеш механизмов $cache неполон и не заменён — удалите его, и следующий заход выкачает заново"
 fi
 [ -f "$cache/scripts/$script" ] || refuse "в механизмах $supplier@$tag нет scripts/$script"
 
