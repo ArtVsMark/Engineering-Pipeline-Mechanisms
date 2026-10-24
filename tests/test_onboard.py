@@ -2469,9 +2469,11 @@ def test_a_shallow_supplier_clone_is_refused_with_its_reason(tmp_path: Path) -> 
     [
         ("want=3.12\n", "write", "want=3.14\n"),
         ("want=3.15\n", "current", "want=3.15\n"),
-        ("# свой\n", "edited", "# свой\n"),
+        ('want="3.12"\n', "write", 'want="3.14"\n'),
+        ("want=3.12  # мой\n", "write", "want=3.14  # мой\n"),
+        ("# свой\n", "notes", "# свой\n"),
     ],
-    ids=["ниже-поднять", "выше-оставить", "без-строки"],
+    ids=["ниже-поднять", "выше-оставить", "в-кавычках", "с-комментарием", "без-строки"],
 )
 def test_plan_floor_lifts_only_a_lower_floor(
     tmp_path: Path, mine: str, where: str, after: str
@@ -2481,6 +2483,10 @@ def test_plan_floor_lifts_only_a_lower_floor(
     (tmp_path / module.paths.FLOOR).write_text(f"# пояснение\n{mine}", encoding="utf-8")
     plan = module.Update()
     module.plan_floor(plan, tmp_path, "# наш\nwant=3.14\n")
+    if where == "notes":
+        assert any(str(module.paths.FLOOR) in note for note in plan.notes), plan
+        assert not plan.edited, "файл проекта остановил всё обновление (взгляд на #1626)"
+        return
     assert module.paths.FLOOR in getattr(plan, where), plan
     if where == "write":
         assert plan.write[module.paths.FLOOR] == f"# пояснение\n{after}"
@@ -2489,3 +2495,31 @@ def test_plan_floor_lifts_only_a_lower_floor(
 def test_version_of_compares_numbers_not_strings() -> None:
     """`3.9` ниже `3.14`: строкой сравнение вышло бы наоборот."""
     assert module.version_of("3.9") < module.version_of("3.14")
+
+
+@pytest.mark.parametrize(
+    ("said", "laid"),
+    [
+        (
+            "[`gaps`](../../../docs/dev/gaps.md)",
+            "[`gaps`](https://github.com/o/r/blob/main/docs/dev/gaps.md)",
+        ),
+        ("[#767](../../../../issues/767)", "[o/r#767](https://github.com/o/r/issues/767)"),
+        (
+            "[`build-a-gate`](../build-a-gate/SKILL.md)",
+            "[`build-a-gate`](../build-a-gate/SKILL.md)",
+        ),
+        (
+            "[`role-profile`](../role-profile/SKILL.md)",
+            "[`role-profile`](https://github.com/o/r/blob/main/.claude/skills/role-profile/SKILL.md)",
+        ),
+        (
+            "[`roles`](../../../docs/agent/roles.md#раздел)",
+            "[`roles`](../../../docs/agent/roles.md#раздел)",
+        ),
+    ],
+    ids=["документ-поставщика", "задача-площадки", "свой-навык", "наш-навык", "свой-документ"],
+)
+def test_skill_kit_points_foreign_links_at_the_supplier(said: str, laid: str) -> None:
+    """Цель вне дерева потребителя — полный адрес поставщика, своя — как есть (взгляд на #1626)."""
+    assert module.skill_kit(said, "o/r") == laid

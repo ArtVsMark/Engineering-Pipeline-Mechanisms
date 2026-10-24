@@ -197,12 +197,18 @@ def pinned_in(
         # у любого соседа ведёт в тот же трекер поставщика. Прибито голое `#N`
         # и имя проекта вне адреса задачи — их подстановка навыка и снимает.
         value = TRACKER_REF.sub("", value)
+        # В прозе полный адрес — ссылка, которую читатель открывает, и у соседа
+        # она ведёт туда же (#1552). В коде адрес — то, что механизм читает:
+        # там он прибит и судится.
+        if prose:
+            value = WEB_ADDRESS.sub("", value)
         if number and number.search(value):
             return True
         for name in family:
             value = value.replace(name, "")
         return any(name in value for name in own)
 
+    prose = suffix == ".md"
     if suffix == ".py":
         tree = ast.parse(text)
         docs = {
@@ -220,7 +226,6 @@ def pinned_in(
             and id(node) not in docs
             and own_in(node.value)
         )
-    prose = suffix == ".md"
     return [
         at
         for at, line in enumerate(text.splitlines(), 1)
@@ -228,6 +233,8 @@ def pinned_in(
     ]
 
 
+#: Адрес страницы площадки в прозе: ссылка, а не прибитое имя.
+WEB_ADDRESS: Final = re.compile(r"https://github\.com/[^\s)]+")
 #: Задача трекера полным адресом: `владелец/репо#N`.
 TRACKER_REF: Final = re.compile(r"[\w.-]+/[\w.-]+#\d+")
 
@@ -899,7 +906,19 @@ def named_paths(skill: Path) -> set[str]:
                 continue
             if (ROOT / said).exists() and said != own and not said.startswith(f"{own}/"):
                 found.add(said)
+        # ЦЕЛЬ ССЫЛКИ РАЗМЕТКИ — ТОЖЕ ПУТЬ (взгляд на #1626): подпись могла
+        # сказать «поставщика», а относительная цель вести в дерево потребителя.
+        for target in RELATIVE_TARGET.findall(text):
+            said = (one.parent / target).resolve()
+            if said.is_relative_to(ROOT) and said.exists():
+                relative = said.relative_to(ROOT).as_posix()
+                if relative != own and not relative.startswith(f"{own}/"):
+                    found.add(relative)
     return found
+
+
+#: Относительная цель ссылки разметки: `](../../../docs/x.md)`, без якоря.
+RELATIVE_TARGET: Final = re.compile(r"\]\((\.\.?/[^)\s#]+)")
 
 
 #: Как подстановка навыка называет ссылку на дерево поставщика: путь в

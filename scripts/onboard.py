@@ -104,6 +104,7 @@ import contextlib
 import difflib
 import hashlib
 import io
+import itertools
 import json
 import re
 import subprocess
@@ -116,6 +117,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import check_env
+import check_rulebook_fresh
 import check_shipped
 import gitcall
 import paths
@@ -964,6 +966,10 @@ SKILL_CALL: Final = re.compile(r"\bpython3? scripts/([A-Za-z0-9_]+\.py)")
 #: Ссылка в тексте навыка на код, тест или документ поставщика: у потребителя
 #: таких путей нет, и навык называет их чужими, а не своими.
 SUPPLIER_REF: Final = re.compile(r"`((?:scripts|tests|docs)/[^`\s]+)`(?! поставщика)")
+#: Относительная ссылка разметки в тексте навыка: цель отсчитывается от его каталога.
+SKILL_LINK: Final = re.compile(r"\]\((?P<target>\.\./[^)\s#]+)(?P<anchor>#[^)\s]*)?\)")
+#: Каталог навыка от корня дерева: `.claude/skills/<имя>/` — у всех навыков один.
+SKILL_DEPTH: Final = 3
 #: Голый номер задачи в тексте навыка: у потребителя `#639` вёл бы в ЕГО трекер.
 BARE_ISSUE: Final = re.compile(r"(?<![\w/#&])#(\d+)\b")
 
@@ -990,8 +996,34 @@ def skill_kit(text: str, repo: str) -> str:
         laid = Path(found[1].split("::", 1)[0]) in DATA_KITTED
         return found[0] if laid else f"`{found[1]}` поставщика"
 
+    def link(found: re.Match[str]) -> str:
+        # Цель вне дерева потребителя ведёт в дерево поставщика полным адресом:
+        # подпись «поставщика» при относительной цели вела бы в пустоту (взгляд
+        # на #1626). Общая ветка, а не прибивка: подстановка не зависит от тега,
+        # и старую копию `plan_tree` узнаёт той же функцией.
+        target = Path(found["target"]).parts
+        ups = len(list(itertools.takewhile(lambda part: part == "..", target)))
+        rest = "/".join(target[ups:]) + (found["anchor"] or "")
+        # Выше корня дерева — адрес площадки (`../../../../issues/767`).
+        if ups > SKILL_DEPTH:
+            return f"](https://github.com/{repo}/{rest})"
+        base = SKILLS_KITTED[0].parent.parts[: SKILL_DEPTH - ups]
+        where = Path(*base, *target[ups:])
+        if where in laid_at_the_consumer():
+            return found[0]
+        prefix = "".join(f"{part}/" for part in base)
+        return f"](https://github.com/{repo}/blob/{paths.TRUNK}/{prefix}{rest})"
+
     shaped = SUPPLIER_REF.sub(ref, SKILL_CALL.sub(call, text))
+    shaped = SKILL_LINK.sub(link, shaped)
     return BARE_ISSUE.sub(rf"{repo}#\1", shaped)
+
+
+def laid_at_the_consumer() -> set[Path]:
+    """Что заход кладёт потребителю: данные, хуки, навыки и свод (#1552)."""
+    # Состав свода — у гейта его свежести, а не второй список здесь (022).
+    rulebook = {Path(one) for one in check_rulebook_fresh.RULEBOOK}
+    return {*DATA_KITTED, *TREE_KITTED, *SKILLS_KITTED, *rulebook}
 
 
 def shape_of(path: Path, repo: str) -> Callable[[str], str]:
@@ -1226,17 +1258,23 @@ def plan_floor(update: Update, consumer: Path, ours: str) -> None:
     mine = target.read_text(encoding="utf-8")
     have = WANT_LINE.search(mine)
     if have is None:
-        update.edited[paths.FLOOR] = (
-            f"в {paths.FLOOR} нет строки want=X.Y — планку хуков не прочесть\n"
+        # Файл проекта, а не наша копия: отказ на всё обновление с советом нести
+        # разницу поставщику назвал бы не ту причину (взгляд на #1626). Строка
+        # вывода — и обновление идёт дальше.
+        update.notes.append(
+            f"`{paths.FLOOR}`: строки want=X.Y не нашлось — планку хуков сверьте сами, "
+            f"механизмам нужна не ниже {wanted[2]}"
         )
-    elif version_of(have[1]) < version_of(wanted[1]):
-        update.write[paths.FLOOR] = WANT_LINE.sub(f"want={wanted[1]}", mine, count=1)
+    elif version_of(have[2]) < version_of(wanted[2]):
+        # Меняется только число: кавычки и хвостовой комментарий — проекта.
+        start, end = have.span(2)
+        update.write[paths.FLOOR] = mine[:start] + wanted[2] + mine[end:]
     else:
         update.current.append(paths.FLOOR)
 
 
 #: Строка планки в `floor.sh`: одно присваивание `want=X.Y`.
-WANT_LINE: Final = re.compile(r"^want=(\d+\.\d+)$", re.M)
+WANT_LINE: Final = re.compile(r"^want=([\"']?)(\d+\.\d+)\1[ \t]*(?:#.*)?$", re.M)
 
 
 def version_of(said: str) -> tuple[int, ...]:
