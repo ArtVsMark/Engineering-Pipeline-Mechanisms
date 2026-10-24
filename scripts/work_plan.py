@@ -906,7 +906,7 @@ def fresh_build(
 
     СОСЕДИ ПО ПРИЗНАКУ «ПЕРЕПИСЫВАЕТ ТЕЛО ЗАДАЧИ ПОСЛЕ ДОЛГОЙ РАБОТЫ» НАЗВАНЫ
     ([195](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/195-a-narrowed-predicate-names-its-neighbour.md)).
-    Тело задачи через PATCH пишут восемь механизмов. Шесть — `drift`,
+    Тело задачи через PATCH пишут девять механизмов. Шесть — `drift`,
     `review_findings`, `unlooked`, `stuck`, `schedules_seen`, `main_red` —
     ведут тело целиком сами, ручной части в нём нет, и потерять правку
     человека им нечем. Седьмой — `items.follow` — пишет в тела ЭПИКОВ, которые
@@ -914,7 +914,9 @@ def fresh_build(
     же дефект, и он починен тем же приёмом — чтение до пересчёта и ещё раз
     перед записью. `items.mark` читает задачу и пишет
     её сразу, без работы между — окно в один запрос, как здесь. Нашёл внешний
-    взгляд на #684 (`55d530e`).
+    взгляд на #684 (`55d530e`). Девятый — `announce_refusal` этого же модуля
+    (#1621): блок отказа он кладёт поверх свежего тела тем же приёмом, чтение
+    и сразу запись, и ручную часть не трогает — лишь вставляет блок под маркер.
     """
     for _ in range(TRIES):
         number, body = findings.live_issue(repo, token, MARKER)
@@ -951,6 +953,79 @@ def fresh_build(
         f"план правили во время каждого из {TRIES} заходов — писать поверх правки "
         "человека сборщик не берётся"
     )
+
+
+#: Блок отказа в шапке плана (#1621): его кладёт отказ сборки, снимает следующая
+#: успешная. Границы — скрытые строки разметки, их читатель не видит.
+REFUSAL_OPEN: Final = "<!-- plan-refused -->"
+REFUSAL_CLOSE: Final = "<!-- /plan-refused -->"
+#: Предел причины в блоке отказа: строка шапки, а не журнал прогона — полная
+#: причина остаётся в прогоне по адресу из блока.
+REASON_LIMIT: Final = 300
+
+
+def without_refusal(body: str) -> str:
+    """Тело плана без блока отказа: успешная сборка снимает его сама."""
+    start = body.find(REFUSAL_OPEN)
+    end = body.find(REFUSAL_CLOSE, start)
+    if start == -1 or end == -1:
+        return body
+    tail = body[end + len(REFUSAL_CLOSE) :]
+    return body[:start].rstrip("\n") + "\n" + tail.lstrip("\n")
+
+
+def with_refusal(body: str, reason: str, run: str) -> str:
+    """Тело плана с блоком отказа сразу под строкой маркера — остальное как было.
+
+    ТЕЛО НЕ ПЕРЕСОБИРАЕТСЯ: отказ мог родиться в нём самом (строка раздела 4
+    без адреса), и сборка заново упала бы тем же. Поэтому блок встаёт поверх
+    прежнего текста, а разделы остаются, какими их оставил последний успех.
+    """
+    clean = without_refusal(body)
+    first, _, rest = clean.partition("\n")
+    # ОДНОЙ СТРОКОЙ И С ПРЕДЕЛОМ (взгляд на #1629): многострочная причина —
+    # тело ответа площадки в `TransportError` — вышла бы из цитаты `>` прямо в
+    # шапку плана.
+    said = " ".join(reason.split())
+    if len(said) > REASON_LIMIT:
+        said = said[: REASON_LIMIT - 1].rstrip() + "…"
+    block = (
+        f"{REFUSAL_OPEN}\n> ⛔ **План не собран, разделы ниже — прежние.** {said}. "
+        f"Прогон: {run}. Блок снимет следующая успешная сборка.\n{REFUSAL_CLOSE}"
+    )
+    return f"{first}\n{block}\n{rest}"
+
+
+def run_address() -> str:
+    """Адрес прогона площадки или честное «не назван» вне неё."""
+    server = os.environ.get("GITHUB_SERVER_URL", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    number = os.environ.get("GITHUB_RUN_ID", "")
+    if server and repo and number:
+        return f"{server}/{repo}/actions/runs/{number}"
+    return "не назван — заход вне площадки"
+
+
+def announce_refusal(repo: str, token: str, reason: str) -> None:
+    """Отказ сборки — строкой в самом плане, а не только в журнале прогона (#1621).
+
+    Предупреждение прогона никто не читает (замер 23.10.2026: план стоял с
+    15:46, выполненное не уходило, нашёл владелец вопросом). Сбой самой записи
+    называется, но кода не меняет: отказ уже назван исходом 2.
+    """
+    try:
+        number, body = findings.live_issue(repo, token, MARKER)
+        if number is None:
+            return
+        ghrest.request(
+            "PATCH",
+            f"repos/{repo}/issues/{number}",
+            token,
+            {"body": with_refusal(body, reason, run_address())},
+        )
+        print(f"отказ сборки назван в плане #{number}", file=sys.stderr)
+    except ghrest.TransportError as exc:
+        print(f"отказ сборки в план не записан: {exc}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1037,8 +1112,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (NotRun, ghrest.TransportError) as exc:
         print(f"сборщик не отработал: {exc}", file=sys.stderr)
+        if args.apply:
+            announce_refusal(args.repo, token, str(exc))
         return EXIT_BROKEN
 
+    said = without_refusal(said)
     gone = sum(
         1
         for one in HELD

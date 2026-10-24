@@ -500,7 +500,9 @@ def test_a_plan_edited_all_the_time_is_not_written_over(monkeypatch: pytest.Monk
         ),
     )
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_BROKEN
-    assert written == []
+    # Пишется только блок отказа поверх свежего тела (#1621): правка руки на месте.
+    assert len(written) == 1 and module.REFUSAL_OPEN in written[0], written
+    assert "сборщик плана, правка" in written[0], "блок отказа стёр правку руки"
 
 
 def test_the_hand_part_is_the_head_and_the_owner_sections() -> None:
@@ -1363,3 +1365,87 @@ def test_when_of_reads_only_a_time() -> None:
     """Время события — ISO с поясом; иное — `None`."""
     assert module.when_of("2026-10-17T10:00:00Z") == datetime(2026, 10, 17, 10, tzinfo=UTC)
     assert module.when_of("вчера") is None and module.when_of(None) is None
+
+
+# --- отказ сборки виден (#1621) ---------------------------------------------
+
+
+def test_a_refusal_block_sits_under_the_marker_and_leaves_the_rest() -> None:
+    """Блок отказа — сразу под маркером; разделы — как были; второй не множится."""
+    body = f"{module.MARKER}\nшапка\n\n## 0 · Раздел\n\nстрока\n"
+    said = module.with_refusal(body, "строка без адреса", "прогон/1")
+    lines = said.splitlines()
+    assert lines[0] == module.MARKER and lines[1] == module.REFUSAL_OPEN, lines
+    assert "строка без адреса" in said and "прогон/1" in said
+    assert said.endswith("## 0 · Раздел\n\nстрока\n"), said
+    again = module.with_refusal(said, "другая причина", "прогон/2")
+    assert again.count(module.REFUSAL_OPEN) == 1 and "другая причина" in again
+    assert "строка без адреса" not in again
+
+
+def test_without_refusal_restores_the_body() -> None:
+    """Успешная сборка снимает блок, и тело — то, что было до отказа."""
+    body = f"{module.MARKER}\nшапка\n\n## 0 · Раздел\n"
+    assert module.without_refusal(module.with_refusal(body, "п", "р")) == body
+    assert module.without_refusal(body) == body
+
+
+def test_run_address_names_the_run_or_says_it_is_not_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Адрес прогона — из переменных площадки; вне неё — честное «не назван»."""
+    for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"):
+        monkeypatch.delenv(name, raising=False)
+    assert "не назван" in module.run_address()
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_RUN_ID", "7")
+    assert module.run_address() == "https://github.com/o/r/actions/runs/7"
+
+
+def test_a_failed_refusal_write_is_named_not_raised(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Сбой записи блока назван строкой, а не трассой: исход 2 уже сказан (039)."""
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (639, "<!-- м -->\n"))
+
+    def refuse(*_: Any, **__: Any) -> dict[str, Any]:
+        raise module.ghrest.TransportError("нет сети")
+
+    monkeypatch.setattr(module.ghrest, "request", refuse)
+    module.announce_refusal("o/r", "t", "причина")
+    assert "в план не записан" in capsys.readouterr().err
+
+
+def test_a_successful_build_drops_the_refusal_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Следующая успешная сборка снимает блок отказа из шапки (#1621)."""
+    body = module.with_refusal(BODY, "прежний отказ", "прогон/1")
+    written = quiet_platform(monkeypatch, body=body)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    assert written and module.REFUSAL_OPEN not in written[-1], written[-1][:300]
+
+
+def test_the_step_turns_red_only_on_a_refused_build() -> None:
+    """Шаг прогона краснеет на отказе сборки и на пустом коде, но не на 0 и 3 (#1621)."""
+    import yaml
+
+    flow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "step-work-plan.yml").read_text(encoding="utf-8")
+    )
+    steps = [one for job in flow["jobs"].values() for one in job.get("steps", [])]
+    build = next(one for one in steps if one.get("id") == "plan")
+    assert build.get("continue-on-error") is True, "сборка перестала быть совещательной (084)"
+    assert '"rc=$rc" >>"$GITHUB_OUTPUT"' in build["run"]
+    red = next(one for one in steps if "steps.plan.outputs.rc" in str(one.get("if", "")))
+    assert red["if"] == "steps.plan.outputs.rc != '0' && steps.plan.outputs.rc != '3'"
+    assert "exit 1" in red["run"] and not red.get("continue-on-error")
+
+
+def test_a_multiline_reason_stays_one_quoted_line() -> None:
+    """Причина отказа — одной строкой и с пределом: из цитаты она не выходит (взгляд на #1629)."""
+    body = f"{module.MARKER}\nшапка\n"
+    said = module.with_refusal(body, "строка один\n\nстрока два " + "х" * 500, "р")
+    block = said.split(module.REFUSAL_OPEN, 1)[1].split(module.REFUSAL_CLOSE, 1)[0].strip()
+    assert block.count("\n") == 0 and block.startswith(">"), block
+    assert "строка один строка два" in block and "…" in block
+    assert len(block) < module.REASON_LIMIT + 200
