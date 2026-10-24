@@ -110,6 +110,7 @@ from pathlib import Path
 from typing import Final
 
 import gitcall
+import paths
 import report
 
 EXIT_OK: Final = 0
@@ -117,7 +118,7 @@ EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 
 #: Где у потребителя лежит код механизмов, если вход шага не назван.
-DEFAULT_PATHS: Final = ("scripts", ".claude/hooks")
+DEFAULT_PATHS: Final = ("scripts", paths.HOOKS.as_posix())
 #: Вызовы процесса, которые судятся, — по имени, как у `tests/test_git_refuses.py`.
 SPAWNS: Final = frozenset({"run", "check_output", "check_call", "call", "Popen"})
 #: Поимка, означающая «истёк дедлайн — свой исход».

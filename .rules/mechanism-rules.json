@@ -12,7 +12,7 @@
       "paths.SOURCES": "tests/test_ghrest.py",
       ".claude/hooks": "исключено: хуки окна к API площадки не ходят — страж толчка спрашивает только локальный git (rev-parse, config), хук старта ходит в PyPI, журнал навыков пишет только свой файл; grep -cE 'graphql|api\\.github|urllib|requests|\\bgh\\b' по .claude/hooks/* — 0 во всех шести файлах (замер 17.10.2026) (без границы слова «gh» ловит «preflight» в session-start.sh — взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
       ".github": "исключено: шаги прогонов к API площадки не обращаются — grep -nE 'gh (api|pr|issue|run|release|workflow|label|repo)|graphql|api.github.com|GITHUB_API_URL|github-script' по .github/workflows/*.yml и .github/actions/*/action.yml — 0; к площадке ходит код scripts/ через packages/transport/ghrest.py (его судит tests/test_ghrest.py), а curl в badges.yml:128 и step-facts.yml:267 качает файлы raw.githubusercontent.com и выпусков, не API",
-      "kit/data": "исключено: загрузчик окна потребителя (kit/data/.claude/preflight.sh, #1553) к API площадки не ходит — git rev-parse локально и git clone тега по https; grep -cE 'graphql|api\\.github|curl|wget|\\bgh\\b' — 0 (замер 23.10.2026)"
+      "kit/data": "исключено: загрузчик окна потребителя (kit/data/.claude/preflight.sh, #1553) к API площадки не ходит — git rev-parse локально и git clone тега по https; grep -cE 'graphql|api\\.github|curl|wget|\\bgh\\b' — 0 (замер 23.10.2026); заготовка хука старта (kit/data/.claude/hooks/session-start.sh, #1554) сама в сеть не ходит — установку интерпретатора несёт общий .claude/hooks/install_floor.sh, его ответ у места .claude/hooks; тот же grep по заготовке — 0 (замер 24.10.2026)"
     },
     "016": {
       "paths.SOURCES": "tests/test_report.py",
@@ -21,7 +21,7 @@
         "признак": "code_files()"
       },
       ".github": "исключено: шаги прогонов вывод читателю не режут — grep head/tail/cut -c/${x:N:M} по .github — 0 строк (замер 17.10.2026 после #1464: прежние две, `git tag --points-at HEAD | head -1` в step-release.yml, выбирали тег, а не резали вывод, и ушли в version.py --head-tag и --head-number. Дописано 21.10.2026: --head-number снят в #1513 тем же выпуском 1.8.0: шаг release выдаёт номер своим выходом из --head-tag, хвост по стоящему тегу берёт его из спрошенной версии и --head-tag только сверяет); обрезку вывода механизма делает packages/transport/report.py::cut",
-      "kit/data": "исключено: загрузчик вывод не режет — свою причину печатает целиком, вывод предполётной отдаёт exec; grep -cE '\\bhead\\b|\\btail\\b|cut -c' — 0 (замер 23.10.2026)"
+      "kit/data": "исключено: загрузчик вывод не режет — свою причину печатает целиком, вывод предполётной отдаёт exec; grep -cE '\\bhead\\b|\\btail\\b|cut -c' — 0 (замер 23.10.2026); заготовка хука старта вывода не режет — тот же grep 0 (замер 24.10.2026)"
     },
     "039": {
       "paths.SOURCES": {
@@ -42,7 +42,7 @@
       "paths.SOURCES": "tests/test_subprocess_deadline.py",
       ".claude/hooks": "не построено: дедлайн у вызовов процесса в *.py хуков держит tests/test_subprocess_deadline.py, а оболочечные хуки он не читает — замер 17.10.2026 по .claude/hooks/*.sh (pip install, uv python install, uv venv, curl, wget): сетевых вызовов без своего дедлайна в session-start.sh 3, их обрывает только предел хука 300 с в .claude/settings.json (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1466)",
       ".github": "не построено: предел работы прогона по всему .github не судится — tests/test_review_safety.py::test_agent_jobs_have_a_timeout берёт только прогоны с агентом (AGENT_WORKFLOWS) — замер 17.10.2026 разбором YAML (работа со шагами без timeout-minutes; разовый разбор окна, в дерево не положен — признак назван здесь же): работ со шагами 46, вызовов общего шага 32, без timeout-minutes 0",
-      "kit/data": "не построено: гейт дедлайна читает *.py, а загрузчик — оболочка — замер 23.10.2026: сетевых вызовов 1 (git clone), под своим дедлайном timeout 300 — 1; дальше exec в предполётную поставщика, её вызовы под её дедлайнами"
+      "kit/data": "не построено: гейт дедлайна читает *.py, а загрузчик — оболочка — замер 23.10.2026: сетевых вызовов 1 (git clone), под своим дедлайном timeout 300 — 1; дальше exec в предполётную поставщика, её вызовы под её дедлайнами; заготовка хука старта (#1554) своих сетевых вызовов не несёт — 0, установка в общем .claude/hooks/install_floor.sh под пределом хука в настройках (timeout 300)"
     },
     "140": {
       "paths.SOURCES": {
@@ -78,7 +78,7 @@
       "paths.SOURCES": "исключено: правило об именах переменных оболочки, а paths.SOURCES — Python: code_files берёт *.py, файлов *.sh в scripts/ и packages/transport/ — 0 (find)",
       ".claude/hooks": "не построено: оболочечные хуки (floor.sh, push_guard.sh, session-start.sh, skill_log.sh) на латиницу имён не сверяются — tests/test_source_hygiene.py::test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 17.10.2026 тем же SHELL_ASSIGN_RE по .claude/hooks/*.sh: присваиваний 11, не ASCII 0",
       ".github": "tests/test_source_hygiene.py",
-      "kit/data": "не построено: оболочечный загрузчик на латиницу имён не сверяется — test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 23.10.2026: присваиваний 6, не ASCII 0"
+      "kit/data": "не построено: оболочечный загрузчик на латиницу имён не сверяется — test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 23.10.2026: присваиваний 6, не ASCII 0; заготовка хука старта и floor.sh (#1554) — присваиваний 2, не ASCII 0 (замер 24.10.2026)"
     },
     "176": {
       "paths.SOURCES": "tests/test_source_hygiene.py",
