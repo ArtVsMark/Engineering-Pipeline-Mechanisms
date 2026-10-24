@@ -193,12 +193,22 @@ def pinned_in(
     number = issue_re(issues) if issues else None
 
     def own_in(value: str) -> bool:
+        # ПОЛНЫЙ АДРЕС ЗАДАЧИ — ССЫЛКА, А НЕ ПРИБИТОЕ ИМЯ (#1552): `владелец/репо#N`
+        # у любого соседа ведёт в тот же трекер поставщика. Прибито голое `#N`
+        # и имя проекта вне адреса задачи — их подстановка навыка и снимает.
+        value = TRACKER_REF.sub("", value)
+        # В прозе полный адрес — ссылка, которую читатель открывает, и у соседа
+        # она ведёт туда же (#1552). В коде адрес — то, что механизм читает:
+        # там он прибит и судится.
+        if prose:
+            value = WEB_ADDRESS.sub("", value)
         if number and number.search(value):
             return True
         for name in family:
             value = value.replace(name, "")
         return any(name in value for name in own)
 
+    prose = suffix == ".md"
     if suffix == ".py":
         tree = ast.parse(text)
         docs = {
@@ -216,12 +226,27 @@ def pinned_in(
             and id(node) not in docs
             and own_in(node.value)
         )
-    prose = suffix == ".md"
     return [
         at
         for at, line in enumerate(text.splitlines(), 1)
         if (prose or not line.strip().startswith("#")) and own_in(line)
     ]
+
+
+#: Адрес страницы площадки в прозе: ссылка, а не прибитое имя.
+WEB_ADDRESS: Final = re.compile(r"https://github\.com/[^\s)]+")
+#: Задача трекера полным адресом: `владелец/репо#N`.
+TRACKER_REF: Final = re.compile(r"[\w.-]+/[\w.-]+#\d+")
+
+
+def laid_text(one: Path, data: dict[str, Any]) -> str:
+    """Текст файла таким, каким его кладёт заход: навык — подстановкой (#1552)."""
+    onboard = load_script("onboard.py")
+    text = one.read_text(encoding="utf-8", errors="replace")
+    relative = one.relative_to(ROOT)
+    if relative in onboard.SKILLS_KITTED:
+        return str(onboard.skill_kit(text, data["own"][0]))
+    return text
 
 
 def files_of(path: Path) -> list[Path]:
@@ -281,7 +306,7 @@ def test_a_mechanism_with_our_own_name_in_it_is_not_as_is() -> None:
         files = files_of(ROOT / name)
         assert files, f"{name}: у механизма нет ни одного файла — мерить нечего (075)"
         for one in files:
-            text = one.read_text(encoding="utf-8")
+            text = laid_text(one, data)
             lines = pinned_in(text, one.suffix, own, family, issues)
             if lines:
                 wrong.append(f"{one.relative_to(ROOT).as_posix()}:{lines}")
@@ -871,12 +896,40 @@ def named_paths(skill: Path) -> set[str]:
     own = skill.relative_to(ROOT).as_posix()
     found: set[str] = set()
     for one in sorted(path for path in skill.rglob("*") if path.is_file()):
-        text = one.read_text(encoding="utf-8", errors="replace")
+        # Судится текст, который ляжет у потребителя (#1552): команда там —
+        # запускателем, а ссылка, названная «поставщика», ведёт к нему, а не в
+        # дерево потребителя.
+        text = laid_text(one, inventory())
         for match in NAMED_PATH.finditer(text):
             said = match.group(1).rstrip(".")
+            if supplier_named(text[match.end() :]):
+                continue
             if (ROOT / said).exists() and said != own and not said.startswith(f"{own}/"):
                 found.add(said)
+        # ЦЕЛЬ ССЫЛКИ РАЗМЕТКИ — ТОЖЕ ПУТЬ (взгляд на #1626): подпись могла
+        # сказать «поставщика», а относительная цель вести в дерево потребителя.
+        for target in RELATIVE_TARGET.findall(text):
+            said = (one.parent / target).resolve()
+            if said.is_relative_to(ROOT) and said.exists():
+                relative = said.relative_to(ROOT).as_posix()
+                if relative != own and not relative.startswith(f"{own}/"):
+                    found.add(relative)
     return found
+
+
+#: Относительная цель ссылки разметки: `](../../../docs/x.md)`, без якоря.
+RELATIVE_TARGET: Final = re.compile(r"\]\((\.\.?/[^)\s#]+)")
+
+
+#: Как подстановка навыка называет ссылку на дерево поставщика: путь в
+#: обратных кавычках и «поставщика» сразу за ним.
+SUPPLIER_MARK: Final = "` поставщика"
+
+
+def supplier_named(rest: str) -> bool:
+    """За путём до закрывающей кавычки — только хвост имени (`::функция`) и «поставщика»."""
+    tail, mark, after = rest.partition("`")
+    return bool(mark) and " " not in tail and f"`{after}".startswith(SUPPLIER_MARK)
 
 
 def consumer_has(said: str, answers: dict[str, Any]) -> bool:
@@ -891,8 +944,15 @@ def consumer_has(said: str, answers: dict[str, Any]) -> bool:
         return True
     # Заготовки данных кладёт заход подключения (`DATA_KITTED`, #1557, #1553):
     # у потребителя они есть с первого захода, и состав — у захода, а не здесь.
-    if said in {one.as_posix() for one in load_script("onboard.py").DATA_KITTED}:
+    onboard = load_script("onboard.py")
+    if said in {one.as_posix() for one in onboard.DATA_KITTED}:
         return True
+    # Хуки и настройки окна заход кладёт из нашего дерева как есть (#1554).
+    if said in {one.as_posix() for one in onboard.TREE_KITTED}:
+        return True
+    # Сам каталог навыков у потребителя есть, если заход кладёт хоть один (#1552).
+    if said.rstrip("/") == ".claude/skills":
+        return bool(onboard.SKILLS_KITTED)
     head = "/".join(said.split("/")[:3])
     if head.startswith(".claude/skills/"):
         return bool(answers.get(head, {}).get("answer") == "as-is")

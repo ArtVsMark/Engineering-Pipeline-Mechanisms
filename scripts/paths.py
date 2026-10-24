@@ -156,6 +156,9 @@ ATTRIBUTION_SINCE: Final = Path(".github/attribution-since")
 #: Загрузчик предполётной у потребителя (#1553): выкачивает механизмы по тегу из
 #: `uses:` его прогонов и зовёт их `scripts/preflight.py` против его дерева.
 PREFLIGHT_LOADER: Final = Path(".claude/preflight.sh")
+#: Запускатель механизмов у потребителя (#1552): выкачивает их по тому же тегу
+#: и зовёт любой их скрипт против его дерева; `PREFLIGHT_LOADER` — частный случай.
+LAUNCHER: Final = Path(".claude/mechanisms.sh")
 #: Хуки окна (#1554): заход подключения кладёт их потребителю — свои как есть,
 #: `floor.sh` и хук старта заготовкой из `kit/data/`.
 HOOKS: Final = Path(".claude/hooks")
@@ -279,6 +282,7 @@ ALL: Final = (
     ONBOARDING,
     ATTRIBUTION_SINCE,
     PREFLIGHT_LOADER,
+    LAUNCHER,
     HOOKS,
     SETTINGS,
     FLOOR,
@@ -296,4 +300,4 @@ WINDOW_DATA: Final = (SKILL_RUNS,)
 #: заготовка `kit/data/<путь>`, которую кладёт заход подключения (#1553). Гейт
 #: сообщений (`tests/test_messages_point_somewhere.py`) судит их заготовкой, а
 #: не существованием. Список закрытый (068).
-CONSUMER_ONLY: Final = (PREFLIGHT_LOADER,)
+CONSUMER_ONLY: Final = (PREFLIGHT_LOADER, LAUNCHER)

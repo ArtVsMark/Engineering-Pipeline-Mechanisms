@@ -104,17 +104,20 @@ import contextlib
 import difflib
 import hashlib
 import io
+import itertools
 import json
 import re
 import subprocess
 import sys
 import tarfile
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
 import check_env
+import check_rulebook_fresh
 import check_shipped
 import gitcall
 import paths
@@ -758,6 +761,25 @@ def split_shebang(text: str) -> tuple[str, str]:
     return first + "\n", rest
 
 
+#: Граница заголовка YAML у навыка: `SKILL.md` начинается с `---`, и площадка
+#: читает навык, только если заголовок стоит первым (#1552).
+FRONTMATTER: Final = "---\n"
+
+
+def split_head(text: str) -> tuple[str, str]:
+    """Что обязано стоять первым — `#!` или заголовок YAML — и остальное.
+
+    Строка лицензии встаёт после этой головы: перед `#!` хук не запустился бы,
+    перед заголовком навык не прочёлся бы. Нет головы — пустая и весь текст.
+    """
+    if text.startswith(FRONTMATTER):
+        end = text.find("\n" + FRONTMATTER, len(FRONTMATTER) - 1)
+        if end != -1:
+            cut = end + 1 + len(FRONTMATTER)
+            return text[:cut], text[cut:]
+    return split_shebang(text)
+
+
 def is_signed(path: Path, text: str) -> bool:
     """Подписана ли заготовка: строка лицензии стоит ПЕРВОЙ в форме своего рода.
 
@@ -776,7 +798,7 @@ def is_signed(path: Path, text: str) -> bool:
         first = next(iter(data), None) if isinstance(data, dict) else None
         return first == "_license" and str(data[first]).startswith(LICENSE_ID)
     form = LICENSE_FORMS.get(path.suffix)
-    head = split_shebang(text)[1].split("\n", 1)[0]
+    head = split_head(text)[1].split("\n", 1)[0]
     return form is not None and head.startswith(form.split("{line}", 1)[0] + LICENSE_ID)
 
 
@@ -805,8 +827,8 @@ def licensed(path: Path, text: str, repo: str) -> str:
             f"{path}: строку лицензии в файл рода «{path.suffix}» класть нечем — "
             "заготовка ушла бы к потребителю без неё (#1470)"
         )
-    shebang, body = split_shebang(text)
-    return shebang + form.format(line=line) + body
+    first, body = split_head(text)
+    return first + form.format(line=line) + body
 
 
 #: Что заход кладёт, но что становится файлом ПРОЕКТА, а не нашей заготовкой:
@@ -900,6 +922,8 @@ DATA_KITTED: Final = (
     paths.RERUN,
     # #1553: предполётная у потребителя — загрузчик, а не копии скриптов (090).
     paths.PREFLIGHT_LOADER,
+    # #1552: запускатель — общий вход к скриптам механизмов у потребителя.
+    paths.LAUNCHER,
     # #1554: хуки с ответом `configured` — заготовкой со слотом, а не нашим
     # наполнением: число планки ставит заход, окружение проверки — проект.
     paths.FLOOR,
@@ -917,6 +941,98 @@ TREE_KITTED: Final = (
     paths.HOOKS / "skill_log.sh",
     paths.HOOKS / "install_floor.sh",
 )
+#: Навыки окна, которые кладутся копией (#1552, решение владельца 24.10.2026).
+#: Остальные навыки отвечают `ours @skill-tree`: их предмет — то, чего у
+#: потребителя нет. Совпадение с ответами `as-is` держит `tests/test_onboard.py`.
+SKILLS_KITTED: Final = tuple(
+    paths.SKILLS / name / "SKILL.md"
+    for name in (
+        "a-task-before-the-work",
+        "answer-a-rule",
+        "audit-the-answers",
+        "build-a-gate",
+        "bundle-the-work",
+        "close-a-finding",
+        "propose-a-rule",
+        "retell-from-the-source",
+        "rulebook-keeps-how-to-work",
+        "rulebook-reread",
+        "work-the-plan",
+    )
+)
+#: Команда скрипта в тексте навыка: у потребителя скриптов в дереве нет, и она
+#: зовётся запускателем (`paths.LAUNCHER`).
+SKILL_CALL: Final = re.compile(r"\bpython3? scripts/([A-Za-z0-9_]+\.py)")
+#: Ссылка в тексте навыка на код, тест или документ поставщика: у потребителя
+#: таких путей нет, и навык называет их чужими, а не своими.
+SUPPLIER_REF: Final = re.compile(r"`((?:scripts|tests|docs)/[^`\s]+)`(?! поставщика)")
+#: Относительная ссылка разметки в тексте навыка: цель отсчитывается от его каталога.
+SKILL_LINK: Final = re.compile(r"\]\((?P<target>\.\./[^)\s#]+)(?P<anchor>#[^)\s]*)?\)")
+#: Каталог навыка от корня дерева: `.claude/skills/<имя>/` — у всех навыков один.
+SKILL_DEPTH: Final = 3
+#: Голый номер задачи в тексте навыка: у потребителя `#639` вёл бы в ЕГО трекер.
+BARE_ISSUE: Final = re.compile(r"(?<![\w/#&])#(\d+)\b")
+
+
+def skill_kit(text: str, repo: str) -> str:
+    """Навык в форме потребителя: команды — запускателем, ссылки на наше — «поставщика».
+
+    Голый номер задачи становится полным адресом трекера поставщика `repo`.
+    Функция текста и имени поставщика, без прибивки: копию из любой версии
+    истории `plan_tree` узнаёт той же подстановкой.
+    """
+
+    def call(found: re.Match[str]) -> str:
+        script = found[1]
+        return (
+            f"bash {paths.PREFLIGHT_LOADER}"
+            if script == "preflight.py"
+            else (f"bash {paths.LAUNCHER} {script}")
+        )
+
+    def ref(found: re.Match[str]) -> str:
+        # Документ, который заход кладёт потребителю (`docs/agent/roles.md`), —
+        # его собственный: ссылка на него ведёт в его дерево.
+        laid = Path(found[1].split("::", 1)[0]) in DATA_KITTED
+        return found[0] if laid else f"`{found[1]}` поставщика"
+
+    def link(found: re.Match[str]) -> str:
+        # Цель вне дерева потребителя ведёт в дерево поставщика полным адресом:
+        # подпись «поставщика» при относительной цели вела бы в пустоту (взгляд
+        # на #1626). Общая ветка, а не прибивка: подстановка не зависит от тега,
+        # и старую копию `plan_tree` узнаёт той же функцией.
+        target = Path(found["target"]).parts
+        ups = len(list(itertools.takewhile(lambda part: part == "..", target)))
+        rest = "/".join(target[ups:]) + (found["anchor"] or "")
+        # Выше корня дерева — адрес площадки (`../../../../issues/767`).
+        if ups > SKILL_DEPTH:
+            return f"](https://github.com/{repo}/{rest})"
+        base = SKILLS_KITTED[0].parent.parts[: SKILL_DEPTH - ups]
+        where = Path(*base, *target[ups:])
+        if where in laid_at_the_consumer():
+            return found[0]
+        prefix = "".join(f"{part}/" for part in base)
+        return f"](https://github.com/{repo}/blob/{paths.TRUNK}/{prefix}{rest})"
+
+    shaped = SUPPLIER_REF.sub(ref, SKILL_CALL.sub(call, text))
+    shaped = SKILL_LINK.sub(link, shaped)
+    return BARE_ISSUE.sub(rf"{repo}#\1", shaped)
+
+
+def laid_at_the_consumer() -> set[Path]:
+    """Что заход кладёт потребителю: данные, хуки, навыки и свод (#1552)."""
+    # Состав свода — у гейта его свежести, а не второй список здесь (022).
+    rulebook = {Path(one) for one in check_rulebook_fresh.RULEBOOK}
+    return {*DATA_KITTED, *TREE_KITTED, *SKILLS_KITTED, *rulebook}
+
+
+def shape_of(path: Path, repo: str) -> Callable[[str], str]:
+    """Как наш файл выглядит у потребителя: навык — подстановкой, остальное — как есть."""
+    if path in SKILLS_KITTED:
+        return lambda text: skill_kit(text, repo)
+    return lambda text: text
+
+
 #: Слот планки в заготовке `floor.sh`: число ставит заход из НАШЕГО
 #: `requires-python` — код хуков наш и исполняется на нашей планке (#1554).
 FLOOR_SLOT: Final = "@floor@"
@@ -1021,7 +1137,7 @@ def data_kit(root: Path, repo: str) -> dict[Path, str]:
         )
     found[paths.DEPENDABOT] = said.replace(f'"{FAMILY_SLOT}"', f'"{shaped["owner"]}/*"')
     found[paths.FLOOR] = floor_kit(root, found[paths.FLOOR])
-    return found | {paths.AREA_PATHS: area_kit(root)} | tree_kit(root)
+    return found | {paths.AREA_PATHS: area_kit(root)} | tree_kit(root, repo)
 
 
 def floor_kit(root: Path, said: str) -> str:
@@ -1040,20 +1156,22 @@ def floor_kit(root: Path, said: str) -> str:
     return said.replace(FLOOR_SLOT, f"{major}.{minor}")
 
 
-def tree_kit(root: Path) -> dict[Path, str]:
+def tree_kit(root: Path, repo: str) -> dict[Path, str]:
     """Хуки окна и настройки из нашего дерева — как есть (`TREE_KITTED`, #1554).
 
     Недостающий файл — отказ, а не тихий пропуск (045): настройки звали бы хук,
     которого у потребителя нет.
     """
-    missing = [path for path in TREE_KITTED if not (root / path).is_file()]
+    missing = [path for path in (*TREE_KITTED, *SKILLS_KITTED) if not (root / path).is_file()]
     if missing:
         raise NotRun(
-            "хуков окна нет в нашем дереве: "
+            "файлов окна нет в нашем дереве: "
             + ", ".join(str(one) for one in missing)
-            + f" — {paths.SETTINGS} у потребителя звал бы отсутствующее"
+            + " — окно потребителя звало бы отсутствующее"
         )
-    return {path: (root / path).read_text(encoding="utf-8") for path in TREE_KITTED}
+    return {path: (root / path).read_text(encoding="utf-8") for path in TREE_KITTED} | {
+        path: skill_kit((root / path).read_text(encoding="utf-8"), repo) for path in SKILLS_KITTED
+    }
 
 
 def settings_note(consumer: Path, laid: list[Path], repo: str, pin: str) -> str:
@@ -1076,8 +1194,8 @@ def unsigned(path: Path, text: str) -> str:
     """Заготовка без строки лицензии, которую поставил `licensed`: та, что лежит у нас."""
     if not is_signed(path, text) or path.suffix == ".json":
         return text
-    shebang, body = split_shebang(text)
-    return shebang + body.partition("\n")[2]
+    first, body = split_head(text)
+    return first + body.partition("\n")[2]
 
 
 def blob_of(text: str) -> str:
@@ -1086,29 +1204,85 @@ def blob_of(text: str) -> str:
     return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
 
 
-def blobs_in_history(root: Path, path: Path) -> set[str]:
-    """Все содержимые нашего файла по истории поставщика: так узнаётся устаревшая копия.
+def blobs_in_history(root: Path, path: Path, shape: Callable[[str], str]) -> set[str]:
+    """Все содержимые нашего файла по истории поставщика — в форме потребителя (`shape`).
 
-    Мелкий клон знает не все — тогда старая копия называется правленой: громкий
-    отказ, а не тихая перезапись (045).
+    Так узнаётся устаревшая копия: она равна одной из прежних версий, пропущенной
+    через ту же подстановку, что и новая (#1552). Мелкий клон всей истории не
+    знает, и неправленая старая копия выглядела бы правленой — поэтому он отказ
+    с названной причиной, а не совет нести задачу поставщику (взгляд на #1619).
     """
-    try:
-        done = subprocess.run(
-            ["git", "-C", str(root), "log", "--format=", "--raw", "--no-abbrev", "--", str(path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=gitcall.LOCAL,
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=gitcall.LOCAL,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise NotRun(f"история {path} не прочитана: {exc}") from exc
+
+    shallow = git("rev-parse", "--is-shallow-repository")
+    if shallow.stdout.strip() == "true":
+        raise NotRun(
+            f"клон поставщика мелкий — по его истории устаревшую копию {path} не узнать; "
+            "позовите обновление из полного клона (`git fetch --unshallow`)"
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise NotRun(f"история {path} не прочитана: {exc}") from exc
+    done = git("log", "--format=%H", "--", str(path))
     if done.returncode:
         raise NotRun(f"история {path} не прочитана: {done.stderr.strip() or done.returncode}")
-    return {line.split()[3] for line in done.stdout.splitlines() if line.startswith(":")}
+    found: set[str] = set()
+    for commit in done.stdout.split():
+        said = git("show", f"{commit}:{path.as_posix()}")
+        # Коммит, удаливший файл, содержимого не несёт — он не версия.
+        if said.returncode == 0:
+            found.add(blob_of(shape(said.stdout)))
+    return found
 
 
-def plan_tree(update: Update, consumer: Path, tree: dict[Path, str], root: Path) -> None:
+def plan_floor(update: Update, consumer: Path, ours: str) -> None:
+    """`floor.sh` потребителя ниже нашей планки — поднять число, не трогая остального.
+
+    Код хуков наш и идёт на нашей планке: старый `want` потребителя после подъёма
+    стража дал бы `SyntaxError`, а такой отказ площадка считает неблокирующим
+    (взгляд на #1619, 195). Выше нашей — выбор проекта, файл не трогается.
+    """
+    target = consumer / paths.FLOOR
+    wanted = WANT_LINE.search(ours)
+    if not target.is_file() or wanted is None:
+        return
+    mine = target.read_text(encoding="utf-8")
+    have = WANT_LINE.search(mine)
+    if have is None:
+        # Файл проекта, а не наша копия: отказ на всё обновление с советом нести
+        # разницу поставщику назвал бы не ту причину (взгляд на #1626). Строка
+        # вывода — и обновление идёт дальше.
+        update.notes.append(
+            f"`{paths.FLOOR}`: строки want=X.Y не нашлось — планку хуков сверьте сами, "
+            f"механизмам нужна не ниже {wanted[2]}"
+        )
+    elif version_of(have[2]) < version_of(wanted[2]):
+        # Меняется только число: кавычки и хвостовой комментарий — проекта.
+        start, end = have.span(2)
+        update.write[paths.FLOOR] = mine[:start] + wanted[2] + mine[end:]
+    else:
+        update.current.append(paths.FLOOR)
+
+
+#: Строка планки в `floor.sh`: одно присваивание `want=X.Y`.
+WANT_LINE: Final = re.compile(r"^want=([\"']?)(\d+\.\d+)\1[ \t]*(?:#.*)?$", re.M)
+
+
+def version_of(said: str) -> tuple[int, ...]:
+    """`3.14` → `(3, 14)`: планки сравниваются числами, а не строками («3.9» > «3.14»)."""
+    return tuple(int(part) for part in said.split("."))
+
+
+def plan_tree(update: Update, consumer: Path, tree: dict[Path, str], root: Path, repo: str) -> None:
     """Хуки окна как есть: устаревшая копия переписывается, правленая — отказ (взгляд на #1619).
 
     Без этого однажды положенный страж толчка не обновлялся бы никогда: `--update`
@@ -1124,7 +1298,7 @@ def plan_tree(update: Update, consumer: Path, tree: dict[Path, str], root: Path)
         mine = unsigned(path, target.read_text(encoding="utf-8"))
         if mine == ours:
             update.current.append(path)
-        elif blob_of(mine) in blobs_in_history(root, path):
+        elif blob_of(mine) in blobs_in_history(root, path, shape_of(path, repo)):
             update.write[path] = ours
         else:
             update.edited[path] = "".join(
@@ -1882,7 +2056,9 @@ def update(
     plan = Update()
     try:
         plan_owned(plan, consumer, owned(root, repo, pin), root, repo)
-        plan_tree(plan, consumer, {path: data[path] for path in TREE_KITTED if path in data}, root)
+        kitted = (*TREE_KITTED, *SKILLS_KITTED)
+        plan_tree(plan, consumer, {path: data[path] for path in kitted if path in data}, root, repo)
+        plan_floor(plan, consumer, data[paths.FLOOR])
         plan_ci(plan, consumer, pipeline, repo, pin)
         wanted = [check_name(one) for one in pipeline] + records
         plan_answer(plan, consumer, wanted, contract, pin)

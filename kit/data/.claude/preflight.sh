@@ -5,50 +5,14 @@
 #   bash .claude/preflight.sh --push     # проверить и толкнуть ветку, если зелено
 #   bash .claude/preflight.sh --list     # только показать, что будет запущено
 #
-# КОД — ТОТ ЖЕ, ЧТО У ПЛОЩАДКИ. Поставщик и тег берутся из `uses:` ваших
-# прогонов (`<владелец>/<репо>/.github/workflows/step-*.yml@vX.Y.Z`), механизмы
-# этого тега выкачиваются один раз в кеш окна, и оттуда зовётся их
-# `scripts/preflight.py` против вашего дерева. Копий скриптов в вашем дереве нет:
-# реализация на семью одна (090).
+# Выкачку механизмов по тегу из ваших `uses:` и вызов их скрипта делает
+# запускатель рядом — `mechanisms.sh` (#1552); предполётная — его частный случай,
+# и отдельной выкачки здесь нет (214).
 #
 # Исходы, как у предполётной: 0 — зелено, 3 — есть красное, 2 — не отработала
-# (в том числе здесь: вызовов нет, вызовы расходятся, ссылка не тег, выкачка
-# не удалась). Интерпретатор — `PYTHON` (по умолчанию `python3`): ему нужны
-# планка механизмов и `pyyaml`.
+# (в том числе у запускателя: вызовов нет, вызовы расходятся, ссылка не тег,
+# выкачка не удалась).
 set -euo pipefail
-
-refuse() {
-  echo "предполётная не отработала: $1" >&2
-  exit 2
-}
-
-root=$(git rev-parse --show-toplevel) || refuse "не дерево git"
-cd "$root"
-
-# Запись вызова — с кавычками или без: `uses: o/m/…@v1` и `uses: "o/m/…@v1"`.
-# Берутся только ОБЩИЕ ШАГИ механизмов (`step-*.yml`) и только незакомментированные
-# строки: чужой переиспользуемый прогон и старый `# uses:` поставщиком не
-# считаются (взгляд на #1618).
-calls=$(grep -rhE "^[[:space:]]*uses:" .github/workflows 2>/dev/null \
-  | grep -oE "uses:[[:space:]]*[\"']?[^[:space:]/\"']+/[^[:space:]/]+/\.github/workflows/step-[^@[:space:]]+@[^[:space:]\"']+" \
-  | sed -E "s/^uses:[[:space:]]*[\"']?([^/]+\/[^/]+)\/.*@(.*)$/\1 \2/" | sort -u || true)
-[ -n "$calls" ] || refuse "в .github/workflows нет вызова общих шагов механизмов — тег взять неоткуда"
-[ "$(printf '%s\n' "$calls" | wc -l)" -eq 1 ] \
-  || refuse "прогоны зовут механизмы по разным ссылкам — сведите их к одному тегу: $(printf '%s' "$calls" | tr '\n' ';' | sed 's/;/; /g')"
-supplier=${calls% *}
-tag=${calls#* }
-[[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-  || refuse "механизмы зовутся по «$tag», а не по закреплённому тегу vX.Y.Z — выкачка не повторила бы площадку"
-
-cache="${XDG_CACHE_HOME:-$HOME/.cache}/mechanisms/${supplier//\//_}@$tag"
-if [ ! -f "$cache/scripts/preflight.py" ]; then
-  origin="${MECHANISMS_ORIGIN:-https://github.com}/$supplier.git"
-  rm -rf "$cache.part"
-  timeout 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$cache.part" \
-    || refuse "механизмы $supplier@$tag не выкачаны из $origin"
-  rm -rf "$cache"
-  mv "$cache.part" "$cache"
-fi
-
-export PYTHONPATH="$cache/packages/transport${PYTHONPATH:+:$PYTHONPATH}"
-exec "${PYTHON:-python3}" "$cache/scripts/preflight.py" --root "$root" --mechanisms "$cache" --supplier "$supplier" "$@"
+here=$(cd "$(dirname "$0")" && pwd)
+[ -r "$here/mechanisms.sh" ] || { echo "предполётная не отработала: нет $here/mechanisms.sh — запускателя механизмов (#1552)" >&2; exit 2; }
+exec bash "$here/mechanisms.sh" preflight.py "$@"
