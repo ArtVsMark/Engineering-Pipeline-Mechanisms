@@ -842,6 +842,34 @@ def test_a_tag_call_at_the_consumer_is_named_from_the_supplier(
     assert set(policy.declared_jobs(directory)) == named
 
 
+def test_a_trunk_call_to_a_file_the_consumer_also_has_reads_the_supplier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`…@main` поставщика при одноимённом файле у потребителя — имена выкачки (`68511bc`).
+
+    Свой прогон потребителя назван иначе: прочитай сверка его — имя было бы
+    `pr-meta / свой`, а площадка запишет джоб поставщика.
+    """
+    supplier = cloned(
+        tmp_path / "mechanisms", "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms"
+    )
+    (supplier / ".github" / "workflows").mkdir(parents=True)
+    (supplier / ".github" / "workflows" / "step-meta.yml").write_text(STEP_META, encoding="utf-8")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "Owner/Consumer")
+    monkeypatch.setenv(policy.SUPPLIER_ENV, str(supplier))
+    directory = called_tree(
+        tmp_path / "consumer",
+        caller="name: c\non: [pull_request]\njobs:\n  meta:\n    name: pr-meta\n"
+        f"    uses: {TRUNK_CALL}\n",
+    )
+    (directory / "step-meta.yml").write_text(
+        STEP_META.replace("name: pr-meta", "name: свой"), encoding="utf-8"
+    )
+    assert set(policy.declared_jobs(directory)) == {"pr-meta / pr-meta"}
+    monkeypatch.setenv("GITHUB_REPOSITORY", "ArtVsMark/Engineering-Pipeline-Mechanisms")
+    assert set(policy.declared_jobs(directory)) == {"pr-meta / свой"}, "своё дерево — своё"
+
+
 def test_a_tag_call_to_a_file_the_supplier_lacks_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -980,7 +1008,9 @@ def test_the_leading_dot_slash_is_not_normalised_away(tmp_path: Path) -> None:
     assert policy.called_jobs(".github/workflows/step-debt.yml", directory) is None
 
 
-def test_an_own_call_by_the_trunk_address_is_read_from_the_tree(tmp_path: Path) -> None:
+def test_an_own_call_by_the_trunk_address_is_read_from_the_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Свой вызов адресом с общей веткой читается деревом, по тегу — нет (#993).
 
     Так `review.yml` зовёт тело взгляда, чтобы карта не исполняла код головы;
@@ -988,6 +1018,7 @@ def test_an_own_call_by_the_trunk_address_is_read_from_the_tree(tmp_path: Path) 
     выпуск, а не дерево, и его имена остаются неизвестными (046); адрес, чьего
     файла в дереве нет, — чужой вызов, а не отказ.
     """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "о/р")  # свой — тот, кого адрес называет
     directory = called_tree(tmp_path)
     trunk = f"О/Р/.github/workflows/step-debt.yml@{policy.paths.TRUNK}"
     assert policy.called_jobs(trunk, directory) == ["внутри"]

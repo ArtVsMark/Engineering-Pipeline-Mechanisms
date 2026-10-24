@@ -454,6 +454,11 @@ def supplier_repo(supplier: Path) -> str:
     return found.group(1).lower() if found else ""
 
 
+def running_repo() -> str:
+    """Свой репозиторий в нижнем регистре: площадка, вне её `origin`; пусто — неизвестен."""
+    return os.environ.get("GITHUB_REPOSITORY", "").lower() or supplier_repo(Path().resolve())
+
+
 def foreign(supplier: Path | None) -> bool:
     """Позван ЧУЖОЙ поставщик: выкачка — другой репозиторий, чем тот, где идёт прогон.
 
@@ -469,7 +474,7 @@ def foreign(supplier: Path | None) -> bool:
     """
     if supplier is None:
         return False
-    here = os.environ.get("GITHUB_REPOSITORY", "").lower() or supplier_repo(Path().resolve())
+    here = running_repo()
     there = supplier_repo(supplier)
     return bool(here and there and here != there)
 
@@ -902,8 +907,12 @@ def called_jobs(said: str, directory: Path = WORKFLOWS) -> list[str] | None:
         where = root / addressed["path"]
         # Файла в дереве нет — вызов чужой. У потребителя его прибивают и к
         # общей ветке поставщика (`…@main`), и читается он так же, как по тегу
-        # (взгляд на #1583, правило 195).
-        if not where.is_file():
+        # (взгляд на #1583, правило 195). Чужой и тот, чей адрес — не свой
+        # репозиторий, даже если одноимённый файл лежит в дереве: прогон
+        # потребителя — не прогон поставщика (находка `68511bc`). Свой
+        # репозиторий не узнан — читается дерево, как прежде.
+        here = running_repo()
+        if not where.is_file() or (here and said.split("/.github/", 1)[0].lower() != here):
             return supplied_jobs(said)
     else:
         where = root / said[len(OUR_CALL) :].split("@")[0]
