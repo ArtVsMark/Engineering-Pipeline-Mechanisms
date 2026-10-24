@@ -238,7 +238,7 @@ def laid_text(one: Path, data: dict[str, Any]) -> str:
     text = one.read_text(encoding="utf-8", errors="replace")
     relative = one.relative_to(ROOT)
     if relative in onboard.SKILLS_KITTED:
-        return onboard.skill_kit(text, data["own"][0])
+        return str(onboard.skill_kit(text, data["own"][0]))
     return text
 
 

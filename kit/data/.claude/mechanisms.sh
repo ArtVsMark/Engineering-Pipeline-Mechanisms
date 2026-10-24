@@ -52,11 +52,31 @@ tag=${calls#* }
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/mechanisms/${supplier//\//_}@$tag"
 if [ ! -f "$cache/scripts/preflight.py" ]; then
   origin="${MECHANISMS_ORIGIN:-https://github.com}/$supplier.git"
-  rm -rf "$cache.part"
-  timeout 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$cache.part" \
-    || refuse "механизмы $supplier@$tag не выкачаны из $origin"
-  rm -rf "$cache"
-  mv "$cache.part" "$cache"
+  # ДЕДЛАЙН ВЫКАЧКИ (100). `timeout` есть в GNU coreutils, на macOS — только
+  # `gtimeout` из coreutils Homebrew. Нет ни одного — отказ с причиной, а не
+  # код 127, который читался бы «механизмы не выкачаны» (взгляд на #1618).
+  if command -v timeout >/dev/null 2>&1; then
+    deadline=timeout
+  elif command -v gtimeout >/dev/null 2>&1; then
+    deadline=gtimeout
+  else
+    refuse "нет ни timeout, ни gtimeout — выкачку нечем ограничить по времени; на macOS: brew install coreutils"
+  fi
+  # ОКОН-ПИСАТЕЛЕЙ МОЖЕТ БЫТЬ ДВА (066, взгляд на #1618): рабочие копии одного
+  # окна делят кеш. Поэтому выкачка идёт в СВОЙ каталог (`.part.<pid>`), а
+  # готовый кеш не стирается никогда: кто выкачал вторым, бросает свою копию.
+  # Остаток — недокачанный кеш без `preflight.py` — заменяется; окно между
+  # проверкой и `mv` названо, а не закрыто: блокировки переносимой у оболочки нет.
+  part="$cache.part.$$"
+  rm -rf "$part"
+  "$deadline" 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$part" \
+    || { rm -rf "$part"; refuse "механизмы $supplier@$tag не выкачаны из $origin"; }
+  if [ -f "$cache/scripts/preflight.py" ]; then
+    rm -rf "$part"
+  else
+    rm -rf "$cache"
+    mv "$part" "$cache"
+  fi
 fi
 [ -f "$cache/scripts/$script" ] || refuse "в механизмах $supplier@$tag нет scripts/$script"
 

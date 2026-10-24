@@ -1,6 +1,7 @@
 """Загрузчик предполётной у потребителя: тег из `uses:`, выкачка в кеш, вызов механизмов (#1553)."""
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -231,3 +232,45 @@ def test_the_preflight_loader_goes_through_the_launcher() -> None:
     assert "git" not in said.split("set -euo pipefail", 1)[1], "у загрузчика своя выкачка"
     assert 'mechanisms.sh" preflight.py' in said
     assert onboard.paths.LAUNCHER in onboard.DATA_KITTED
+
+
+def test_without_a_deadline_tool_the_loader_names_it(tmp_path: Path) -> None:
+    """Нет ни `timeout`, ни `gtimeout` — отказ называет их, а не «не выкачаны» (`20bdf07`)."""
+    supplier(tmp_path)
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-lint.yml@v1.2.3")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name in ("bash", "dirname", "git", "grep", "sed", "sort", "wc", "tr", "rm", "mv"):
+        found = shutil.which(name)
+        assert found, f"без {name} загрузчик не позвать"
+        (tools / name).symlink_to(found)
+    env = {
+        "PATH": str(tools),
+        "HOME": str(tmp_path),
+        "XDG_CACHE_HOME": str(tmp_path / "cache"),
+        "MECHANISMS_ORIGIN": (tmp_path / "origin").as_uri(),
+        "PYTHON": sys.executable,
+    }
+    done = subprocess.run(
+        [shutil.which("bash") or "bash", str(LOADER)],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        timeout=120,
+    )
+    assert done.returncode == 2, done.stderr
+    assert "нет ни timeout, ни gtimeout" in done.stderr, done.stderr
+
+
+def test_a_half_cache_is_replaced_and_no_part_is_left(tmp_path: Path) -> None:
+    """Недокачанный кеш заменяется, своя копия выкачки не остаётся (`3341be3`)."""
+    supplier(tmp_path)
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-lint.yml@v1.2.3")
+    cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
+    cache.mkdir(parents=True)
+    (cache / "обрывок").write_text("", encoding="utf-8")
+    assert load(tree, tmp_path).returncode == 0
+    assert (cache / "scripts" / "preflight.py").is_file()
+    assert not list(cache.parent.glob("*.part*")), "своя копия выкачки осталась рядом с кешем"
