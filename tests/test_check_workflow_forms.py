@@ -127,10 +127,46 @@ def test_an_exception_with_its_place_allows_and_a_stale_one_turns_red(tmp_path: 
     """Исключение с местом разрешает; пережившее место — находка, а не тихое разрешение (195)."""
     uses = "ArtVsMark/Engineering-Incidents-Playbook@main"
     root = tree(tmp_path, {"a.yml": CLEAN.replace("@v2.1.0", "@main")})
-    exceptions(root, {"branch": [{"file": "a.yml", "uses": uses, "why": "причина"}]})
+    where = ".github/workflows/a.yml"
+    exceptions(root, {"branch": [{"file": where, "uses": uses, "why": "причина"}]})
     assert module.look(root) == []
     (root / module.WORKFLOWS / "a.yml").write_text(CLEAN, encoding="utf-8")
-    assert module.look(root) == [f"исключение пережило место: a.yml → {uses}"]
+    assert module.look(root) == [f"исключение пережило место: {where} → {uses}"]
+
+
+def test_an_exception_is_keyed_by_the_path_not_the_name(tmp_path: Path) -> None:
+    """Исключение одного файла не разрешает форму в одноимённом другом (взгляд на #1634)."""
+    uses = "ArtVsMark/Engineering-Incidents-Playbook@main"
+    text = CLEAN.replace("@v2.1.0", "@main")
+    root = tree(tmp_path, {"a.yml": text})
+    exceptions(root, {"branch": [{"file": "a.yml", "uses": uses, "why": "имя, а не путь"}]})
+    told = module.look(root)
+    assert any(one.startswith(".github/workflows/a.yml:a:") for one in told), told
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'persist-credentials: "true"',
+        "persist-credentials: 'true'",
+        "persist-credentials: true #",
+        "persist-credentials: true #   ",
+    ],
+    ids=["кавычки", "одинарные", "голая-решётка", "решётка-с-пробелами"],
+)
+def test_true_without_words_of_reason_turns_red(tmp_path: Path, line: str) -> None:
+    """`true` в кавычках или с пустым комментарием — без причины (взгляд на #1634)."""
+    text = CLEAN.replace("persist-credentials: false", line)
+    assert any("без причины" in one for one in found(tree(tmp_path, {"a.yml": text})))
+
+
+def test_true_in_a_flow_mapping_is_judged_too(tmp_path: Path) -> None:
+    """Запись в строку `{persist-credentials: true}` судится, как блочная."""
+    text = CLEAN.replace(
+        "        with:\n          persist-credentials: false\n",
+        "        with: {persist-credentials: true}\n",
+    )
+    assert any("без причины" in one for one in found(tree(tmp_path, {"a.yml": text})))
 
 
 @pytest.mark.parametrize(
@@ -168,7 +204,8 @@ def test_the_gate_refuses_a_red_tree_with_its_exit(tmp_path: Path) -> None:
     ("uses", "said"),
     [
         ("./local", ""),
-        ("docker://alpine:3", ""),
+        ("docker://alpine:3", "образ контейнера не по digest"),
+        ("docker://alpine@sha256:" + "a" * 64, ""),
         (CHECKOUT, ""),
         ("actions/checkout@v7", "стороннее действие не на полном sha"),
         ("ArtVsMark/X/.github/workflows/s.yml@v1.10.0", ""),

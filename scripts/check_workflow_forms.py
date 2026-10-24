@@ -65,8 +65,12 @@ PERSIST: Final = "persist-credentials"
 FAMILY_OWNER: Final = catalogue.REPO.partition("/")[0].lower()
 SHA_RE: Final = re.compile(r"[0-9a-f]{40}")
 RELEASE_RE: Final = re.compile(r"v\d+(\.\d+)*")
-#: `true` без причины: комментарий на строке обязателен.
-BARE_TRUE_RE: Final = re.compile(rf"^\s*{PERSIST}:\s*true\s*$", re.MULTILINE)
+#: `true` у ключа в любой записи — блочной, в кавычках, в строку `{…: true}`.
+TRUE_RE: Final = re.compile(rf"{PERSIST}[\"']?\s*:\s*[\"']?true\b", re.IGNORECASE)
+#: Причина — комментарий со словами после значения, а не голый `#` (взгляд на #1634).
+REASON_RE: Final = re.compile(r"#\s*\w")
+#: Образ контейнера закреплён по digest: метка подвижна, как тег действия.
+DIGEST_RE: Final = re.compile(r"@sha256:[0-9a-f]{64}")
 
 
 class NotRun(RuntimeError):
@@ -163,8 +167,10 @@ def uses_of(job: dict[str, Any]) -> list[str]:
 
 def pin_problem(uses: str) -> str:
     """Что не так с закреплением `uses:`; пусто — законно или своё по пути."""
-    if uses.startswith(("./", "docker://")):
+    if uses.startswith("./"):
         return ""
+    if uses.startswith("docker://"):
+        return "" if DIGEST_RE.search(uses) else "образ контейнера не по digest"
     name, _, ref = uses.partition("@")
     if SHA_RE.fullmatch(ref):
         return ""
@@ -182,7 +188,9 @@ def judge(
     """Находки файла и исключения, которые в нём встретились."""
     found: list[str] = []
     met: set[tuple[str, str]] = set()
-    name = path.name
+    # КЛЮЧ ИСКЛЮЧЕНИЯ — ПУТЬ ОТ КОРНЯ, А НЕ ИМЯ: у всех составных действий имя
+    # `action.yml`, и исключение одного разрешило бы форму в каждом (взгляд на #1634).
+    name = path.as_posix()
     target_allowed, branch_allowed = exceptions
     if "pull_request_target" in events(said) and name not in target_allowed:
         found.append(f"{path}: pull_request_target — исполняет голову изменения с правами базы")
@@ -192,7 +200,7 @@ def judge(
     for job_name, job in jobs_of(path, said).items():
         where = f"{path}:{job_name}"
         rights = job.get("permissions", top)
-        if job.get("permissions") == "write-all" and not name.startswith("action."):
+        if job.get("permissions") == "write-all" and not path.name.startswith("action."):
             found.append(f"{where}: permissions: write-all у джоба")
         if "steps" in job and rights is None:
             found.append(f"{where}: прав не объявлено ни у джоба, ни у файла")
@@ -213,8 +221,10 @@ def judge(
                 met.add((name, uses))
                 continue
             found.append(f"{where}: {uses} — {problem}")
-    if BARE_TRUE_RE.search(text):
-        found.append(f"{path}: {PERSIST}: true без причины комментарием на строке")
+    for number, line in enumerate(text.splitlines(), 1):
+        value = TRUE_RE.search(line)
+        if value and not REASON_RE.search(line[value.end() :]):
+            found.append(f"{path}:{number}: {PERSIST}: true без причины комментарием на строке")
     return found, met
 
 
@@ -228,8 +238,8 @@ def look(root: Path) -> list[str]:
         told, seen = judge(path, text, said, exceptions)
         found += told
         met |= seen
-        if path.name in target_allowed and "pull_request_target" in events(said):
-            met.add((path.name, "pull_request_target"))
+        if path.as_posix() in target_allowed and "pull_request_target" in events(said):
+            met.add((path.as_posix(), "pull_request_target"))
     for key in sorted(branch_allowed.keys() - met):
         found.append(f"исключение пережило место: {key[0]} → {key[1]}")
     for name in target_allowed.keys() - {one for one, what in met if what == "pull_request_target"}:
