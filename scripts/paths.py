@@ -71,6 +71,8 @@ MECHANISM_RULES: Final = Path(".rules/mechanism-rules.json")
 #: Слежка за путями поставщика: с какого закрепления снято знание о его коде
 #: и за каким файлом оно следит — читает перехватчик подъёма (#1522).
 VENDOR_WATCH: Final = Path(".rules/vendor-watch.json")
+#: Исключения гейта опасных форм прогонов — данные проекта, с причиной (#1430).
+WORKFLOW_FORMS: Final = Path(".rules/workflow-forms.json")
 #: Фрагменты журнала и собранный журнал.
 FRAGMENTS: Final = Path("changelog.d")
 RELEASED: Final = FRAGMENTS / "released"
@@ -308,6 +310,7 @@ ALL: Final = (
     CLAIMS,
     MECHANISM_RULES,
     VENDOR_WATCH,
+    WORKFLOW_FORMS,
     FRAGMENTS,
     RELEASED,
     CHANGELOG,
