@@ -267,16 +267,27 @@ def test_without_a_deadline_tool_the_loader_names_it(tmp_path: Path) -> None:
     assert "нет ни timeout, ни gtimeout" in done.stderr, done.stderr
 
 
-def test_a_half_cache_is_replaced_and_no_part_is_left(tmp_path: Path) -> None:
-    """Недокачанный кеш заменяется, своя копия выкачки не остаётся (`3341be3`)."""
+def test_a_half_cache_is_named_and_left_in_place(tmp_path: Path) -> None:
+    """Остаток прежнего запускателя назван отказом и не тронут (`3341be3`, взгляды на #1640).
+
+    Перенос каталога кеша мог бы унести готовый кеш соседа, ставший на место
+    остатка между проверкой и переносом; без переноса гонке негде случиться.
+    """
     supplier(tmp_path)
     tree = consumer(tmp_path, "o/m/.github/workflows/step-lint.yml@v1.2.3")
     cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
     cache.mkdir(parents=True)
     (cache / "обрывок").write_text("", encoding="utf-8")
-    assert load(tree, tmp_path).returncode == 0
+    done = load(tree, tmp_path)
+    assert done.returncode == 2, done.stderr
+    assert "остаток прежнего запускателя" in done.stderr, done.stderr
+    assert sorted(path.name for path in cache.iterdir()) == ["обрывок"], "остаток тронут"
+    assert sorted(path.name for path in cache.parent.iterdir()) == [cache.name], (
+        "рядом с кешем осталась выкачка или унесённый каталог"
+    )
+    shutil.rmtree(cache)
+    assert load(tree, tmp_path).returncode == 0, "после удаления остатка кеш не выкачан"
     assert (cache / "scripts" / "preflight.py").is_file()
-    assert not list(cache.parent.glob("*.part*")), "своя копия выкачки осталась рядом с кешем"
 
 
 def test_a_cache_won_by_a_neighbour_is_kept(tmp_path: Path) -> None:
@@ -329,45 +340,6 @@ def test_a_cache_won_by_a_neighbour_is_kept(tmp_path: Path) -> None:
     assert not list(cache.parent.glob("*.part.*")), "своя выкачка не убрана"
 
 
-def test_a_neighbour_cache_is_never_carried_away(tmp_path: Path) -> None:
-    """Сосед ставит готовый кеш между признанием остатка и переносом — кеш не исчезает (#1640).
-
-    Прежде остаток признавала оболочка, а уносил отдельный процесс: готовый кеш
-    соседа уходил в сторону и возвращался, и на этот миг его не было. Обёртка
-    `PYTHON` ставит кеш соседа ровно перед первым вызовом с `.stale.` и после
-    вызова отмечает, стоит ли кеш на месте.
-    """
-    supplier(tmp_path)
-    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
-    cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
-    cache.mkdir(parents=True)
-    (cache / "обрывок").write_text("", encoding="utf-8")
-    log, once = tmp_path / "gap.log", tmp_path / "neighbour.done"
-    shim = tmp_path / "python-shim"
-    shim.write_text(
-        "#!/usr/bin/env bash\n"
-        'if [[ "$*" == *".stale."* ]]; then\n'
-        f'  if [ ! -e "{once}" ]; then\n'
-        f'    : > "{once}"; rm -rf "{cache}"; mkdir -p "{cache}/scripts"\n'
-        f'    echo "print(\'сосед\')" > "{cache}/scripts/work_plan.py"\n'
-        f'    : > "{cache}/scripts/preflight.py"\n'
-        "  fi\n"
-        f'  "{sys.executable}" "$@"; rc=$?\n'
-        f'  [ -f "{cache}/scripts/preflight.py" ] || echo gap >> "{log}"\n'
-        "  exit $rc\n"
-        "fi\n"
-        f'exec "{sys.executable}" "$@"\n',
-        encoding="utf-8",
-    )
-    shim.chmod(0o755)
-    done = launch(tree, tmp_path, "work_plan.py", env_over={"PYTHON": str(shim)})
-    assert done.returncode == 0, done.stderr
-    assert "сосед" in done.stdout, "кеш соседа подменён своей копией"
-    assert not log.exists(), "готовый кеш соседа на миг уносился в сторону"
-    assert not list(cache.parent.glob("*.part.*")), "своя выкачка не убрана"
-    assert not list(cache.parent.glob("*.stale.*")), "унесённый остаток не убран"
-
-
 def test_an_interpreter_that_does_not_run_is_named(tmp_path: Path) -> None:
     """`PYTHON` не запускается — отказ называет интерпретатор, а не «кеш неполон» (#1640)."""
     supplier(tmp_path)
@@ -376,3 +348,27 @@ def test_an_interpreter_that_does_not_run_is_named(tmp_path: Path) -> None:
     assert done.returncode == 2, done.stderr
     assert "не запускается" in done.stderr, done.stderr
     assert "неполон" not in done.stderr, done.stderr
+
+
+def test_a_tree_without_mechanisms_is_named_and_not_cached(tmp_path: Path) -> None:
+    """По тегу выкачано не то дерево — названо отказом, кеш не занят (взгляд на #1642).
+
+    Прежде такая выкачка вставала на место кеша, отказ говорил «перенос
+    отказал», а следующий заход называл её «остатком прежнего запускателя».
+    """
+    origin = supplier(tmp_path)
+    repo = origin / "o" / "m.git"
+    git(repo, "rm", "-q", "scripts/preflight.py")
+    (repo / "README.md").write_text("не механизмы\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "не то дерево")
+    git(repo, "tag", "-f", "v1.2.3")
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-lint.yml@v1.2.3")
+    cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
+    for _ in range(2):
+        done = load(tree, tmp_path)
+        assert done.returncode == 2, done.stderr
+        assert "выкачаны не механизмы" in done.stderr, done.stderr
+        assert "остаток" not in done.stderr, done.stderr
+    assert not cache.exists(), "чужое дерево встало на место кеша"
+    assert not list(cache.parent.glob("*.part*")), "выкачка осталась рядом с кешем"
