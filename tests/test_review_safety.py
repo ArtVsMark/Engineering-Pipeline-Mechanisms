@@ -2521,8 +2521,15 @@ ACTION_DEP: Final = "anthropics/claude-code-action"
 
 
 def action_pins() -> set[str]:
-    """Закрепления действия агента в шаге взгляда (находка `2325e34`: разбор был дважды)."""
-    return set(ACTION_PIN.findall(LOOK_BODY.read_text("utf-8")))
+    """Закрепления действия агента во ВСЕХ прогонах, что его зовут (находка `2325e34`).
+
+    Не в одном шаге взгляда (взгляд на #1627, `ef72d18`): задание
+    `step-claude.yml` тоже называет пути, возвращённые к базе, и его закрепление
+    обязано совпадать со слежкой так же — иначе перечень молча станет неверным.
+    """
+    callers = [one for one in walk(WORKFLOWS, "*.yml") if ACTION_PIN.search(one.read_text("utf-8"))]
+    assert LOOK_BODY in callers, "шаг взгляда не зовёт действие агента — сверять нечего (075)"
+    return {pin for one in callers for pin in ACTION_PIN.findall(one.read_text("utf-8"))}
 
 
 def restored_from_pin() -> str:
