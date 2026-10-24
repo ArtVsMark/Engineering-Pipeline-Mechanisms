@@ -1378,7 +1378,9 @@ def test_the_tail_frees_only_the_labels_of_its_release(
         return
     assert run.returncode == 0, run.stdout + run.stderr
     stamp = git(
-        ["git", "for-each-ref", "--format=%(creatordate:iso-strict)", "refs/tags/v1.2.3"], text=True
+        ["git", "for-each-ref", "--format=%(creatordate:iso-strict)", "refs/tags/v1.2.3"],
+        text=True,
+        encoding="utf-8",
     ).stdout.strip()
     called = argv.read_text(encoding="utf-8").splitlines()
     assert called[called.index("--before") + 1] == stamp and stamp, called
