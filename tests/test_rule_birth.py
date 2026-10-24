@@ -668,3 +668,25 @@ def test_an_old_name_leaves_and_previous_names_do_not_drop() -> None:
     assert "«A» выпало" in " ".join(module.thawed(chained_before, dropped))
     carried = {"C": {"встречен": ["m0"], "прежде": ["A", "B"]}}
     assert module.thawed(chained_before, carried) == []
+
+
+def test_the_records_are_found_where_the_base_table_puts_them(tmp_path: Path) -> None:
+    """Каталог записей переназначен таблицей ОСНОВАНИЯ — новая запись судится там (#1632)."""
+    root = tmp_path
+    (root / ".pipeline.yml").write_text(
+        "paths:\n  decisions: handbook/decisions\n", encoding="utf-8"
+    )
+    git(root, "init", "--initial-branch=main")
+    git(root, "config", "user.name", "Artem Markitanov")
+    git(root, "config", "user.email", "a@b.c")
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "основание")
+    git(root, "checkout", "-b", "feature")
+    (root / "handbook" / "decisions").mkdir(parents=True)
+    (root / "handbook" / "decisions" / "002-новое.md").write_text("решение\n", encoding="utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "запись")
+    table = module.table_at("main", root)
+    assert table["decisions"] == Path("handbook/decisions")
+    assert module.added("main", "HEAD", root, table) == ["handbook/decisions/002-новое.md"]
+    assert module.added("main", "HEAD", root) == [], "по умолчанию запись не видна"

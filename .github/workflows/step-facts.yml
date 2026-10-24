@@ -115,6 +115,7 @@ jobs:
       # Теги нужны версии и выпуску: без них число головы правдоподобно и ложно.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: true # издатель толкает факты в ветку badges (publish_facts.py)
           fetch-depth: 0
           fetch-tags: true
       # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У

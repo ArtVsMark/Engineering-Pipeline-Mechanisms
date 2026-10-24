@@ -1046,6 +1046,7 @@ KIT_REFUSED: Final = {
     paths.SCHEDULES: "цена и роль ВАШИХ прогонов по расписанию: состав знает только ваше дерево",
     paths.SHOWCASE: "вопросы вашей витрины: наш набор отвечал бы о нашем проекте",
     paths.VENDOR_WATCH: "знание, снятое с кода ваших закреплений действий, а не наших",
+    paths.WORKFLOW_FORMS: "исключения ваших прогонов, с вашими причинами; нет файла — нет их",
     paths.BEHAVIOUR: "шаги называют документ ссылкой в сообщении; порядок работ — ваш",
     paths.RELEASE_DOC: "шаги называют документ ссылкой в сообщении; порядок выпуска — ваш",
     paths.DECISIONS: "записи ваших решений; пустой каталог законен",
@@ -1074,11 +1075,15 @@ def area_kit(root: Path) -> str:
     каждого дерева; до наполнения область задевает любой путь (`AREA_ANY`).
     """
     try:
-        areas = json.loads((root / paths.AREA_PATHS).read_text(encoding="utf-8"))["areas"]
+        table = policy.project_path("area-paths", root)
+    except paths.BadPaths as exc:
+        raise NotRun(f"таблица путей не разобрана: {exc}") from exc
+    try:
+        areas = json.loads((root / table).read_text(encoding="utf-8"))["areas"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise NotRun(f"`{paths.AREA_PATHS}` не разобран: {exc!r}") from exc
+        raise NotRun(f"`{table}` не разобран: {exc!r}") from exc
     if not isinstance(areas, dict) or not areas:
-        raise NotRun(f"`{paths.AREA_PATHS}`: нет словаря `areas` — областей для заготовки нет")
+        raise NotRun(f"`{table}`: нет словаря `areas` — областей для заготовки нет")
     kit = {
         "_": (
             "Области каталога → пути этого дерева — заготовка механизмов (#1386). Роль "
@@ -1353,11 +1358,19 @@ def lay_free(consumer: Path, kit: dict[Path, str], repo: str) -> list[Path]:
 
 
 def bindings_note(consumer: Path) -> str:
-    """Названное отсутствие ответа каталогу: без него карта взгляда не собирается."""
-    if (consumer / paths.BINDINGS).exists():
+    """Названное отсутствие ответа каталогу: без него карта взгляда не собирается.
+
+    Адрес — по таблице путей потребителя (#1632): ответ, переназначенный им,
+    ищется там, где он его положил.
+    """
+    try:
+        answer = policy.project_path("bindings", consumer)
+    except paths.BadPaths as exc:
+        return f"Ответ каталогу не проверен: раздел путей не разобран — {exc}"
+    if (consumer / answer).exists():
         return ""
     return (
-        f"`{paths.BINDINGS}` нет: без него карта взгляда не собирается, и взгляд идёт без "
+        f"`{answer}` нет: без него карта взгляда не собирается, и взгляд идёт без "
         "карты. Заготовкой он не кладётся — это ответ проекта каталогу правил: "
         "заведите его по договору ответа каталога."
     )

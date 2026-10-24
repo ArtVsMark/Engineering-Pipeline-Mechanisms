@@ -372,6 +372,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.present == 'yes'
         with:
+          persist-credentials: true # claude-code-action зовёт git против ветки изменения; у закрытого потребителя без учётных данных выборка не пройдёт
           fetch-depth: 1
 
       # ПРОВЕРКИ СТАВЯТСЯ, РАЗ РЕВЬЮ ИХ ОБЪЯВЛЯЕТ. Список разрешённого ниже
@@ -728,6 +729,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 1
       # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
       # потребителя нашего `scripts/` нет: дерево вызывающего — ЕГО, и в нём
@@ -852,6 +854,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 1
       # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
       # потребителя нашего `scripts/` нет: дерево вызывающего — ЕГО, и в нём
@@ -977,6 +980,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.present == 'yes'
         with:
+          persist-credentials: true # claude-code-action зовёт git против ветки изменения; у закрытого потребителя без учётных данных выборка не пройдёт
           # Премиса проверяется по истории общей ветки: находка могла быть
           # починена после слияния изменения, из которого пришла.
           fetch-depth: 0
@@ -1272,6 +1276,8 @@ jobs:
       numbers: ${{ steps.pick.outputs.numbers }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # КОД КОНВЕЙЕРА — СВОИМ CHECKOUT, А НЕ ИЗ ДЕРЕВА ВЫЗЫВАЮЩЕГО (#990). У
       # потребителя нашего `scripts/` нет: дерево вызывающего — ЕГО, и в нём
       # только данные. Репозиторий и коммит — того файла, который позвали
@@ -1430,6 +1436,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.token.outputs.present == 'yes'
         with:
+          persist-credentials: true # claude-code-action зовёт git против ветки изменения; у закрытого потребителя без учётных данных выборка не пройдёт
           # Поздний взгляд ищет уплотнённый коммит слитого изменения в истории
           # общей ветки — одной головы для этого мало.
           fetch-depth: 0
