@@ -781,10 +781,12 @@ NOT_A_TREE: Final = "not a git repository"
 INSTALLED: Final = ("site-packages", "dist-packages")
 
 
-def code_origin(root: Path) -> str:
+def code_origin(root: Path, supplier: Path | None = None) -> str:
     """Откуда ШАГИ импортируют транспорт — спрошено у их же среды, а не выведено (216).
 
-    Спрашивает тот же `bash` с тем же `PATH` и корнем, что у шагов (`run`):
+    Спрашивает тот же `bash` с тем же `PATH`, корнем и `MECHANISMS`, что у шагов
+    (`run`): у потребителя код конвейера — выкачка `supplier`, а не его дерево
+    (находка `26bdccb`).
     ответ про импорт знает только импортирующий, а корень прогона об установке
     не знает ничего. Не ответила среда — пустая строка: молчание называет
     `source_line`, а не прячет.
@@ -803,7 +805,7 @@ def code_origin(root: Path) -> str:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env={**environment(), MECHANISMS: str(root.resolve())},
+            env={**environment(), MECHANISMS: str((supplier or root).resolve())},
             timeout=gitcall.LOCAL,
         )
     except OSError, subprocess.TimeoutExpired:
@@ -811,8 +813,13 @@ def code_origin(root: Path) -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
-def source_line(origin: str, root: Path) -> tuple[str, bool]:
+def source_line(origin: str, root: Path, supplier: Path | None = None) -> tuple[str, bool]:
     """Строка отчёта об источнике проверяемого кода и признак предупреждения (216).
+
+    ВЫКАЧКА ПОСТАВЩИКА — ЗАКОННЫЙ ИСТОЧНИК (находка `26bdccb`). У потребителя
+    транспорт берётся из кеша механизмов, у которого свой git: сверка только с
+    корнем давала ложное «НЕ из проверяемого дерева» первой строкой каждого
+    захода. Источник, совпавший с `supplier`, называется выкачкой.
 
     ПРЕДУПРЕЖДЕНИЕ, А НЕ ОТКАЗ (051). Окно ставит пакеты дерева в `.venv`
     РЕДАКТИРУЕМОЙ установкой из того дерева, где оно собралось (хук старта), а
@@ -839,6 +846,8 @@ def source_line(origin: str, root: Path) -> tuple[str, bool]:
         return f"код транспорта: {where} — дерево не установлено: {report.cut(str(exc))}", False
     if owner == root.resolve():
         return f"код транспорта: из этого дерева, {where}", False
+    if supplier is not None and owner == supplier.resolve():
+        return f"код транспорта: из выкачки поставщика, {where}", False
     return (
         f"⚠ код транспорта НЕ из проверяемого дерева: импортируется {where},"
         f" а прогон идёт в {root.resolve()} — правку транспорта здесь видят только"
@@ -963,7 +972,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.list:
         # ПЕРВОЙ СТРОКОЙ — ЧЕЙ КОД ПРОВЕРЯЕТСЯ (216): остальные ответы прогона
         # имеют смысл только после неё.
-        print(source_line(code_origin(args.root), args.root)[0])
+        print(source_line(code_origin(args.root, args.mechanisms), args.root, args.mechanisms)[0])
         gap = environment_gap(args.root)
         if gap:
             print("окружение окна расходится с тем, что ставит прогон:")
