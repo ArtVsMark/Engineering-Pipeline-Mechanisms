@@ -629,7 +629,7 @@ def test_rebound_names_the_consumers_the_module_binds_itself() -> None:
 
 def test_consumes_here_takes_the_bare_unshadowed_builtin_only() -> None:
     """Голое имя встроенного — да; метод того же имени и переопределённое — нет."""
-    bare, method = (ast.parse(one).body[0].value for one in ("list(g)", "obj.list(g)"))
+    bare, method = (ast.parse(one, mode="eval").body for one in ("list(g)", "obj.list(g)"))
     assert isinstance(bare, ast.Call) and isinstance(method, ast.Call)
     assert gate.consumes_here(bare, frozenset())
     assert not gate.consumes_here(bare, frozenset({"list"}))
