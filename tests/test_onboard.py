@@ -2434,6 +2434,8 @@ def test_the_write_lays_the_record_of_what_it_laid(tmp_path: Path) -> None:
     mine = module.unsigned(guard, (consumer / guard).read_text(encoding="utf-8"))
     assert laid[guard] == module.blob_of(mine)
     assert set(laid) <= module.LAID_KINDS and module.SKILLS_KITTED[0] in laid
+    # Настройки окна — файл проекта: `plan_tree` их не судит, в перечне им не место.
+    assert module.paths.SETTINGS not in laid
     said = json.loads((consumer / module.paths.KIT_LAID).read_text(encoding="utf-8"))
     assert next(iter(said)) == "_license", "перечень положен без подписи"
 

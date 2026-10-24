@@ -1013,8 +1013,12 @@ SKILLS_KITTED: Final = tuple(
     )
 )
 #: Что записывается в перечень положенного: то, что `plan_tree` судит как
-#: устаревшее или правленое, — хуки, настройки окна и навыки.
-LAID_KINDS: Final = frozenset({*TREE_KITTED, *SKILLS_KITTED})
+#: устаревшее или правленое, — хуки и навыки. Настройки окна — файл проекта
+#: (`of_the_project`), `plan_tree` их не судит, и запись о них никто бы не
+#: прочёл (взгляд на #1651).
+LAID_KINDS: Final = frozenset(
+    path for path in (*TREE_KITTED, *SKILLS_KITTED) if not of_the_project(path)
+)
 #: Команда скрипта в тексте навыка: у потребителя скриптов в дереве нет, и она
 #: зовётся запускателем (`paths.LAUNCHER`).
 SKILL_CALL: Final = re.compile(r"\bpython3? scripts/([A-Za-z0-9_]+\.py)")
