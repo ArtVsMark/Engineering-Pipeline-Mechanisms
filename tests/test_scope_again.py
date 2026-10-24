@@ -220,12 +220,19 @@ def test_a_silent_platform_is_the_third_outcome(
 
 
 def test_the_window_judges_from_its_pushed_head(tmp_path: Path) -> None:
-    """У окна прежняя голова — `origin/<ветка>`; ветка не толкнута — пусто."""
+    """У окна прежняя голова — `origin/<ветка>`, помеченная `--push`; иначе — пусто."""
     root = tree(tmp_path)
     assert preflight.pushed(root) == ""
     since = green_head(root)
     git(root, "update-ref", "refs/remotes/origin/agent/x", since)
+    assert preflight.pushed(root) == "", "толкнута мимо --push — не зелёная (`1f6094a`)"
+    preflight.mark_green(root, "agent/x")
     assert preflight.pushed(root) == since
+    (root / "later.txt").write_text("x", encoding="utf-8")
+    git(root, "add", "later.txt")
+    git(root, "commit", "-qm", "позже")
+    git(root, "update-ref", "refs/remotes/origin/agent/x", "HEAD")
+    assert preflight.pushed(root) == "", "площадка ушла дальше пометки — суд от предка"
 
 
 def test_the_preflight_hands_the_pushed_head_to_the_choice(

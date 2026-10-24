@@ -831,6 +831,34 @@ def test_a_platform_refusal_does_not_hold_the_push(
     assert "не проверено" in capsys.readouterr().err
 
 
+def test_only_a_push_that_happened_marks_the_head_green(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Толчок удался — голова помечена зелёной; не удался — пометки нет (`1f6094a`)."""
+    import subprocess
+
+    (tmp_path / "дерево").mkdir()
+    root = branch_tree(tmp_path / "дерево", "agent/работа")
+    for gate in (preflight.check_branch_revival, preflight.check_open_limit):
+        monkeypatch.setattr(gate, "look", lambda *_: (0, "чисто"))
+    mark = preflight.GREEN_REF + "agent/работа"
+
+    def marked() -> bool:
+        said = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", mark], cwd=root, capture_output=True
+        )
+        return said.returncode == 0
+
+    assert preflight.push_branch(root) == preflight.EXIT_BROKEN  # origin нет
+    assert not marked()
+    bare = tmp_path / "площадка.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=root, check=True)
+    assert preflight.push_branch(root) == preflight.EXIT_OK
+    assert marked()
+    assert preflight.pushed(root) != ""
+
+
 # --- тишина взгляда называется на КАЖДОМ заходе (#616) ------------------------
 
 

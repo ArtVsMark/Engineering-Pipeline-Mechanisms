@@ -394,18 +394,41 @@ def chosen_scope(root: Path, *, everything: bool) -> scope.Choice | None:
     return said
 
 
+#: Ссылка, которой `--push` помечает толкнутую им голову: зелёная по вердикту,
+#: а не по порядку окна. Локальная: на площадку не уходит.
+GREEN_REF: Final = "refs/preflight/green/"
+
+
 def pushed(root: Path) -> str:
     """Толкнутая голова ветки окна — прежняя зелёная (#1602); не толкнута — пусто.
 
-    Зелёной её делает порядок окна: ветку толкает `--push` после зелёной
-    предполётной. Ветки нет на площадке или git не ответил — пусто, и суд идёт
-    от общего предка: ошибка в сторону «больше» (039).
+    ЗЕЛЁНОЙ ЕЁ ДЕЛАЕТ ПОМЕТКА, А НЕ ПОРЯДОК ОКНА (находка `1f6094a`). Прежде
+    `origin/<ветка>` считалась зелёной без проверки: толкнутая простым `git
+    push` или с красной предполётной, она сужала суд до правок после себя.
+    Теперь `--push` после толчка ставит `GREEN_REF<ветка>` на толкнутую
+    голову, и голова площадки засчитывается, только совпав с пометкой. Иначе —
+    толчок мимо `--push`, голова, подтянутая очередью, — пусто, и суд идёт от
+    общего предка: ошибка в сторону «больше» (039). Ветки нет на площадке или
+    git не ответил — тоже пусто.
     """
     try:
         name = gitcall.branch(scope.NotRun, cwd=str(root))
-        return scope.git(root, "rev-parse", "--verify", "--quiet", f"origin/{name}").strip()
+        remote = scope.git(root, "rev-parse", "--verify", "--quiet", f"origin/{name}").strip()
+        green = scope.git(root, "rev-parse", "--verify", "--quiet", GREEN_REF + name).strip()
     except scope.NotRun:
         return ""
+    return remote if remote and remote == green else ""
+
+
+def mark_green(root: Path, branch: str) -> None:
+    """Помечает толкнутую голову зелёной; отказ git — слово, а не трасса (039)."""
+    try:
+        scope.git(root, "update-ref", GREEN_REF + branch, "HEAD")
+    except scope.NotRun as exc:
+        print(
+            f"голова не помечена зелёной — следующий заход судит от предка: {report.cut(str(exc))}",
+            file=sys.stderr,
+        )
 
 
 def journal_base() -> str:
@@ -743,6 +766,7 @@ def push_branch(root: Path) -> int:
     if said.returncode != 0:
         print(f"толчок не прошёл: {report.cut(said.stderr.strip())}", file=sys.stderr)
         return EXIT_BROKEN
+    mark_green(root, branch)
     print(f"толкнуто: {branch}")
     return EXIT_OK
 
