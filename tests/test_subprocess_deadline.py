@@ -510,6 +510,23 @@ def test_a_generator_expression_runs_outside_the_try(source: str, bad: bool) -> 
     assert bool(undeadlined(source)) is bad
 
 
+@pytest.mark.parametrize(
+    ("wrap", "bad"),
+    [("all", False), ("any", False), ("list", False), ("next", False), ("keep", True)],
+)
+def test_a_generator_consumed_on_the_spot_runs_in_the_try(wrap: str, bad: bool) -> None:
+    """Генератор, тут же обойдённый встроенным, исполняется в `try` (взгляд на #1603).
+
+    Отданный иному вызову (`keep`) судится строго: тот вправе обойти его позже.
+    """
+    source = (
+        "import subprocess\ntry:\n"
+        f"    {wrap}(subprocess.run(['x'], timeout=5) for _ in 'a')\n"
+        "except subprocess.TimeoutExpired:\n    pass\n"
+    )
+    assert bool(undeadlined(source)) is bad
+
+
 HOOK = (
     "import subprocess\n\ndef f():\n" + SPAWN_BODY + "\n"
     "def main():\n    try:\n        f()\n    except subprocess.TimeoutExpired:\n"
