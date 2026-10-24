@@ -59,7 +59,7 @@ import items
 import items_left
 import labels
 import main_red
-import paths
+import pipeline_checks as policy
 import report
 import task_shape
 import unlooked
@@ -740,7 +740,8 @@ def remind(has_debt: bool, unread: dict[int, list[str]] | None = None) -> None:
     unread = unread or {}
     if has_debt:
         print(
-            f"\nЭто идёт ПЕРЕД планом: {paths.BEHAVIOUR}, контур 1, источники {sources_said()}.\n"
+            f"\nЭто идёт ПЕРЕД планом: {policy.named_path('behaviour')}, контур 1, "
+            f"источники {sources_said()}.\n"
             "Правило каталога — 177: пока незакрытая работа по правилам есть, новую не начинают."
         )
     else:
@@ -751,7 +752,7 @@ def remind(has_debt: bool, unread: dict[int, list[str]] | None = None) -> None:
         print(
             f"\nпо прочитанному долга нет: {said}.\n"
             f"Источник 5 шаг читает не весь — {', '.join(NOT_READ)} сводит план "
-            f"({paths.BEHAVIOUR}, контур 1): за работой по плану — туда."
+            f"({policy.named_path('behaviour')}, контур 1): за работой по плану — туда."
         )
     for source, whys in sorted(unread.items()):
         print(f"Источник {source} прочитан не весь: {'; '.join(whys)} — это НЕ «пусто» (045).")

@@ -1234,7 +1234,7 @@ def test_an_answer_finding_is_not_closed_without_touching_the_answer(
     monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == set(), "снятие принято при нетронутом ответе"
-    assert "abc1234" in держим and module.ANSWER_FILE in держим["abc1234"]
+    assert "abc1234" in держим and findings_module.answer_file() in держим["abc1234"]
 
 
 def test_an_answer_finding_is_closed_when_the_answer_was_edited(
@@ -1247,7 +1247,9 @@ def test_an_answer_finding_is_closed_when_the_answer_was_edited(
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
     monkeypatch.setattr(
-        module, "touched", lambda repo, token, number: {module.ANSWER_FILE, "scripts/arm.py"}
+        module,
+        "touched",
+        lambda repo, token, number: {findings_module.ANSWER_FILE, "scripts/arm.py"},
     )
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
@@ -1274,7 +1276,7 @@ def test_an_answer_finding_is_closed_by_editing_its_own_place(
     assert берём == {"abc1234"} and not держим, "правка места находки её не сняла"
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {30}})
     assert not берём, "снятие принято без правки ответа и места"
-    assert f"ни {module.ANSWER_FILE}, ни .rules/proposals.json" in держим["abc1234"]
+    assert f"ни {findings_module.ANSWER_FILE}, ни .rules/proposals.json" in держим["abc1234"]
 
 
 def test_an_answer_finding_placed_in_the_answer_file_still_needs_the_answer(
@@ -1286,16 +1288,16 @@ def test_an_answer_finding_placed_in_the_answer_file_still_needs_the_answer(
     местом в `bindings.json` не снимает правка соседнего файла, упомянутого в
     заголовке, — место берётся из начала заголовка, а не из упоминания (#896).
     """
-    title = f"{module.ANSWER_FILE}:40 — ответ 045 расходится с `scripts/arm.py`"
+    title = f"{findings_module.ANSWER_FILE}:40 — ответ 045 расходится с `scripts/arm.py`"
     entries = {
         "abc1234": findings_module.Entry(10, "дефект", title, kind=findings_module.ANSWER_KIND)
     }
     monkeypatch.setattr(module, "touched", lambda repo, token, number: {"scripts/arm.py"})
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert not берём and "abc1234" in держим
-    assert module.subject_of(entries["abc1234"]) == {module.ANSWER_FILE}
+    assert module.subject_of(entries["abc1234"]) == {findings_module.ANSWER_FILE}
     assert module.subject_of(отметка(10, findings_module.ANSWER_KIND)["abc1234"]) == {
-        module.ANSWER_FILE
+        findings_module.ANSWER_FILE
     }
 
 
@@ -1309,7 +1311,7 @@ def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
     Исходы — в каноне `closable`.
     """
     entries = отметка(10, findings_module.ANSWER_KIND)
-    files = {10: {"scripts/arm.py"}, 20: {module.ANSWER_FILE}}
+    files = {10: {"scripts/arm.py"}, 20: {findings_module.ANSWER_FILE}}
     monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
     берём, держим = module.closable("o/r", "t", entries, {"abc1234": {20}})
     assert берём == {"abc1234"} and not держим
@@ -1320,7 +1322,7 @@ def test_the_answer_is_asked_of_the_closer_not_of_the_finder(
 def test_one_closer_that_edited_the_answer_is_enough(monkeypatch: pytest.MonkeyPatch) -> None:
     """Из нескольких снявших хватает одного, правившего ответ; ни одного — отказ (#838)."""
     entries = отметка(10, findings_module.ANSWER_KIND)
-    files = {20: {"scripts/arm.py"}, 30: {module.ANSWER_FILE}, 40: {"docs/x.md"}}
+    files = {20: {"scripts/arm.py"}, 30: {findings_module.ANSWER_FILE}, 40: {"docs/x.md"}}
     monkeypatch.setattr(module, "touched", lambda repo, token, number: files[number])
     берём, _ = module.closable("o/r", "t", entries, {"abc1234": {20, 30}})
     assert берём == {"abc1234"}
@@ -1789,7 +1791,7 @@ def test_the_sweep_hands_the_closers_to_the_answer_check(
     kept = {
         "abc1234": findings_module.Entry(10, "дефект", "находка", kind=findings_module.ANSWER_KIND)
     }
-    files = {20: {module.ANSWER_FILE}, 30: {"scripts/arm.py"}}
+    files = {20: {findings_module.ANSWER_FILE}, 30: {"scripts/arm.py"}}
     saved: list[dict[str, Any]] = []
     monkeypatch.setattr(module, "open_changes", lambda repo, token: set())
     monkeypatch.setenv("GH_TOKEN", "токен")

@@ -586,6 +586,7 @@ def render_section(title: str, fragments: list[Fragment]) -> str:
 
 def render(version: str) -> str:
     """Собирает журнал целиком: не выпущенное, затем выпуски от новых к старым."""
+    release_doc = pipeline_checks.named_path("release-doc").as_posix()
     parts = [
         "# Журнал изменений",
         "",
@@ -594,7 +595,7 @@ def render(version: str) -> str:
         "> сборке (правило 125).",
         "",
         f"Версия контракта — `{version}`, источник `CONTRACT_VERSION`. Что означают",
-        f"разряды и что делает потребитель — [`{paths.RELEASE_DOC}`]({paths.RELEASE_DOC}).",
+        f"разряды и что делает потребитель — [`{release_doc}`]({release_doc}).",
         "",
         render_section("Не выпущено", read_fragments(FRAGMENTS)),
     ]
