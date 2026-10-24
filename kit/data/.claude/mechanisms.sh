@@ -69,21 +69,54 @@ if [ ! -f "$cache/scripts/preflight.py" ]; then
   # стирается и не подменяется — подмены живой цели нет, и блокировать нечего.
   # Прежде здесь стояло `rm -rf "$cache"; mv`, и второй писатель между проверкой
   # и `mv` стирал кеш под скриптом первого (находка на #1626). `os.rename`, а не
-  # `mv`: `mv` на занятый каталог кладёт копию ВНУТРЬ него.
-  swap() { "${PYTHON:-python3}" -c 'import os, sys; os.rename(sys.argv[1], sys.argv[2])' "$1" "$2" 2>/dev/null; }
+  # `mv`: `mv` на занятый каталог кладёт копию ВНУТРЬ него. Отказ переноса —
+  # код 1 без слов; интерпретатор, который не запускается, назван заранее, а
+  # не читается «кеш неполон» (взгляд на #1640).
+  "${PYTHON:-python3}" -c '' 2>/dev/null \
+    || refuse "интерпретатор ${PYTHON:-python3} не запускается — переносить кеш нечем"
+  swap() {
+    "${PYTHON:-python3}" -c '
+import os, sys
+try:
+    os.rename(sys.argv[1], sys.argv[2])
+except OSError:
+    sys.exit(1)' "$1" "$2"
+  }
   part="$cache.part.$$"
   rm -rf "$part"
   "$deadline" 300 git -c advice.detachedHead=false clone -q --depth 1 --branch "$tag" "$origin" "$part" \
     || { rm -rf "$part"; refuse "механизмы $supplier@$tag не выкачаны из $origin"; }
   # ОСТАТОК — недокачанный кеш без `preflight.py` (`3341be3`) — уходит в сторону
-  # тем же переименованием и стирается уже там. Оказался готовым — его положил
-  # сосед между проверкой и переносом, — он возвращается, а не стирается.
-  if [ -d "$cache" ] && [ ! -f "$cache/scripts/preflight.py" ]; then
-    stale="$cache.stale.$$"
-    if swap "$cache" "$stale"; then
-      if [ -f "$stale/scripts/preflight.py" ]; then swap "$stale" "$cache" || true; else rm -rf "$stale"; fi
-    fi
-  fi
+  # и стирается уже там. Проверка, перенос и сверка — ОДНИМ процессом: каталог,
+  # унесённый в сторону, сверяется по inode с тем, что был признан остатком, и
+  # готовый или подменённый соседом возвращается на место. Прежде проверка шла
+  # в оболочке, а перенос — отдельным процессом, и сосед, поставивший готовый
+  # кеш между ними, терял его на время возврата (взгляд на #1640). Окно между
+  # переносом и возвратом осталось — одна пара системных вызовов, а не два
+  # запуска интерпретатора; закрыть его нечем без обмена каталогов, которого
+  # у `os` нет.
+  stale="$cache.stale.$$"
+  retired=0
+  "${PYTHON:-python3}" -c '
+import os, sys
+cache, stale = sys.argv[1:3]
+ready = lambda where: os.path.isfile(os.path.join(where, "scripts", "preflight.py"))
+try:
+    seen = os.stat(cache)
+    if ready(cache):
+        sys.exit(0)
+    os.rename(cache, stale)
+except OSError:
+    sys.exit(0)
+moved = os.stat(stale)
+if (moved.st_dev, moved.st_ino) != (seen.st_dev, seen.st_ino) or ready(stale):
+    try:
+        os.rename(stale, cache)
+    except OSError:
+        pass
+    sys.exit(0)
+sys.exit(3)' "$cache" "$stale" || retired=$?
+  if [ "$retired" = 3 ]; then rm -rf "$stale"; fi
   swap "$part" "$cache" || rm -rf "$part"
   [ -f "$cache/scripts/preflight.py" ] \
     || refuse "кеш механизмов $cache неполон и не заменён — удалите его, и следующий заход выкачает заново"
