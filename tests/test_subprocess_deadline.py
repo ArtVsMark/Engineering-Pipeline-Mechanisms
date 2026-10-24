@@ -616,3 +616,21 @@ def test_only_the_builtin_consumes_on_the_spot(source: str, bad: bool) -> None:
         prefix = source
     text = f"import subprocess\n{prefix}try:\n{body}except subprocess.TimeoutExpired:\n    pass\n"
     assert bool(undeadlined(text)) is bad
+
+
+def test_rebound_names_the_consumers_the_module_binds_itself() -> None:
+    """`def`, присваивание, импорт и довод связывают имя; чужое имя не в счёт."""
+    tree = ast.parse(
+        "def list(x):\n    return x\nsorted = 1\nfrom m import a as any\n"
+        "def f(next):\n    pass\nkeep = 2\n"
+    )
+    assert gate.rebound(tree) == frozenset({"list", "sorted", "any", "next"})
+
+
+def test_consumes_here_takes_the_bare_unshadowed_builtin_only() -> None:
+    """Голое имя встроенного — да; метод того же имени и переопределённое — нет."""
+    bare, method = (ast.parse(one).body[0].value for one in ("list(g)", "obj.list(g)"))
+    assert isinstance(bare, ast.Call) and isinstance(method, ast.Call)
+    assert gate.consumes_here(bare, frozenset())
+    assert not gate.consumes_here(bare, frozenset({"list"}))
+    assert not gate.consumes_here(method, frozenset())
