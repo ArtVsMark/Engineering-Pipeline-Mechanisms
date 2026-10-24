@@ -293,7 +293,9 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
 
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        # Не UTF-8 — тот же отказ, что у вызываемого прогона (`_called_jobs`),
+        # а не трасса (взгляд на #1593, 195).
         raise NotRun(f"{path} не разбирается: {exc}") from exc
     if not isinstance(document, dict):
         raise NotRun(f"{path}: ожидалось отображение, пришло {type(document).__name__}")

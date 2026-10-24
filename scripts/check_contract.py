@@ -183,7 +183,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.show:
-        print(contract.as_text(contract.surface()))
+        try:
+            print(contract.as_text(contract.surface()))
+        except contract.policy.BadPolicy as exc:
+            print(f"гейт не отработал: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
         return EXIT_CLEAN
 
     try:
@@ -197,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             before = contract.surface(base_tree(fork, Path(room)))
         after = contract.surface()
         changes = contract.differences(before, after)
-    except journal.NotRun as exc:
+    except (journal.NotRun, contract.policy.BadPolicy) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     except NotRun as exc:
