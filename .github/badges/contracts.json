@@ -6,7 +6,8 @@
     "sha": "6d8f241b19868c9b04a4a2f7919610a1e3f73d69"
   },
   "gives": {
-    "steps": "0.12"
+    "steps": "0.12",
+    "facts": "2.1"
   },
   "takes": []
 }
