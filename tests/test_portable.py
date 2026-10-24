@@ -1078,12 +1078,20 @@ def test_a_flow_the_kit_is_cut_from_is_answered_configured() -> None:
     assert not wrong, f"заготовка режется из прогона, а ответ не `configured`: {wrong}"
 
 
+#: Вызов скрипта запускателем в тексте навыка: `bash .claude/mechanisms.sh имя.py`.
+LAUNCHED: Final = re.compile(r"\.claude/mechanisms\.sh\s+(\w+)\.py")
+
+
 def delivered_scripts() -> set[str]:
-    """Наши скрипты, которые у потребителя кто-то зовёт: шаги по тегу и предполётная (#1553).
+    """Наши скрипты, которые у потребителя кто-то зовёт: шаги, предполётная, отданные навыки.
 
     Шаги — тем же `called_scripts`, что выводит данные потребителя; предполётная
     — её модуль и проверки перед толчком (`BEFORE_PUSH`), каждый с импортами
-    (`module_closure`). Второго обхода импортов здесь нет (214).
+    (`module_closure`). Второго обхода импортов здесь нет (214). Навыки, которые
+    заход кладёт потребителю (`SKILLS_KITTED`), зовут скрипты запускателем по
+    тегу (#1552), и позванное ими тоже доходит (#1636). Текст меряется таким,
+    каким его получит потребитель, — после `skill_kit`: в нашем дереве вызов
+    записан `python scripts/…`, и запускателем он становится при кладке.
     """
     onboard = load_script("onboard.py")
     preflight = load_script("preflight.py")
@@ -1097,6 +1105,13 @@ def delivered_scripts() -> set[str]:
         match.group(1)
         for step in preflight.BEFORE_PUSH
         for match in onboard.CALLED_SCRIPT.finditer(step.command)
+    }
+    starts |= {
+        match.group(1)
+        for skill in onboard.SKILLS_KITTED
+        for match in LAUNCHED.finditer(
+            onboard.skill_kit((ROOT / skill).read_text(encoding="utf-8"), "o/r")
+        )
     }
     for start in sorted(starts):
         found |= {one.as_posix() for one in closure(start, ROOT)}
