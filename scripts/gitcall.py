@@ -25,8 +25,10 @@
 без поимки было 19 в 11 модулях; восемь сняты в #1021, одиннадцать — в #1027.
 """
 
+import os
 import subprocess
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Final
 
 import report
@@ -92,3 +94,30 @@ def branch(refusal: Callable[[str], Exception], *, cwd: str | None = None) -> st
     """
     said = output(["rev-parse", "--symbolic-full-name", "HEAD"], refusal, cwd=cwd).strip()
     return said.removeprefix(BRANCH_REF)
+
+
+class _NoOrigin(RuntimeError):
+    """Адрес `origin` не прочитан: для `own_repo` это «имя неизвестно», а не отказ."""
+
+
+def own_repo(root: Path) -> str:
+    """Своё имя `владелец/репозиторий`: площадка в прогоне, `origin` локально; пусто — неизвестно.
+
+    ОДИН ОТВЕТ НА «КТО Я» ДЛЯ ГЕЙТОВ (#1624). Прежде он жил в
+    `check_agent_silenced`; третий спрашивающий (`check_foreign_why`) сделал
+    его общим (093). Признак широкий — две последние части адреса: ошибиться
+    он может только в сторону «неизвестно», и тогда гейт судит как обычно.
+    Соседние разборы `origin` с другим допуском ошибки — `onboard.repo_of`
+    (узкий: имя уходит строкой в чужой README) и
+    `check_branch_revival.repo_of` (отказывает: имя идёт запросом к
+    площадке) — названы, а не слиты (195).
+    """
+    said = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if said:
+        return said
+    try:
+        url = output(["remote", "get-url", "origin"], _NoOrigin, cwd=str(root))
+    except _NoOrigin:
+        return ""
+    parts = url.strip().removesuffix(".git").replace(":", "/").split("/")
+    return f"{parts[-2]}/{parts[-1]}" if len(parts) >= 2 and parts[-1] and parts[-2] else ""

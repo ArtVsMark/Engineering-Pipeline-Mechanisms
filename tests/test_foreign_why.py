@@ -363,3 +363,42 @@ def test_an_empty_tree_is_broken_whatever_the_network(
     assert module.main([]) == module.EXIT_BROKEN
     assert "нет ни одного документа" in capsys.readouterr().err
     assert asked == [], "пустое дерево спросило каталог — исход снова зависит от сети"
+
+
+@pytest.mark.parametrize(
+    ("named", "said"),
+    [("artvsmark/engineering-incidents-playbook", "env"), ("", "origin")],
+    ids=["площадка-в-другом-регистре", "origin-локально"],
+)
+def test_the_catalogue_tree_is_not_applicable(
+    named: str,
+    said: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Дерево и есть каталог — «неприменимо», а не находки по его же разборам (#1624).
+
+    Имя приходит от площадки или из `origin` — оба пути `gitcall.own_repo`.
+    """
+    catalogue(monkeypatch)
+    root = tree(tmp_path, f"Мы считаем так: {CLAIM}.\n")
+    if said == "env":
+        monkeypatch.setenv("GITHUB_REPOSITORY", named)
+    else:
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        url = f"https://github.com/{module.catalogue.REPO}.git"
+        subprocess.run(["git", "remote", "add", "origin", url], cwd=root, check=True)
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    assert "неприменимо: дерево — сам каталог" in capsys.readouterr().out
+
+
+def test_a_tree_of_unknown_name_is_judged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Имени не узнать — гейт судит как обычно: ошибка в сторону громкости (051)."""
+    catalogue(monkeypatch)
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    root = tree(tmp_path, f"Мы считаем так: {CLAIM}.\n")
+    assert module.main(["--root", str(root)]) == module.EXIT_FOUND
+    assert "разбор правила 153 переписан" in capsys.readouterr().err

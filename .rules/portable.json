@@ -592,6 +592,12 @@
         ".rules/bindings.json"
       ]
     },
+    "scripts/shipped_form.py": {
+      "answer": "configured",
+      "where": [
+        "README.md"
+      ]
+    },
     "scripts/text_width.py": {
       "answer": "as-is"
     },
