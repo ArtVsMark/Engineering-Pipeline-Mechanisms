@@ -406,3 +406,19 @@ def test_the_map_reads_its_tables_where_the_base_answer_points(
     shown[".pipeline.yml"] = "paths:\n  rolez: x\n"
     with pytest.raises(module.NotRun, match="такого ключа нет"):
         module.base_path("main", "review-roles")
+
+
+def test_the_fallback_names_the_roles_the_base_moved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Процедура не прочиталась — раздел зовёт профили ролей по адресу таблицы базы (#1630)."""
+    shown = {".pipeline.yml": "paths:\n  roles: handbook/roles.md\n"}
+
+    def from_base(_: str, path: Path) -> str:
+        if str(path) not in shown:
+            raise module.NotRun(f"{path} не прочитан из базы")
+        return shown[str(path)]
+
+    monkeypatch.setattr(module, "shown_from_base", from_base)
+    said = module.roles_section("main", "o/r", 7)
+    assert "`handbook/roles.md`" in said and str(module.paths.ROLES) not in said
+    shown[".pipeline.yml"] = "paths:\n  rolez: x\n"
+    assert f"`{module.paths.ROLES}`" in module.roles_section("main", "o/r", 7)

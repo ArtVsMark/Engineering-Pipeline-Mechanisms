@@ -884,10 +884,14 @@ def roles_section(
         table = table_shape(json.loads(shown_from_base(base, base_path(base, "review-roles"))))
     except (NotRun, json.JSONDecodeError) as exc:
         print(f"процедура взгляда не прочитана: {exc}", file=sys.stderr)
+        try:
+            profiles = base_path(base, "roles")
+        except NotRun:
+            profiles = paths.PROJECT["roles"]
         return (
             "\n## Процедура взгляда и роли этого изменения\n\n"
             f"> Процедура не прочитана с общей ветки ({exc}). Смотри ролями из "
-            f"`{paths.PROJECT['roles']}`, чей вопрос изменение задевает, и назови это "
+            f"`{profiles}`, чей вопрос изменение задевает, и назови это "
             "первой строкой. "
             f"Раздела «{SUBJECT.removeprefix('## ')}» нет: предмет проекта читай по "
             "`AGENTS.md`.\n"
