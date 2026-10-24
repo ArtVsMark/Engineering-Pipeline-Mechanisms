@@ -811,3 +811,22 @@ def test_a_renamed_mechanisms_publisher_still_gives_the_facts_deal(tmp_path: Pat
     links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
     (link,) = [one for one in links if one["what"] == "facts"]
     assert link["state"] == "ok", link
+
+
+def test_the_answer_is_read_where_the_table_puts_it(tmp_path: Path) -> None:
+    """Ответ переназначен таблицей путей — сверяется он, а битая таблица — «unknown» (#1632)."""
+    root = tree(tmp_path)
+    (root / "cfg").mkdir()
+    (root / "cfg" / "answer.json").write_text(
+        json.dumps({"schema": "1.9", "answers_to": "1.7"}), encoding="utf-8"
+    )
+    (root / ".pipeline.yml").write_text("paths:\n  bindings: cfg/answer.json\n", encoding="utf-8")
+    said = summary(publisher(CATALOGUE, bindings="1.9", export="1.7"))
+    links = fc.family_links(root, said, "o/p")
+    assert {one.what: (one.state, one.where) for one in links if one.what != "steps"} == {
+        "bindings": ("ok", "cfg/answer.json"),
+        "export": ("ok", "cfg/answer.json"),
+    }
+    (root / ".pipeline.yml").write_text("paths:\n  bindings: /abs.json\n", encoding="utf-8")
+    [broken] = [one for one in fc.family_links(root, said, "o/p") if one.what == "bindings"]
+    assert (broken.what, broken.state) == ("bindings", "unknown") and "вне дерева" in broken.why

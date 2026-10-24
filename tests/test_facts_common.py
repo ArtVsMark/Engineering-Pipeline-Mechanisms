@@ -461,3 +461,15 @@ def test_every_release_file_is_pinned_by_its_hash() -> None:
     assert fetched, "шаг больше не перечисляет файлы выпуска — сверять нечего"
     assert set(pinned) == set(fetched.group(1).split())
     assert all(re.fullmatch(r"[0-9a-f]{64}", one) for one in pinned.values())
+
+
+def test_the_answer_path_comes_from_the_table(tmp_path: Path) -> None:
+    """Адрес ответа каталогу — по таблице путей дерева; битый раздел — отказ (#1632)."""
+    root = tree(tmp_path)
+    assert module.answer_path(root) == module.paths.BINDINGS
+    (root / ".pipeline.yml").write_text("paths:\n  bindings: cfg/a.json\n", encoding="utf-8")
+    assert module.answer_path(root) == Path("cfg/a.json")
+    (root / ".pipeline.yml").write_text("paths:\n  bindings: ../a.json\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="вне дерева"):
+        module.answer_path(root)
+    assert module.rules_said(root)["read"] is False

@@ -68,6 +68,7 @@ import findings
 import ghrest
 import gitcall
 import paths
+import pipeline_checks as policy
 import report
 
 EXIT_OK: Final = 0
@@ -175,6 +176,14 @@ def uses_lines(root: Path, dep: str) -> int:
     )
 
 
+def at_root(key: str, root: Path) -> Path:
+    """Путь данных проекта по таблице дерева `root` (#1632); битый раздел — `NotRun`."""
+    try:
+        return policy.project_path(key, root)
+    except paths.BadPaths as exc:
+        raise NotRun(str(exc)) from exc
+
+
 def plan(root: Path, dep: str, tag: str, sha: str) -> dict[Path, str]:
     """Подъём действия во всём дереве: файл от корня → новый текст. Дерево не трогается."""
     planned: dict[Path, str] = {}
@@ -183,12 +192,13 @@ def plan(root: Path, dep: str, tag: str, sha: str) -> dict[Path, str]:
         after = bump_text(before, dep, tag, sha)
         if after != before:
             planned[path.relative_to(root)] = after
-    bindings = root / paths.BINDINGS
+    answer = at_root("bindings", root)
+    bindings = root / answer
     if planned and bindings.is_file():
         before = bindings.read_text(encoding="utf-8")
         after = bump_origins(before, dep, tag)
         if after != before:
-            planned[paths.BINDINGS] = after
+            planned[answer] = after
     return planned
 
 
@@ -205,16 +215,17 @@ def watches(root: Path, dep: str) -> list[dict[str, Any]]:
     У потребителя файла нет, и подъём идёт как прежде: слежку объявляет тот,
     у кого есть знание, снятое с кода поставщика.
     """
-    path = root / paths.VENDOR_WATCH
+    watch = at_root("vendor-watch", root)
+    path = root / watch
     if not path.is_file():
         return []
     try:
         said = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise NotRun(f"{paths.VENDOR_WATCH}: не читается — {exc}") from exc
+        raise NotRun(f"{watch}: не читается — {exc}") from exc
     found = said.get("watched") if isinstance(said, dict) else None
     if not isinstance(found, list) or not all(isinstance(one, dict) for one in found):
-        raise NotRun(f"{paths.VENDOR_WATCH}: `watched` — не список записей")
+        raise NotRun(f"{watch}: `watched` — не список записей")
     return [one for one in found if str(one.get("dep") or "").lower() == dep.lower()]
 
 
@@ -271,6 +282,7 @@ def follow(root: Path, dep: str, sha: str, token: str) -> dict[Path, str]:
     нечего». Теперь `compare` спрашивается один раз на `read_at`, а сдвиг идёт,
     только когда не тронут ни один файл.
     """
+    watch = at_root("vendor-watch", root)
     found = watches(root, dep)
     if not found:
         return {}
@@ -278,7 +290,7 @@ def follow(root: Path, dep: str, sha: str, token: str) -> dict[Path, str]:
     for one in found:
         since, path = str(one.get("read_at") or ""), str(one.get("path") or "")
         if not SHA_RE.match(since) or not path:
-            raise NotRun(f"{paths.VENDOR_WATCH}: у слежки {dep} нет `read_at` по sha или `path`")
+            raise NotRun(f"{watch}: у слежки {dep} нет `read_at` по sha или `path`")
         if since == sha:
             continue
         if since not in seen:
@@ -287,16 +299,16 @@ def follow(root: Path, dep: str, sha: str, token: str) -> dict[Path, str]:
             raise Refused(
                 f"{dep}: между {since[:7]} и {sha[:7]} у поставщика тронут {path} — "
                 f"перечитать {one.get('by')} по https://github.com/{dep}/blob/{sha}/{path} "
-                f"и сдвинуть `read_at` в {paths.VENDOR_WATCH}"
+                f"и сдвинуть `read_at` в {watch}"
             )
-    before = (root / paths.VENDOR_WATCH).read_text(encoding="utf-8")
+    before = (root / watch).read_text(encoding="utf-8")
     after = before
     for since in seen:
         old, new = f'"read_at": "{since}"', f'"read_at": "{sha}"'
         if old not in after:
-            raise NotRun(f"{paths.VENDOR_WATCH}: строки {old} нет — сдвигать нечего")
+            raise NotRun(f"{watch}: строки {old} нет — сдвигать нечего")
         after = after.replace(old, new)
-    return {paths.VENDOR_WATCH: after} if after != before else {}
+    return {watch: after} if after != before else {}
 
 
 def resolve(dep: str, new: str, token: str) -> tuple[str, str]:

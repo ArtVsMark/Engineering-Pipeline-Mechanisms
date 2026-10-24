@@ -48,6 +48,7 @@ import argparse
 import re
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
@@ -56,6 +57,7 @@ import finding_kinds
 import gitcall
 import journal
 import paths
+import pipeline_checks as policy
 import trunk_log
 
 EXIT_OK: Final = 0
@@ -74,7 +76,9 @@ class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «ответ есть»."""
 
 
-def added(base: str, head: str = "HEAD", root: Path = Path()) -> list[str]:
+def added(
+    base: str, head: str = "HEAD", root: Path = Path(), table: Mapping[str, Path] = paths.PROJECT
+) -> list[str]:
     """Записи решений, ДОБАВЛЕННЫЕ этим изменением.
 
     Список путей читается по NUL: без него git экранирует имена с не-ASCII, и
@@ -101,7 +105,9 @@ def added(base: str, head: str = "HEAD", root: Path = Path()) -> list[str]:
     return [
         path
         for path in done.stdout.split("\0")
-        if path.startswith(f"{paths.DECISIONS}/") and path.endswith(".md") and "README" not in path
+        if path.startswith(f"{table['decisions'].as_posix()}/")
+        and path.endswith(".md")
+        and "README" not in path
     ]
 
 
@@ -143,13 +149,28 @@ def text_at(ref: str, path: str, root: Path = Path()) -> str | None:
     raise NotRun(f"{path} у {ref} не прочитан: {done.stderr.strip()}")
 
 
-def queued(head: str, root: Path = Path()) -> str:
+def table_at(ref: str, root: Path = Path()) -> dict[str, Path]:
+    """Таблица путей проекта у состояния `ref` (#1632): ответа нет — умолчания, битый — отказ.
+
+    Гейт берёт её у ТОЧКИ ВЕТВЛЕНИЯ, а не у головы: голову пишет тот, кого
+    судят, и путь, переназначенный в ней, увёл бы сверку к пустому каталогу
+    записей (085). Тем же приёмом читает таблицу карта взгляда.
+    """
+    where = paths.PIPELINE.as_posix()
+    text = text_at(ref, where, root)
+    try:
+        return policy.project_paths_of(text or "", f"{ref}:{where}")
+    except paths.BadPaths as exc:
+        raise NotRun(str(exc)) from exc
+
+
+def queued(head: str, root: Path = Path(), table: Mapping[str, Path] = paths.PROJECT) -> str:
     """Очередь предложений у головы изменения; её нет — отказ, как у плана.
 
     Как ищется слаг — у словаря родов (`finding_kinds.queued`): ищется
     вхождением, а очереди нет — отказ, а не пустая очередь.
     """
-    where = paths.PROPOSALS.as_posix()
+    where = table["proposals"].as_posix()
     text = text_at(head, where, root)
     if text is None:
         raise NotRun(f"очередь предложений не прочитана: {where} у {head} нет")
@@ -161,7 +182,13 @@ def queued(head: str, root: Path = Path()) -> str:
 slug_of = finding_kinds.slug_of
 
 
-def missing(paths_: list[str], queue: str, head: str = "HEAD", root: Path = Path()) -> list[str]:
+def missing(
+    paths_: list[str],
+    queue: str,
+    head: str = "HEAD",
+    root: Path = Path(),
+    table: Mapping[str, Path] = paths.PROJECT,
+) -> list[str]:
     """Записи, чей ответ отсутствует или не сходится с очередью; читаются у головы."""
     told: list[str] = []
     for one in paths_:
@@ -192,18 +219,20 @@ def missing(paths_: list[str], queue: str, head: str = "HEAD", root: Path = Path
         elif slug not in queue:
             told.append(
                 f"  {one}: назван слаг «{slug}», а в очереди предложений "
-                f"({paths.PROPOSALS}) его нет — ответ обещает то, чего не отправили"
+                f"({table['proposals']}) его нет — ответ обещает то, чего не отправили"
             )
     return told
 
 
-def kinds_at(ref: str, root: Path = Path()) -> dict[str, Any]:
+def kinds_at(
+    ref: str, root: Path = Path(), table: Mapping[str, Path] = paths.PROJECT
+) -> dict[str, Any]:
     """Роды находок у состояния `ref` — базы или головы; файла нет — родов не было.
 
     Разбор общий со словарём родов (`finding_kinds.kinds_in`): не та форма —
     отказ у любого читателя, а не трасса у одного (`948f893`).
     """
-    where = paths.FINDING_KINDS.as_posix()
+    where = table["finding-kinds"].as_posix()
     text = text_at(ref, where, root)
     # ФАЙЛА НЕТ У СОСТОЯНИЯ — ЭТО «РОДОВ НЕ БЫЛО», А НЕ ОТКАЗ: молча принять
     # пустоту при битом клоне значило бы объявить новыми все роды разом, и
@@ -312,14 +341,16 @@ def thawed(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     return told
 
 
-def known_at(head: str, root: Path = Path()) -> frozenset[str]:
+def known_at(
+    head: str, root: Path = Path(), table: Mapping[str, Path] = paths.PROJECT
+) -> frozenset[str]:
     """Номера правил, на которые дерево отвечает у головы, — чем сверять ответ «есть» (#887).
 
     ВСЕ ОТКАЗЫ НАЧИНАЮТСЯ С `finding_kinds.ANSWERS_UNREAD`, как у `known_rules`
     (взгляды на #893, #899, 210): файла нет, git его не прочёл (`text_at`) и
     файл не разбирается или не той формы (`rule_numbers`).
     """
-    where = str(paths.BINDINGS)
+    where = str(table["bindings"])
     try:
         text = text_at(head, where, root)
     except NotRun as exc:
@@ -362,9 +393,10 @@ def main(argv: list[str] | None = None) -> int:
         # только слиянием базы руками. История слитого ниже по-прежнему от
         # базы: встречи рода считаются по тому, что уже уехало.
         fork = journal.common_ancestor(args.base, args.head, args.root)
-        new = added(fork, args.head, args.root)
-        queue = queued(args.head, args.root)
-        told = missing(new, queue, args.head, args.root)
+        table = table_at(fork, args.root)
+        new = added(fork, args.head, args.root, table)
+        queue = queued(args.head, args.root, table)
+        told = missing(new, queue, args.head, args.root, table)
         # РОДЫ ЧИТАЮТСЯ У ТОГО ЖЕ СОСТОЯНИЯ, ЧТО ЗАПИСИ И ОЧЕРЕДЬ: «до» — у
         # точки ветвления, «после» — у головы, все через git. Прежде «после»
         # читалось с диска корня, а записи — диапазоном коммитов, и
@@ -377,8 +409,8 @@ def main(argv: list[str] | None = None) -> int:
         # только если словарь у ГОЛОВЫ непуст, и ветка, снявшая все роды или сам
         # файл, проходила молча: пустота у головы читалась «родов не ведут»
         # (045). Нашлось при проверке #1494 отката обратной стороны.
-        after = kinds_at(args.head, args.root)
-        base_kinds = kinds_at(fork, args.root)
+        after = kinds_at(args.head, args.root, table)
+        base_kinds = kinds_at(fork, args.root, table)
         frozen = thawed(base_kinds, after) if base_kinds else []
         grown: list[str] = []
         if after:
@@ -396,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
             after, _ = finding_kinds.with_history(after, [*history, *own])
             grown = crossed(before, after)
         told += kinds_missing(
-            grown, after, queue, known_at(args.head, args.root) if grown else None
+            grown, after, queue, known_at(args.head, args.root, table) if grown else None
         )
     except (NotRun, journal.NotRun, finding_kinds.NotRun, trunk_log.NotRun) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)

@@ -421,10 +421,11 @@ def ours(
     потребителя ответа может не быть, а у нас его отсутствие — сломанный вход,
     и общий издатель с его серым «не прочитано» этого бы не сказал (045).
     """
-    rules_facts(root / BINDINGS)
+    answer = root / common.answer_path(root)
+    rules_facts(answer)
     checks = checks_facts(root / policy.DEFAULT_PATH)
     said = manifest_facts(root)
-    seen = family_facts(summary, mine=mine, answers=root / BINDINGS, uptake=uptake)
+    seen = family_facts(summary, mine=mine, answers=answer, uptake=uptake)
     taken = seen["uptake"]
     # НА СВЕЖЕМ ЛИ СЕМЬЯ — вопрос издателя (#1344): пины взявших против
     # нашего выпуска и их диапазоны против отдаваемого `steps`. Выпуск и
