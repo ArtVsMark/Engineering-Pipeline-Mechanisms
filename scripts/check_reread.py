@@ -29,6 +29,7 @@ import sys
 from typing import Any, Final
 
 import gitcall
+import journal
 import paths
 import report
 
@@ -110,9 +111,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         where = str(paths.BINDINGS)
-        was = at(args.base or base_ref(), where)
+        # «ДО» — ТОЧКА ВЕТВЛЕНИЯ, А НЕ ВЕРШИНА БАЗЫ (взгляд на #1499, 195; тот же
+        # приём, что у гейта поверхности, #1494). База, поправившая ответ после
+        # ветвления, делала одиночный подъём номера «с тронутыми ответами».
+        was = at(journal.common_ancestor(args.base or base_ref()), where)
         now = json.loads(paths.BINDINGS.read_text(encoding="utf-8"))
-    except (NotRun, OSError, json.JSONDecodeError) as exc:
+    except (NotRun, journal.NotRun, OSError, json.JSONDecodeError) as exc:
         print(f"гейт не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
 
