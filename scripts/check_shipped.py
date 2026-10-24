@@ -44,16 +44,17 @@ from pathlib import Path
 from typing import Final
 
 import paths
+import pipeline_checks as policy
 import report
+import shipped_form
 import version
 
 EXIT_OK: Final = 0
 EXIT_REJECTED: Final = 1
 EXIT_BROKEN: Final = 2
 
-#: Маркер объявления: им инструмент говорит «меня берут наружу». Прописными —
-#: чтобы не совпасть с прозой о передаче, которой в дереве хватает.
-MARK: Final = "ОТДАЁТСЯ НАРУЖУ"
+#: Маркер нашего объявления — у формы раздела (`shipped_form.MARK`).
+MARK: Final = shipped_form.MARK
 
 #: Маркер ищется в ШАПКЕ файла — в докстроке модуля или в комментарии над
 #: прогоном. Ниже по файлу он был бы словом внутри разбора, а не объявлением.
@@ -105,7 +106,7 @@ def bare(line: str) -> str:
             return said
 
 
-def declares(path: Path) -> bool:
+def declares(path: Path, marker: str = MARK) -> bool:
     """Объявляет ли файл себя отдаваемым наружу.
 
     Судится НАЧАЛО строки в шапке, а не вхождение слов: этот гейт называет
@@ -116,10 +117,10 @@ def declares(path: Path) -> bool:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as exc:
         raise NotRun(f"{path} не читается: {exc}") from exc
-    return any(bare(line).startswith(MARK) for line in lines[:HEAD_LINES])
+    return any(bare(line).startswith(marker) for line in lines[:HEAD_LINES])
 
 
-def shipped(root: Path) -> list[str]:
+def shipped(root: Path, marker: str = MARK) -> list[str]:
     """Пути помеченных инструментов, по одному адресу на инструмент.
 
     Отсутствие ОБОИХ каталогов поиска — третий исход: на обрезанном или чужом
@@ -133,7 +134,7 @@ def shipped(root: Path) -> list[str]:
             continue
         looked += 1
         for path in sorted(folder.glob(LAYOUT.get(where, "*"))):
-            if path.suffix in SUFFIXES and declares(path):
+            if path.suffix in SUFFIXES and declares(path, marker):
                 seen.append(str(path.relative_to(root)))
     if not looked:
         raise NotRun(
@@ -196,39 +197,40 @@ def unreleased(ref: str, root: Path) -> list[str]:
     return [one for one in shipped(root) if one not in carried]
 
 
-def entrance(root: Path) -> str:
+def entrance(root: Path, entry: Path = paths.ENTRANCE) -> str:
     """Текст входа. Без него судить нечего — третий исход."""
-    path = root / paths.ENTRANCE
+    path = root / entry
     if not path.is_file():
-        raise NotRun(f"входа {paths.ENTRANCE} нет: сверять дерево не с чем")
+        raise NotRun(f"входа {entry} нет: сверять дерево не с чем")
     try:
         return path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise NotRun(f"{path} не читается: {exc}") from exc
 
 
-def apart(said: str, tools: list[str]) -> str:
+def apart(said: str, tools: list[str], form: shipped_form.Form = shipped_form.DEFAULT_FORM) -> str:
     """Пусто, если вход сходится с деревом; иначе — чем именно расходится."""
+    entry, mark = form.entry, form.marker
     empty_said = SAYS_EMPTY in said
     if not tools:
         if empty_said:
             return ""
         return (
-            f"наружу не помечено ни одного инструмента, а вход {paths.ENTRANCE} об этом молчит: "
+            f"наружу не помечено ни одного инструмента, а вход {entry} об этом молчит: "
             f"отсутствующий механизм и молчащий снаружи неотличимы (046). Скажите словом — "
             f"строкой «{SAYS_EMPTY}» с причиной и сроком — либо пометьте инструмент "
-            f"маркером «{MARK}»"
+            f"маркером «{mark}»"
         )
     nameless = [at for at in tools if at not in said]
     if empty_said:
         return (
-            f"вход {paths.ENTRANCE} говорит «{SAYS_EMPTY}», а маркером «{MARK}» помечено "
+            f"вход {entry} говорит «{SAYS_EMPTY}», а маркером «{mark}» помечено "
             f"{len(tools)}: {', '.join(tools)}. Либо снимите объявление пустоты, либо "
             f"пометки — вход, отстающий от дерева, читают как дерево (005)"
         )
     if nameless:
         return (
-            f"на входе {paths.ENTRANCE} не названо: {', '.join(nameless)} — "
+            f"на входе {entry} не названо: {', '.join(nameless)} — "
             f"инструмент, отданный наружу, называют на входе, а не в журнале изменений. "
             f"Неназванное берут копированием, потому что другого пути читателю не оставили"
         )
@@ -243,13 +245,14 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.root)
     try:
-        tools = shipped(root)
-        said = entrance(root)
-    except NotRun as exc:
+        form = policy.shipped_form_at(root / paths.PIPELINE)
+        tools = shipped(root, form.marker)
+        said = entrance(root, form.entry)
+    except (NotRun, shipped_form.NotRun) as exc:
         print(f"гейт не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
 
-    apart_said = apart(said, tools)
+    apart_said = apart(said, tools, form)
     if apart_said:
         print(f"отвергнуто: {apart_said}")
         return EXIT_REJECTED
