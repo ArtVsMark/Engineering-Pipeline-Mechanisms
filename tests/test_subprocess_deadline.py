@@ -590,3 +590,29 @@ def test_modules_with_one_name_share_the_taken_names(tmp_path: Path) -> None:
     assert [(name, what) for name, _, what in found] == [
         ("scripts/hook.py", "TimeoutExpired не пойман")
     ]
+
+
+@pytest.mark.parametrize(
+    ("source", "bad"),
+    [
+        ("cache.list(subprocess.run(['x'], timeout=5) for _ in 'a')", True),
+        ("def list(gen):\n    return gen\n", True),
+        ("list = keep\n", True),
+        ("from helpers import keep as list\n", True),
+        ("", False),
+    ],
+    ids=["метод-того-же-имени", "свой-def", "присваивание", "импорт-под-именем", "встроенный"],
+)
+def test_only_the_builtin_consumes_on_the_spot(source: str, bad: bool) -> None:
+    """Встроенный — голым именем, не переопределённым модулем (взгляд на #1628).
+
+    Метод того же имени и своё `list` вправе сохранить генератор и обойти позже.
+    """
+    if source.startswith("cache."):
+        body = f"    {source}\n"
+        prefix = ""
+    else:
+        body = "    list(subprocess.run(['x'], timeout=5) for _ in 'a')\n"
+        prefix = source
+    text = f"import subprocess\n{prefix}try:\n{body}except subprocess.TimeoutExpired:\n    pass\n"
+    assert bool(undeadlined(text)) is bad

@@ -381,7 +381,14 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
         )
     # ДОГОВОР ФАКТОВ — У МЕХАНИЗМОВ (взгляд на #1612, 195): номер у каталога —
     # прежний держатель, и наш 2.1 против его 2.0 читался бы «сводка отстала».
-    epm = (publishers.get(family_uptake.OURS.lower()) or {}).get("gives") or {}
+    # Издатель — по той же роли, что у сверки шагов (`family_publishers`), а не
+    # по имени по умолчанию: переименованный иначе дал бы серые факты молча
+    # (взгляд на #1628).
+    mechanisms = next(
+        (repo for repo, code in family_publishers(summary).items() if code == "EPM"),
+        family_uptake.OURS,
+    )
+    epm = (publishers.get(mechanisms.lower()) or {}).get("gives") or {}
     if isinstance(facts := _json(root / FACTS), dict):
         links.append(compare_facts(facts.get("schema"), epm.get("facts")))
     return links + steps_links(root, summary)

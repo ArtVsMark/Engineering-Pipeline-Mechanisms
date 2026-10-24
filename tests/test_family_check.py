@@ -797,3 +797,17 @@ def test_steps_links_of_an_answer_not_in_utf8_is_grey(tmp_path: Path) -> None:
     (link,) = fc.steps_links(tmp_path, {"projects": []})
     assert link.state == "unknown"
     assert "не прочитан" in link.why
+
+
+def test_a_renamed_mechanisms_publisher_still_gives_the_facts_deal(tmp_path: Path) -> None:
+    """Издатель договора фактов — по роли (`steps`), а не по имени (взгляд на #1628).
+
+    Переименованные механизмы сверка шагов узнаёт по тому, кто отдаёт `steps`;
+    сверка фактов по жёсткому имени молча посерела бы.
+    """
+    root = tree(tmp_path)
+    facts_file(root, {"schema": "2.1"})
+    said = summary(publisher("New/Mechanisms", steps="0.11.0", facts="2.1"))
+    links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
+    (link,) = [one for one in links if one["what"] == "facts"]
+    assert link["state"] == "ok", link

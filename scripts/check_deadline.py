@@ -194,7 +194,36 @@ def is_spawn(call: ast.Call, imported: set[str], modules: frozenset[str] = froze
     return isinstance(func, ast.Name) and func.id in imported
 
 
-def executed(statement: ast.AST) -> list[ast.AST]:
+def rebound(tree: ast.AST) -> frozenset[str]:
+    """Имена из `CONSUMERS`, которые модуль связывает сам: `def`, присваивание, импорт, довод.
+
+    Такое имя — не встроенный (взгляд на #1628): свой `sum` или `list = ...`
+    вправе сохранить генератор и обойти его позже, вне `try`.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            names.add(node.id)
+        elif isinstance(node, ast.alias):
+            names.add(node.asname or node.name.split(".", 1)[0])
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+    return frozenset(names & CONSUMERS)
+
+
+def consumes_here(call: ast.Call, shadowed: frozenset[str]) -> bool:
+    """Встроенный из `CONSUMERS` — голым именем, которое модуль не переопределил.
+
+    Метод с тем же именем (`cache.set(k, gen)`, `obj.list(gen)`) — не встроенный:
+    он вправе сохранить генератор (взгляд на #1628).
+    """
+    func = call.func
+    return isinstance(func, ast.Name) and func.id in CONSUMERS and func.id not in shadowed
+
+
+def executed(statement: ast.AST, shadowed: frozenset[str] = frozenset()) -> list[ast.AST]:
     """Узлы, исполняемые там, где написан `statement`: в тела `def`, `lambda`, `class` не входит."""
     found: list[ast.AST] = []
     todo = [statement]
@@ -203,7 +232,7 @@ def executed(statement: ast.AST) -> list[ast.AST]:
         found.append(node)
         if not isinstance(node, SCOPES):
             todo.extend(ast.iter_child_nodes(node))
-        if isinstance(node, ast.Call) and spawned_name(node.func) in CONSUMERS:
+        if isinstance(node, ast.Call) and consumes_here(node, shadowed):
             # Генератор, который встроенный обходит у места вызова, исполняется
             # здесь же — его тело судится как тело `try` (взгляд на #1603).
             for arg in node.args:
@@ -225,9 +254,12 @@ def caught(block: ast.Try) -> set[str]:
 def guarded(tree: ast.AST) -> set[int]:
     """Узлы в ТЕЛЕ `try` с поимкой истёкшего дедлайна — не в обработчике и не после."""
     inside: set[int] = set()
+    shadowed = rebound(tree)
     for block in ast.walk(tree):
         if isinstance(block, ast.Try) and caught(block) & CATCHES:
-            inside |= {id(node) for statement in block.body for node in executed(statement)}
+            inside |= {
+                id(node) for statement in block.body for node in executed(statement, shadowed)
+            }
     return inside
 
 
