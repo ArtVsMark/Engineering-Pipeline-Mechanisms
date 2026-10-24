@@ -690,3 +690,72 @@ def test_the_records_are_found_where_the_base_table_puts_them(tmp_path: Path) ->
     assert table["decisions"] == Path("handbook/decisions")
     assert module.added("main", "HEAD", root, table) == ["handbook/decisions/002-новое.md"]
     assert module.added("main", "HEAD", root) == [], "по умолчанию запись не видна"
+
+
+def remapped_tree(tmp_path: Path, table: str) -> Path:
+    """Основание, где очередь, роды, ответ и записи лежат по таблице путей `table`."""
+    root = tmp_path / "tree"
+    (root / "cfg" / "decisions").mkdir(parents=True)
+    (root / "cfg" / "queue.json").write_text(
+        json.dumps({"schema": "1.1", "proposals": [{"slug": "a-red-that-survived-the-merge"}]}),
+        encoding="utf-8",
+    )
+    (root / "cfg" / "answer.json").write_text('{"rules": {"206": {}}}', encoding="utf-8")
+    (root / "cfg" / "kinds.json").write_text(
+        json.dumps({"kinds": {"род": kind(2)}}, ensure_ascii=False), encoding="utf-8"
+    )
+    (root / ".pipeline.yml").write_text(table, encoding="utf-8")
+    git(root, "init", "--initial-branch=main")
+    git(root, "config", "user.name", "Artem Markitanov")
+    git(root, "config", "user.email", "a@b.c")
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "основание")
+    git(root, "checkout", "-b", "work")
+    return root
+
+
+REMAPPED: Final = (
+    "paths:\n  decisions: cfg/decisions\n  proposals: cfg/queue.json\n"
+    "  finding-kinds: cfg/kinds.json\n  bindings: cfg/answer.json\n"
+)
+
+
+def test_main_hands_the_base_table_to_every_reader(tmp_path: Path) -> None:
+    """Проводка таблицы в `main`: записи, очередь, роды и ответ — по ней (`6ea3acc`).
+
+    Каждая половина судится всем путём гейта: тест краснеет, если `main`
+    перестанет передавать таблицу хоть одному читателю — `queued`, `missing`,
+    `kinds_at` или `known_at`.
+    """
+    root = remapped_tree(tmp_path, REMAPPED)
+    (root / "cfg" / "decisions" / "002-предложено.md").write_text(
+        f"# 002\n\n{SAID_SENT}\n", encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "запись", "-m", "Разобрано: aaaaaaa\nРод: род")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND  # род без ответа
+    kinds = root / "cfg" / "kinds.json"
+    kinds.write_text(
+        json.dumps({"kinds": {"род": kind(2, "есть — 206")}}, ensure_ascii=False), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "ответ каталогу")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == CLEAN
+    kinds.write_text(
+        json.dumps({"kinds": {"род": kind(2, "есть — 211")}}, ensure_ascii=False), encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-m", "номер не из ответа")
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == FOUND
+
+
+def test_a_broken_base_table_is_the_third_outcome(tmp_path: Path) -> None:
+    """Битая таблица у основания — «не отработал», а не умолчания молча (`6ea3acc`)."""
+    root = remapped_tree(tmp_path, "paths:\n  proposals: /abs/queue.json\n")
+    with pytest.raises(module.NotRun, match="вне дерева"):
+        module.table_at("main", root)
+    with contextlib.chdir(root):
+        assert module.main(["--base", "main", "--root", str(root)]) == BROKEN
