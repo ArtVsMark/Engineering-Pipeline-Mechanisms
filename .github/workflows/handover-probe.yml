@@ -115,7 +115,7 @@ concurrency:
 jobs:
   probe-attribution:
     name: probe-attribution
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.9.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.10.0
     permissions:
       contents: read
       checks: read
@@ -124,7 +124,7 @@ jobs:
 
   probe-contract:
     name: probe-contract
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.9.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-contract.yml@v1.10.0
     with:
       strip-ours: true
     permissions:
@@ -135,7 +135,7 @@ jobs:
 
   probe-debt:
     name: probe-debt
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.9.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-debt.yml@v1.10.0
     with:
       strip-ours: true
     permissions:
@@ -146,7 +146,7 @@ jobs:
 
   probe-lint:
     name: probe-lint
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.9.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-lint.yml@v1.10.0
     permissions:
       contents: read
       checks: read
@@ -155,7 +155,7 @@ jobs:
 
   probe-pipeline:
     name: probe-pipeline
-    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.9.0
+    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-pipeline.yml@v1.10.0
     with:
       strip-ours: true
     permissions:
