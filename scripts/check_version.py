@@ -35,6 +35,7 @@ from typing import Final
 
 import gitcall
 import paths
+import pipeline_checks as policy
 import version as project_version
 
 #: Половины маркера — по частям: целиком строка в этом файле была бы маркером,
@@ -245,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "\nВерсия живёт в CONTRACT_VERSION и больше нигде. Уберите число или\n"
             "оберните его маркером контракта, который переписывает выпуск.\n"
-            f"Формат маркера — {paths.RELEASE_DOC}, раздел «Маркер в прозе».\n\n"
+            f"Формат маркера — {policy.named_path('release-doc')}, раздел «Маркер в прозе».\n\n"
             "Пример маркера здесь не приводится намеренно: гейт ищет маркеры во\n"
             "всём дереве и на собственной подсказке нашёл бы сам себя. Это не\n"
             "придирка — так он и был пойман при первом же прогоне."

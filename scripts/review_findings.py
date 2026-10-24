@@ -1177,12 +1177,6 @@ def resolved_marks(
     return marks, mark
 
 
-#: Файл, правкой которого чинится находка ОБ ОТВЕТЕ. Один и тот же адрес у
-#: механического пола рода и у этой проверки: два понимания «где живёт ответ»
-#: разошлись бы молча (022).
-ANSWER_FILE: Final = findings.ANSWER_FILE
-
-
 def touched(repo: str, token: str, number: int) -> set[str]:
     """Пути, тронутые слитым изменением. Пусто — площадка не ответила.
 
@@ -1219,8 +1213,12 @@ def subject_of(entry: findings.Entry) -> set[str]:
     Исходы правила и его цена — в докстроке `closable`: канон один, чтобы
     соседние тексты не расходились с ним (поздние взгляды на #965–#969).
     """
+    # Файл ответа — тот же адрес, что у механического пола рода
+    # (`findings.answer_file`, по таблице путей): два понимания «где живёт
+    # ответ» разошлись бы молча (022, #1632).
+    answer = findings.answer_file()
     place = findings.place_of(entry.title)
-    return {ANSWER_FILE, place} if place else {ANSWER_FILE}
+    return {answer, place} if place else {answer}
 
 
 def canon_at() -> str:

@@ -31,7 +31,6 @@ import ghrest
 import gitcall
 import items
 import labels
-import paths
 import scope
 import squash_body
 
@@ -253,7 +252,7 @@ def text_problems(
     for heading in dict.fromkeys([title, *([coming.title] if coming else [])]):
         if changerefs.CLOSING_KEYWORD_RE.search(heading):
             problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")
-    if messages and paths.FINDING_KINDS.is_file():
+    if messages and finding_kinds.table_path("finding-kinds").is_file():
         problems += kind_problems(landing, finding_kinds.read())
     said = "\n".join([body, landing, coming.body if coming else ""])
     for line in dict.fromkeys(changerefs.stray_closing_words(said)):
