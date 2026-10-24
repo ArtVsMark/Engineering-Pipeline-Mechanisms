@@ -264,6 +264,11 @@ def table_of(section: object) -> dict[str, Path]:
         if path.is_absolute() or ".." in path.parts:
             problems.append(f"«{key}»: «{value}» вне дерева — путь от корня без `..`")
             continue
+        if not path.parts:
+            # `.` — корень, а не путь данных: `git show base:.` отдал бы список
+            # файлов, и читатель принял бы его за текст (взгляд на #1631).
+            problems.append(f"«{key}»: «{value}» — корень дерева, а не путь данных")
+            continue
         table[key] = path
     if problems:
         raise BadPaths("раздел путей: " + "; ".join(problems))
