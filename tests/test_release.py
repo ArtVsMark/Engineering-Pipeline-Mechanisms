@@ -1318,10 +1318,71 @@ def test_a_tail_without_its_number_or_apply_is_refused(
     assert ("::error::" in run.stdout) is refused, run.stdout
 
 
-def test_the_tail_frees_only_the_labels_of_its_release() -> None:
-    """Метку снимают с границей — временем тега, — а не со всех задач (взгляд на #1488)."""
-    script = str(named("снять метку «ждёт выпуска» с задач плана")["run"])
-    assert "--released --before" in script and "creatordate:iso-strict" in script
+@pytest.mark.parametrize(
+    ("version", "tagged", "said"),
+    [("1.2.3", True, ""), ("", True, "Номер выпуска не назван"), ("1.2.4", True, "Время тега")],
+    ids=["граница-тега", "без-номера", "тега-нет"],
+)
+def test_the_tail_frees_only_the_labels_of_its_release(
+    tmp_path: Path, version: str, tagged: bool, said: str
+) -> None:
+    """Метку снимают с границей — временем тега, — а не со всех задач (взгляд на #1488).
+
+    ЦЕПОЧКА ИСПОЛНЯЕТСЯ, А НЕ ИЩЕТСЯ ПОДСТРОКОЙ (находки `36bb1a5`, `11c68c3`):
+    номер → время тега → `--before`. Пустой или неверный тег поиск подстроки
+    пропустил бы; сборщик плана подменён записью доводов.
+    """
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    git = partial(subprocess.run, cwd=tree, check=True, capture_output=True, timeout=30)
+    git(["git", "init", "-q"])
+    git(
+        [
+            "git",
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "а",
+        ]
+    )
+    if tagged:
+        git(["git", "tag", "v1.2.3"])
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    argv = tmp_path / "argv"
+    (shim / "python").write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{argv}"\n', encoding="utf-8")
+    (shim / "python").chmod(0o755)
+    run = subprocess.run(
+        ["bash", "-c", str(named("снять метку «ждёт выпуска» с задач плана")["run"])],
+        cwd=tree,
+        env={
+            **os.environ,
+            "PATH": f"{shim}{os.pathsep}{os.environ.get('PATH', '')}",
+            "RELEASE_VERSION": version,
+            "GITHUB_REPOSITORY": "o/r",
+            "MECHANISMS": str(ROOT),
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+    if said:
+        assert run.returncode == 1 and said in run.stdout, run.stdout + run.stderr
+        assert not argv.exists(), "сборщик позван без границы"
+        return
+    assert run.returncode == 0, run.stdout + run.stderr
+    stamp = git(
+        ["git", "for-each-ref", "--format=%(creatordate:iso-strict)", "refs/tags/v1.2.3"], text=True
+    ).stdout.strip()
+    called = argv.read_text(encoding="utf-8").splitlines()
+    assert called[called.index("--before") + 1] == stamp and stamp, called
+    assert "--released" in called, called
 
 
 #: Откуда шаги хвоста берут номер выпуска — выход выпуска или выкачки тега.
