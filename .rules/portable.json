@@ -152,60 +152,49 @@
       "why": "@skill-tree"
     },
     ".claude/skills/a-task-before-the-work": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/answer-a-rule": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/audit-the-answers": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/bundle-the-work": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/build-a-gate": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/close-a-finding": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/direction-coverage": {
       "answer": "ours",
       "why": "@skill-tree"
     },
     ".claude/skills/propose-a-rule": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/retell-from-the-source": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/role-profile": {
       "answer": "ours",
       "why": "@skill-tree"
     },
     ".claude/skills/rulebook-keeps-how-to-work": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/rulebook-reread": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".claude/skills/what-the-graph-misses": {
       "answer": "ours",
       "why": "@skill-tree"
     },
     ".claude/skills/work-the-plan": {
-      "answer": "ours",
-      "why": "@skill-tree"
+      "answer": "as-is"
     },
     ".github/workflows/agent-pr.yml": {
       "answer": "configured",
