@@ -55,7 +55,7 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Final
 
@@ -523,7 +523,10 @@ def known_rules(path: Path | None = None) -> frozenset[str]:
 
 
 def answer_problem(
-    body: dict[str, Any], queue: str, known: frozenset[str] | None = None
+    body: dict[str, Any],
+    queue: str,
+    known: frozenset[str] | None = None,
+    table: Mapping[str, Path] = paths.PROJECT,
 ) -> str | None:
     """Чем ответ рода каталогу не годится; ``None`` — годится.
 
@@ -542,7 +545,7 @@ def answer_problem(
     if kind == "предложено":
         slug = slug_of(what)
         if not slug or slug not in queue:
-            return f"назван слаг «{slug}», а в очереди предложений ({paths.PROPOSALS}) его нет"
+            return f"назван слаг «{slug}», а в очереди предложений ({table['proposals']}) его нет"
     if kind != "есть":
         return None
     found = RULE_NUMBER_RE.match(what)
@@ -553,7 +556,7 @@ def answer_problem(
     # (взгляд на #887).
     number = found.group(0)
     if known is not None and number not in known:
-        return f"ответ «есть — {number}», а правила {number} в {paths.BINDINGS} нет"
+        return f"ответ «есть — {number}», а правила {number} в {table['bindings']} нет"
     return None
 
 

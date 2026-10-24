@@ -165,13 +165,16 @@ def test_the_loader_is_laid_by_onboarding() -> None:
 LAUNCHER: Final = ROOT / onboard.DATA_KIT / onboard.paths.LAUNCHER
 
 
-def launch(tree: Path, tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def launch(
+    tree: Path, tmp_path: Path, *args: str, env_over: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Позвать запускатель так, как его зовёт навык окна потребителя (#1552)."""
     env = {
         **os.environ,
         "XDG_CACHE_HOME": str(tmp_path / "cache"),
         "MECHANISMS_ORIGIN": (tmp_path / "origin").as_uri(),
         "PYTHON": sys.executable,
+        **(env_over or {}),
     }
     env.pop("PYTHONPATH", None)
     return subprocess.run(
@@ -274,3 +277,102 @@ def test_a_half_cache_is_replaced_and_no_part_is_left(tmp_path: Path) -> None:
     assert load(tree, tmp_path).returncode == 0
     assert (cache / "scripts" / "preflight.py").is_file()
     assert not list(cache.parent.glob("*.part*")), "своя копия выкачки осталась рядом с кешем"
+
+
+def test_a_cache_won_by_a_neighbour_is_kept(tmp_path: Path) -> None:
+    """Сосед положил кеш, пока шла своя выкачка, — его кеш цел, своя копия брошена.
+
+    Сосед встаёт ровно в окно прежнего дефекта — после выкачки, до переноса:
+    `git` в пути — обёртка, которая после настоящей выкачки кладёт кеш соседа.
+    Прежний код стирал его `rm -rf` перед `mv` (находка на #1626).
+    """
+    origin = supplier(tmp_path)
+    repo = origin / "o" / "m.git"
+    (repo / "scripts" / "work_plan.py").write_text("print('свой')\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "скрипт")
+    git(repo, "tag", "-f", "v1.2.3")
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
+    shims = tmp_path / "shims"
+    shims.mkdir()
+    real = shutil.which("git")
+    assert real, "git не найден"
+    (shims / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        f'"{real}" "$@" || exit $?\n'
+        'if [[ " $* " == *" clone "* ]]; then\n'
+        f'  mkdir -p "{cache}/scripts"\n'
+        f'  echo "print(\'сосед\')" > "{cache}/scripts/work_plan.py"\n'
+        f'  : > "{cache}/scripts/preflight.py"\n'
+        "fi\n",
+        encoding="utf-8",
+    )
+    (shims / "git").chmod(0o755)
+    done = subprocess.run(
+        ["bash", str(LAUNCHER), "work_plan.py"],
+        cwd=tree,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **{k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
+            "PATH": f"{shims}{os.pathsep}{os.environ['PATH']}",
+            "XDG_CACHE_HOME": str(tmp_path / "cache"),
+            "MECHANISMS_ORIGIN": (tmp_path / "origin").as_uri(),
+            "PYTHON": sys.executable,
+        },
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "сосед" in done.stdout, "кеш соседа подменён своей копией"
+    assert not list(cache.parent.glob("*.part.*")), "своя выкачка не убрана"
+
+
+def test_a_neighbour_cache_is_never_carried_away(tmp_path: Path) -> None:
+    """Сосед ставит готовый кеш между признанием остатка и переносом — кеш не исчезает (#1640).
+
+    Прежде остаток признавала оболочка, а уносил отдельный процесс: готовый кеш
+    соседа уходил в сторону и возвращался, и на этот миг его не было. Обёртка
+    `PYTHON` ставит кеш соседа ровно перед первым вызовом с `.stale.` и после
+    вызова отмечает, стоит ли кеш на месте.
+    """
+    supplier(tmp_path)
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    cache = tmp_path / "cache" / "mechanisms" / "o_m@v1.2.3"
+    cache.mkdir(parents=True)
+    (cache / "обрывок").write_text("", encoding="utf-8")
+    log, once = tmp_path / "gap.log", tmp_path / "neighbour.done"
+    shim = tmp_path / "python-shim"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$*" == *".stale."* ]]; then\n'
+        f'  if [ ! -e "{once}" ]; then\n'
+        f'    : > "{once}"; rm -rf "{cache}"; mkdir -p "{cache}/scripts"\n'
+        f'    echo "print(\'сосед\')" > "{cache}/scripts/work_plan.py"\n'
+        f'    : > "{cache}/scripts/preflight.py"\n'
+        "  fi\n"
+        f'  "{sys.executable}" "$@"; rc=$?\n'
+        f'  [ -f "{cache}/scripts/preflight.py" ] || echo gap >> "{log}"\n'
+        "  exit $rc\n"
+        "fi\n"
+        f'exec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    done = launch(tree, tmp_path, "work_plan.py", env_over={"PYTHON": str(shim)})
+    assert done.returncode == 0, done.stderr
+    assert "сосед" in done.stdout, "кеш соседа подменён своей копией"
+    assert not log.exists(), "готовый кеш соседа на миг уносился в сторону"
+    assert not list(cache.parent.glob("*.part.*")), "своя выкачка не убрана"
+    assert not list(cache.parent.glob("*.stale.*")), "унесённый остаток не убран"
+
+
+def test_an_interpreter_that_does_not_run_is_named(tmp_path: Path) -> None:
+    """`PYTHON` не запускается — отказ называет интерпретатор, а не «кеш неполон» (#1640)."""
+    supplier(tmp_path)
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    done = launch(tree, tmp_path, "work_plan.py", env_over={"PYTHON": str(tmp_path / "нет-такого")})
+    assert done.returncode == 2, done.stderr
+    assert "не запускается" in done.stderr, done.stderr
+    assert "неполон" not in done.stderr, done.stderr

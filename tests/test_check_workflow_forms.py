@@ -210,6 +210,8 @@ def test_the_gate_refuses_a_red_tree_with_its_exit(tmp_path: Path) -> None:
         ("actions/checkout@v7", "стороннее действие не на полном sha"),
         ("ArtVsMark/X/.github/workflows/s.yml@v1.10.0", ""),
         ("artvsmark/X@main", "семейное не по тегу выпуска и не по sha"),
+        ("ArtVsMark/X@v1", "семейное не по тегу выпуска и не по sha"),
+        ("ArtVsMark/X@v1.10", "семейное не по тегу выпуска и не по sha"),
     ],
 )
 def test_pin_problem_names_each_kind(uses: str, said: str) -> None:

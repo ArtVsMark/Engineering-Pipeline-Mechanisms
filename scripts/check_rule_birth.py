@@ -366,12 +366,20 @@ def known_at(
 
 
 def kinds_missing(
-    names: list[str], after: dict[str, Any], queue: str, known: frozenset[str] | None = None
+    names: list[str],
+    after: dict[str, Any],
+    queue: str,
+    known: frozenset[str] | None = None,
+    table: Mapping[str, Path] = paths.PROJECT,
 ) -> list[str]:
-    """Роды у порога, чей ответ каталогу отсутствует или не сходится."""
+    """Роды у порога, чей ответ каталогу отсутствует или не сходится.
+
+    Отказ называет адреса по таблице путей, которой судит гейт (`table_at`), а
+    не умолчания: иначе при переназначенной очереди он слал бы к пустому месту.
+    """
     told: list[str] = []
     for name in names:
-        problem = finding_kinds.answer_problem(after[name], queue, known)
+        problem = finding_kinds.answer_problem(after[name], queue, known, table)
         if problem is not None:
             told.append(f"  род «{name}» дошёл до порога: {problem}")
     return told
@@ -428,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
             after, _ = finding_kinds.with_history(after, [*history, *own])
             grown = crossed(before, after)
         told += kinds_missing(
-            grown, after, queue, known_at(args.head, args.root, table) if grown else None
+            grown, after, queue, known_at(args.head, args.root, table) if grown else None, table
         )
     except (NotRun, journal.NotRun, finding_kinds.NotRun, trunk_log.NotRun) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)

@@ -965,3 +965,16 @@ def test_every_mark_of_the_dictionary_names_its_rule() -> None:
         module.since_of(body)
         said = module.fate(body)
         assert (said and said[0] == "есть") or body.get(module.BORN), name
+
+
+def test_an_answer_problem_names_the_table_addresses() -> None:
+    """Отказ называет очередь и ответ по таблице путей, а не умолчания (находка на #1633)."""
+    table = {
+        **module.paths.PROJECT,
+        "proposals": Path("cfg/queue.json"),
+        "bindings": Path("cfg/answer.json"),
+    }
+    said = module.answer_problem({"каталогу": "предложено — other"}, "", None, table)
+    assert "cfg/queue.json" in str(said) and str(module.paths.PROPOSALS) not in str(said)
+    said = module.answer_problem({"каталогу": "есть — 212"}, "", frozenset(), table)
+    assert "cfg/answer.json" in str(said)
