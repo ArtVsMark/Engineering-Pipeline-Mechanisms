@@ -75,7 +75,7 @@
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
           "what": "steps",
-          "mine": ">=0.11,<0.13",
+          "mine": ">=0.12,<0.14",
           "latest": "0.12",
           "where": ".pipeline.yml:contract",
           "state": "ok",
