@@ -2,8 +2,11 @@
 """Гейт: в прогонах и составных действиях нет опасных форм, которые разъехались бы по семье.
 
 Мы поставщик: шаги `step-*.yml` зовёт каждый потребитель, и опасная форма в
-нашем прогоне исполняется у всех. Из таких форм держалась одна — `${{ }}` в
-`run:`, её держит `tests/test_review_safety.py`, и сюда она не дублируется.
+нашем прогоне исполняется у всех. Такие формы держались ПОРОЗНЬ и только для
+нашего дерева: `${{ }}` в `run:`, `pull_request_target` и закрепление по `sha` —
+`tests/test_review_safety.py`, семейная прибивка — `tests/test_family_pinning.py`
+(взгляд на #1634, `6116853`). Гейт сводит пять форм в одну проверку, которую
+шаг `pipeline` гоняет и у потребителя; `${{ }}` в `run:` сюда не дублируется.
 Приём взят у ECC (разбор #1424), код свой.
 
 СПРОСИЛИ СЕМЬЮ (162), 24.10.2026: у каталога есть свой гейт прогонов —
@@ -68,8 +71,19 @@ SHA_RE: Final = re.compile(r"[0-9a-f]{40}")
 #: Тег выпуска — полная версия `vN.N.N`: мажорный алиас `@v1` подвижен, как ветка.
 #: Один признак на гейт и на `tests/test_family_pinning.py` (находка на #1634).
 RELEASE_RE: Final = re.compile(r"v\d+\.\d+\.\d+")
-#: `true` у ключа в любой записи — блочной, в кавычках, в строку `{…: true}`.
-TRUE_RE: Final = re.compile(rf"{PERSIST}[\"']?\s*:\s*[\"']?true\b", re.IGNORECASE)
+#: `true` на СТРОКЕ КЛЮЧА — блочной, в кавычках, в строку `{…: true}` (взгляд на
+#: #1634, `016a18a`): начало строки — ключ, пункт шага или `with: {`, а не
+#: комментарий и не тело `run:`. Судится строка, только если разобранное
+#: значение у выгрузки и правда `true`: строка ищет причину, а не решает, есть
+#: ли запись. ГРАНИЦА НАЗВАНА: такая же строка в теле `run:` файла, где
+#: настоящий `true` тоже есть, причины потребует и от неё.
+TRUE_RE: Final = re.compile(
+    rf"^\s*(?:-\s*)?(?:with\s*:\s*\{{[^}}]*?)?[\"']?{PERSIST}[\"']?\s*:\s*[\"']?true\b",
+    re.IGNORECASE,
+)
+#: Выражение площадки вместо значения: `${{ inputs.x }}` даёт `true`, не неся
+#: причины, и форма 1 по ключу его не видела (взгляд на #1634, `c4b082e`).
+EXPRESSION: Final = "${{"
 #: Причина — комментарий со словами после значения, а не голый `#` (взгляд на #1634).
 REASON_RE: Final = re.compile(r"#\s*\w")
 #: Образ контейнера закреплён по digest: метка подвижна, как тег действия.
@@ -195,6 +209,7 @@ def judge(
     # `action.yml`, и исключение одного разрешило бы форму в каждом (взгляд на #1634).
     name = path.as_posix()
     target_allowed, branch_allowed = exceptions
+    trues = 0
     if "pull_request_target" in events(said) and name not in target_allowed:
         found.append(f"{path}: pull_request_target — исполняет голову изменения с правами базы")
     top = said.get("permissions")
@@ -207,15 +222,22 @@ def judge(
             found.append(f"{where}: permissions: write-all у джоба")
         if "steps" in job and rights is None:
             found.append(f"{where}: прав не объявлено ни у джоба, ни у файла")
-        if writes(rights):
-            for step in job.get("steps") or []:
-                if not isinstance(step, dict) or not str(step.get("uses", "")).startswith(CHECKOUT):
-                    continue
-                given = step.get("with")
-                if not isinstance(given, dict) or PERSIST not in given:
-                    found.append(
-                        f"{where}: {CHECKOUT} в джобе с правом записи без явного {PERSIST}"
-                    )
+        for step in job.get("steps") or []:
+            if not isinstance(step, dict) or not str(step.get("uses", "")).startswith(CHECKOUT):
+                continue
+            given = step.get("with")
+            value = given.get(PERSIST) if isinstance(given, dict) else None
+            if str(value).strip().lower() == "true":
+                trues += 1
+            if not writes(rights):
+                continue
+            if not isinstance(given, dict) or PERSIST not in given:
+                found.append(f"{where}: {CHECKOUT} в джобе с правом записи без явного {PERSIST}")
+            elif EXPRESSION in str(value):
+                found.append(
+                    f"{where}: {PERSIST}: {value} — выражение вместо значения: "
+                    "явное false либо true с причиной комментарием"
+                )
         for uses in uses_of(job):
             problem = pin_problem(uses)
             if not problem:
@@ -224,7 +246,7 @@ def judge(
                 met.add((name, uses))
                 continue
             found.append(f"{where}: {uses} — {problem}")
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(text.splitlines() if trues else [], 1):
         value = TRUE_RE.search(line)
         if value and not REASON_RE.search(line[value.end() :]):
             found.append(f"{path}:{number}: {PERSIST}: true без причины комментарием на строке")

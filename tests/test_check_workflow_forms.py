@@ -241,3 +241,35 @@ def test_writes_and_uses_of_read_the_job() -> None:
     job = {"uses": "o/r/.github/workflows/s.yml@v1", "steps": [{"uses": "a/b@c"}, {"run": "x"}]}
     assert module.uses_of(job) == ["o/r/.github/workflows/s.yml@v1", "a/b@c"]
     assert module.uses_of({"steps": "не список"}) == []
+
+
+def test_an_expression_instead_of_a_value_turns_red(tmp_path: Path) -> None:
+    """`persist-credentials: ${{ inputs.x }}` — выражение без причины, не значение (`c4b082e`)."""
+    text = CLEAN.replace("persist-credentials: false", "persist-credentials: ${{ inputs.keep }}")
+    assert any("выражение вместо значения" in one for one in found(tree(tmp_path, {"a.yml": text})))
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "      # persist-credentials: true здесь нужен бы для толчка\n",
+        "      - run: |\n          echo persist-credentials: true\n",
+    ],
+    ids=["комментарий", "тело-run"],
+)
+def test_true_outside_a_key_is_not_a_form(tmp_path: Path, extra: str) -> None:
+    """Слова `persist-credentials: true` в комментарии или в теле `run:` — не запись (`016a18a`).
+
+    Значение у выгрузки — `false`; прежний разбор по всему тексту краснел и тут.
+    """
+    text = CLEAN + extra
+    assert found(tree(tmp_path, {"a.yml": text})) == []
+
+
+def test_true_among_other_keys_of_a_flow_mapping_is_judged(tmp_path: Path) -> None:
+    """`with: {fetch-depth: 0, persist-credentials: true}` — ключ не первым, судится тоже."""
+    text = CLEAN.replace(
+        "        with:\n          persist-credentials: false\n",
+        "        with: {fetch-depth: 0, persist-credentials: true}\n",
+    )
+    assert any("без причины" in one for one in found(tree(tmp_path, {"a.yml": text})))
