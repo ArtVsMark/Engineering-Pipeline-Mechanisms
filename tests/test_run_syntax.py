@@ -130,7 +130,11 @@ def test_every_bash_script_parses() -> None:
 #: Флаг `-u` в строке `set`: `set -u`, `set -euo pipefail`, `set -uo …`.
 SET_U: Final = re.compile(r"^\s*set\s+-[a-z]*u", re.MULTILINE)
 #: Раскрытие массива без защиты пустого: `"${a[@]}"`, а не `${a[@]+"${a[@]}"}`.
-BARE_ARRAY: Final = re.compile(r'(?<!\+)"\$\{\w+\[@\]\}"')
+#: ВСЕ ФОРМЫ, А НЕ ОДНА (находка `3e109af`, правило 210): в кавычках и без,
+#: `[@]` и `[*]` — под `set -u` на bash ниже 4.4 «unbound variable» дают все
+#: четыре. Защищённая форма не видна: её внешнее раскрытие кончается `+`, а
+#: внутреннее стоит после `+"`. Длина `${#a[@]}` под признак не попадает.
+BARE_ARRAY: Final = re.compile(r'(?<!\+")(?<!\+)\$\{\w+\[[@*]\]\}')
 
 
 def shell_sources() -> list[tuple[str, str]]:
@@ -165,8 +169,21 @@ def test_an_array_under_set_u_survives_old_bash() -> None:
         ('set -euo pipefail\ncmd ${args[@]+"${args[@]}"}\n', 0),
         ('set -e\ncmd "${args[@]}"\n', 0),
         ('  set -uo pipefail\ncmd "${a[@]}" "${b[@]}"\n', 2),
+        ("set -u\ncmd ${args[@]}\n", 1),
+        ('set -u\ncmd "${args[*]}"\n', 1),
+        ('set -u\ncmd ${args[*]+"${args[*]}"}\n', 0),
+        ('set -u\necho "${#args[@]}"\n', 0),
     ],
-    ids=["голый-под-u", "защищённый", "без-u", "два-голых"],
+    ids=[
+        "голый-под-u",
+        "защищённый",
+        "без-u",
+        "два-голых",
+        "без-кавычек",
+        "звёздочка",
+        "звёздочка-защищённая",
+        "длина",
+    ],
 )
 def test_the_bare_array_predicate(text: str, bad: int) -> None:
     """Предикат различает форму и видит `-u` в любой связке флагов."""

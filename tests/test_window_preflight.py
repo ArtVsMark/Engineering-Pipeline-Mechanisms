@@ -1486,9 +1486,23 @@ def code_beside(root: Path) -> None:
 
 
 def test_without_the_base_the_contract_gate_is_the_third_outcome(tmp_path: Path) -> None:
-    """Без `origin/<база>` у окна — названный отказ с кодом 2, а не «зелено» (#1575)."""
+    """Без `origin/<база>` у окна — названный отказ с кодом 2, а не «зелено» (#1575).
+
+    ПРИЧИНА ЗАКРЕПЛЕНА, А НЕ ТОЛЬКО КОД (находки `7bc05e9`, `36e48ef`): тот же
+    код 2 дают отказ `contract.surface` на голом дереве и любой `journal.NotRun`.
+    Дерево несёт прогоны и каталог фрагментов — поверхность читается, и
+    отказать может только пропажа базы.
+    """
     code_beside(tmp_path)
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (tmp_path / "changelog.d").mkdir()
+    (flows / "step-a.yml").write_text(
+        "on:\n  workflow_call:\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: echo\n",
+        encoding="utf-8",
+    )
     git_in(tmp_path, "init", "-q")
+    git_in(tmp_path, "add", "-A")
     git_in(
         tmp_path,
         "-c",
@@ -1505,3 +1519,5 @@ def test_without_the_base_the_contract_gate_is_the_third_outcome(tmp_path: Path)
     code, said = preflight.run(step, tmp_path)
     assert code == 2, said
     assert "не отработал" in said
+    # Своя часть сообщения, а не текст git: его язык зависит от среды прогона.
+    assert "git merge-base origin/main HEAD" in said, said

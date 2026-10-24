@@ -32,7 +32,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Final
 
-from tests.conftest import ROOT, code_files
+from tests.conftest import HOOKS, ROOT, code_files
 
 #: Намеренные копии образца — с причиной у каждой (071). Подпись ставится на
 #: ПАРУ МОДУЛЕЙ, а не на образец целиком: общий образец вроде «числа подряд»
@@ -119,6 +119,16 @@ def signed(said: str, places: list[str]) -> bool:
 def modules() -> list[Path]:
     """Модули рабочего кода и хуки окна: механизмы тоже предмет правил о механизмах (220)."""
     return code_files(with_hooks=True)
+
+
+def test_the_gate_reads_the_window_hooks() -> None:
+    """Хуки окна — в предмете гейта: их потеря в `code_roots` краснеет здесь, а не молчит.
+
+    Прежде то, что гейт видит `.claude/hooks/`, держалось одной фразой «проверено
+    вставкой пробного файла» (находка `77c5a9a`).
+    """
+    hooks = [path for path in modules() if HOOKS in path.relative_to(ROOT).parents]
+    assert any(path.suffix == ".py" for path in hooks), "хуки окна выпали из предмета гейта"
 
 
 def test_the_gate_found_its_subject() -> None:

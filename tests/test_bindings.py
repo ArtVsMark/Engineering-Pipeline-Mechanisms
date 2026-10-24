@@ -414,13 +414,21 @@ def field_problems(item: dict[str, Any], fields: tuple[str, ...]) -> list[str]:
     Форму поля держала только запись данных: у слияния, навыка и правила
     `why`, `claim` или `slug` списком или числом проходили как годные — их
     смотрела лишь проверка на пустоту.
+
+    ПУСТОЙ СПИСОК — НЕ ОТСУТСТВИЕ ПОЛЯ (взгляд на #1476). `rules: []` и
+    `holds: []` отвергаются, как и до общей проверки отвергался пустой `rules`,
+    но называются пустыми: «поля нет» уводило бы искать то, что на месте.
+    Ужесточение у `holds` названо здесь: прежде пустой список навыка
+    принимался, а навык без единого правила каталогу нечего держать.
     """
     slug = item.get("slug", "?")
     found: list[str] = []
     for one in fields:
         value = item.get(one)
         wanted = list if one in LIST_FIELDS else str
-        if not value:
+        if value == [] and wanted is list:
+            found.append(f"{slug}: {one} — пустой список, а нужен хотя бы один номер")
+        elif not value:
             found.append(f"{slug}: поля «{one}» нет")
         elif not isinstance(value, wanted):
             kind = "список" if wanted is list else "строка"
@@ -669,6 +677,14 @@ def test_a_bad_evidence_field_is_named_not_crashed(field: str, value: object, sa
         "measured_at": "2026-10-14",
     }
     assert proposal_problems({**good, field: value}) == [said]
+
+
+@pytest.mark.parametrize("field", sorted(LIST_FIELDS))
+def test_an_empty_list_field_is_named_empty_not_missing(field: str) -> None:
+    """`rules: []` и `holds: []` — «пустой список», а не «поля нет» (взгляд на #1476)."""
+    said = field_problems({"slug": "x", field: []}, (field,))
+    assert said == [f"x: {field} — пустой список, а нужен хотя бы один номер"]
+    assert field_problems({"slug": "x"}, (field,)) == [f"x: поля «{field}» нет"]
 
 
 def test_a_calendar_day_is_a_real_date_in_its_one_form() -> None:
