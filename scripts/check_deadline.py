@@ -195,10 +195,21 @@ def is_spawn(call: ast.Call, imported: set[str], modules: frozenset[str] = froze
 
 
 def rebound(tree: ast.AST) -> frozenset[str]:
-    """Имена из `CONSUMERS`, которые модуль связывает сам: `def`, присваивание, импорт, довод.
+    """Имена из `CONSUMERS`, которые модуль связывает сам — по перечню форм справки языка.
 
     Такое имя — не встроенный (взгляд на #1628): свой `sum` или `list = ...`
     вправе сохранить генератор и обойти его позже, вне `try`.
+
+    ПЕРЕЧЕНЬ, А НЕ ФОРМА ЗА ФОРМОЙ (210: второй круг по месту, #1603 → #1628).
+    Формы связывания — раздел «Naming and binding» справки языка, все восемь:
+    довод; `def` и `class`; присваивание и его цели — `for`, `with … as`,
+    `:=`, `type X =`, включения (всё это `Name` в `Store`); `except … as`
+    (имя строкой у обработчика); захват и `as` в `match` (`MatchAs`,
+    `MatchStar`, остаток `MatchMapping`); импорт; параметры типа
+    (`def f[list]()`). `from m import *` связывает неизвестно что — и потому
+    снимает засчёт со ВСЕХ `CONSUMERS`: строгость, а не угадывание. Граница
+    названа: `builtins.list = …`, `globals()[…]` и `exec` связывают имя мимо
+    синтаксиса, и их разбор не видит.
     """
     names: set[str] = set()
     for node in ast.walk(tree):
@@ -207,9 +218,17 @@ def rebound(tree: ast.AST) -> frozenset[str]:
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             names.add(node.id)
         elif isinstance(node, ast.alias):
+            if node.name == "*":
+                return CONSUMERS
             names.add(node.asname or node.name.split(".", 1)[0])
         elif isinstance(node, ast.arg):
             names.add(node.arg)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+        elif isinstance(node, (ast.TypeVar, ast.ParamSpec, ast.TypeVarTuple)):
+            names.add(node.name)
     return frozenset(names & CONSUMERS)
 
 
