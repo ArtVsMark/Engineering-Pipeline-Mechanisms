@@ -809,8 +809,7 @@
       ]
     },
     "scripts/findings_db.py": {
-      "answer": "ours",
-      "why": "@window-path"
+      "answer": "as-is"
     },
     "scripts/gitcall.py": {
       "answer": "as-is"
@@ -911,8 +910,7 @@
       ]
     },
     "scripts/skill_runs.py": {
-      "answer": "ours",
-      "why": "@window-path"
+      "answer": "as-is"
     },
     "scripts/squash_body.py": {
       "answer": "as-is"
