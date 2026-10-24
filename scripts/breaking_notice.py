@@ -252,7 +252,10 @@ def window_of(one: family_uptake.Took, token: str) -> str | None:
     Не прочитано — `NotRun` с причиной: «окна не видно» не значит «покрывает»,
     и повтор хвоста может его прочитать. Прочитано, но окна нет — `None`: это
     состояние соседа, повтором его не исправить, и сосед оповещается (взгляд
-    на #1591).
+    на #1591). ТОТ ЖЕ КЛАСС — НА УРОВНЕ ФАЙЛА: `.pipeline.yml` нет у соседа
+    (`NotFound`) или он не разбирается (`BadAnswer`) — тоже его состояние, и
+    без оповещения шаг выпуска краснел бы на каждом миноре (взгляд на #1591,
+    195).
     """
     if one.span:
         return one.span
@@ -260,6 +263,8 @@ def window_of(one: family_uptake.Took, token: str) -> str | None:
         raise NotRun("окно не прочитано: обход его не застал, а токена площадки нет")
     try:
         span = consumers.answer_of(one.repo, token).get("contract")
+    except ghrest.NotFound, consumers.BadAnswer:
+        return None
     except (consumers.NotRun, ghrest.TransportError, ValueError) as exc:
         # ValueError — битый base64 или не UTF-8 в чужом файле: тоже «не прочитано» (039).
         raise NotRun(f"окно не прочитано: {exc}") from exc
