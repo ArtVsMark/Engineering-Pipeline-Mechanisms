@@ -707,6 +707,21 @@ def test_an_open_list_empty_on_every_attempt_is_a_refusal(monkeypatch: pytest.Mo
     assert len(calls) == debt.findings.OPEN_TRIES
 
 
+def test_an_empty_open_list_ends_main_with_the_broken_outcome(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пустой на всех попытках список доходит до выхода шага кодом 2 (взгляд на #1581).
+
+    Пункт приёмки обещал «прежний отказ с кодом 2», а соседний тест проверял
+    только исключение `open_listed`: код выхода `main` не видел никто.
+    """
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(debt.ghrest, "paginate", lambda path, token, key=None: iter([]))
+    monkeypatch.setattr(debt.findings.time, "sleep", lambda _: None)
+    assert debt.main(["--repo", "o/r"]) == debt.EXIT_BROKEN
+    assert "пустой список открытых" in capsys.readouterr().err
+
+
 # --- закрытые «входящие» -----------------------------------------------------
 
 

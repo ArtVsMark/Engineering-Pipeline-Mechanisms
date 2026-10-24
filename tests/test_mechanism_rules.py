@@ -15,6 +15,7 @@
 каталога (его `scripts/check_mechanism_scope.py`), взят приёмом, а не копией.
 """
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -35,10 +36,29 @@ UNBUILT: Final = "не построено: "
 #: Замер у «не построено» — число и дата: без них долг неотличим от «не смотрели» (213).
 MEASURED_RE: Final = re.compile(r"замер\s+\d{2}\.\d{2}\.\d{4}.*?\d")
 RULE_RE: Final = re.compile(r"^\d{3}$")
-#: Слово, которым гейт ИСКЛЮЧАЕТ место: признак места его поглощает («hooks»
-#: стоит и в `with_hooks=False`), и гейт, хуки явно исключивший, иначе прошёл
-#: бы проверку «видит место» (взгляд на #1466).
-EXCLUDED_BY: Final = {".claude/hooks": "with_hooks=False"}
+#: Довод обхода, которым гейт ИСКЛЮЧАЕТ место: признак места его поглощает
+#: («hooks» стоит и в `with_hooks=False`), и гейт, хуки явно исключивший, иначе
+#: прошёл бы проверку «видит место» (взгляд на #1466).
+#:
+#: ОТНОШЕНИЕ, А НЕ ПОДСТРОКА (взгляд на #1471, правило 210). Прежде искалась
+#: подстрока «with_hooks=False» во всём файле, и докстрока, называющая это
+#: слово, делала гейт «исключившим» хуки: так у `tests/test_live_references.py`.
+#: Теперь судится вызов: именованный довод `with_hooks` со значением `False`.
+EXCLUDED_BY: Final = {".claude/hooks": "with_hooks"}
+
+
+def excludes(code: str, keyword: str) -> bool:
+    """Зовёт ли код что-либо с доводом `keyword=False` — по разбору, а не по тексту."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    return any(
+        one.arg == keyword and isinstance(one.value, ast.Constant) and one.value.value is False
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for one in node.keywords
+    )
 
 
 def census() -> dict[str, Any]:
@@ -66,8 +86,8 @@ def judged(value: object, place: str, signs: dict[str, str], root: Path = ROOT) 
     code = path.read_text(encoding="utf-8")
     if sign not in code:
         return f"в коде {gate} нет признака места «{sign}»"
-    if (excluding := EXCLUDED_BY.get(place)) and excluding in code:
-        return f"гейт {gate} исключает место словом «{excluding}»"
+    if (excluding := EXCLUDED_BY.get(place)) and excludes(code, excluding):
+        return f"гейт {gate} исключает место доводом «{excluding}=False»"
     return ""
 
 
@@ -158,3 +178,12 @@ def test_a_gate_excluding_the_hooks_does_not_see_them(tmp_path: Path) -> None:
     sign = {".claude/hooks": "hooks"}
     assert judged("seeing.py", ".claude/hooks", sign, tmp_path) == ""
     assert "исключает" in judged("blind.py", ".claude/hooks", sign, tmp_path)
+
+
+def test_a_gate_naming_the_exclusion_in_prose_still_sees_the_hooks(tmp_path: Path) -> None:
+    """Слово `with_hooks=False` в докстроке — не исключение: судится вызов (`874ec3c`)."""
+    (tmp_path / "prose.py").write_text(
+        '"""Исключить хуки — только явным `with_hooks=False`."""\ncode_files()  # hooks\n',
+        encoding="utf-8",
+    )
+    assert judged("prose.py", ".claude/hooks", {".claude/hooks": "hooks"}, tmp_path) == ""

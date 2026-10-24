@@ -56,7 +56,12 @@ MATRIX_FLOW: Final = WORKFLOWS / "ci.yml"
 MATRIX_JOB: Final = "test-matrix"
 MATRIX_AXIS: Final = "python"
 #: Условие шага на ячейку матрицы — снятый обход #1527; вернувшийся шаг ячейки краснеет.
-CELL_IF: Final = re.compile(r"^\s*matrix\.python\s*==\s*'(?P<cell>[^']+)'\s*$")
+#: Обе формы условия, которые принимает площадка: голое выражение и обёрнутое в
+#: `${{ … }}` (взгляд на #1533). Без обёртки во второй форме шаг ячейки падал
+#: бы с ложной причиной «разошёлся с полом», а не назывался шагом ячейки.
+CELL_IF: Final = re.compile(
+    r"^\s*(?:\$\{\{\s*)?matrix\.python\s*==\s*'(?P<cell>[^']+)'\s*(?:\}\}\s*)?$"
+)
 #: Ячейка, которую сверка умеет сравнить с планкой: ровно `X.Y`.
 CELL: Final = re.compile(r"(\d+)\.(\d+)")
 
@@ -145,6 +150,17 @@ def test_the_floor_gap_tells_both_halves(cells: list[str], gap: str) -> None:
     """Обе половины предиката: ячейка ниже планки и планка выше всех ячеек (#1038)."""
     said = floor_gap(cells, (3, 14))
     assert (gap in said) if gap else not said, f"{cells}: «{said}»"
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["matrix.python == '3.15'", "${{ matrix.python == '3.15' }}", "  ${{matrix.python=='3.15'}} "],
+    ids=["голое", "в-обёртке", "в-обёртке-без-пробелов"],
+)
+def test_a_cell_condition_is_read_in_both_forms(said: str) -> None:
+    """Условие на ячейку узнаётся и голым, и в `${{ … }}` (взгляд на #1533)."""
+    found = CELL_IF.match(said)
+    assert found and found["cell"] == "3.15"
 
 
 def test_the_lowest_matrix_cell_is_the_floor() -> None:

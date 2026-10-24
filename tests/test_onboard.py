@@ -422,11 +422,24 @@ def test_the_laid_answer_is_read_by_the_mechanism(tmp_path: Path) -> None:
     assert policy.compatible(policy.span(said), FAKE_VERSION)
 
 
+#: Мажор подделок — от `FAKE_VERSION`: его чуждость живому контракту держит
+#: `tests/test_fixture_version.py`. Двузначный минор строится от него, а не
+#: «далёким» литералом: литерал столкнётся с контрактом, когда тот дорастёт, —
+#: так уже было дважды (#1448 → 0.99, #1514 → 0.42; находки `3e60154`, `c5cc567`).
+FAKE_MAJOR: Final = FAKE_VERSION.split(".", 1)[0]
+
+
 @pytest.mark.parametrize(
     ("contract", "span", "inside", "outside"),
-    # Двузначный минор взят далёким от живого контракта: литерал, совпавший с ним,
-    # гейт версии принимает за вписанный рукой (#1514, выпуск v1.8.0).
-    [("9.9.0", ">=9.9,<9.10", "9.9.4", "9.10.0"), ("0.42.2", ">=0.42,<0.43", "0.42.0", "1.0.0")],
+    [
+        ("9.9.0", ">=9.9,<9.10", "9.9.4", "9.10.0"),
+        (
+            f"{FAKE_MAJOR}.42.2",
+            f">={FAKE_MAJOR}.42,<{FAKE_MAJOR}.43",
+            f"{FAKE_MAJOR}.42.0",
+            f"{FAKE_MAJOR}.43.0",
+        ),
+    ],
     ids=["минор", "двузначный-минор"],
 )
 def test_the_answer_window_is_the_minor_of_the_release(
@@ -2175,7 +2188,14 @@ def test_the_kinds_kit_carries_no_meetings_of_ours() -> None:
     ours = json.loads((ROOT / module.paths.FINDING_KINDS).read_text(encoding="utf-8"))
     assert set(kit["kinds"]) == set(ours["kinds"])
     assert all(body["встречен"] == [] for body in kit["kinds"].values())
-    assert not any({"каталогу", "породил", "правило с"} & set(b) for b in kit["kinds"].values())
+    # РАЗРЕШИТЕЛЬНЫЙ СПИСОК, А НЕ ЗАПРЕТИТЕЛЬНЫЙ (068, находка `91669c7`): новое
+    # поле нашей записи уехало бы к потребителю мимо списка запретов молча.
+    assert all(set(body) <= KIND_KIT_FIELDS for body in kit["kinds"].values())
+
+
+#: Поля рода, которые заготовка несёт потребителю: имя рода — ключ, признак
+#: — смысл, встречи — пустой список, закрытие — заглушка; ведёт их уже потребитель.
+KIND_KIT_FIELDS: Final = frozenset({"признак", "встречен", "закрыт"})
 
 
 # --- хуки окна и настройки (#1554) -------------------------------------------
