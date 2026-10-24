@@ -10,6 +10,7 @@
 """
 
 import ast
+import re
 from itertools import pairwise
 from pathlib import Path
 from typing import Final
@@ -252,6 +253,10 @@ def test_what_only_looks_like_writing_the_version(как: str, tmp_path: Path) -
 LINE_KEYWORDS: Final = {"tree": frozenset({"tag", "version"})}
 #: Вызов, у которого номер линии — первый позиционный довод.
 LINE_FIRST_ARG: Final = frozenset({"refusals"})
+#: Номер линии ПО ВЕЛИЧИНЕ: строка вида `v1.2.3` или `1.2.3-rc1` (взгляд на #1482).
+RELEASE_NUMBER_RE: Final = re.compile(r"v?\d+\.\d+\.\d+(?:-[\w.]+)?")
+#: Начало списка доводов, который ставит тег выпуска: `["git", "tag", …]`.
+TAG_CALL: Final = ("git", "tag")
 
 
 def callee(node: ast.Call) -> str:
@@ -273,6 +278,12 @@ def release_line_sites(source: str) -> tuple[int, list[tuple[int, str]]]:
     позиционным доводом не судится — у одноимённых помощников других модулей
     второй довод значит другое; замер 17.10.2026: позиционной версии у `tree`
     в наборе ноль.
+
+    СПИСОК ДОВОДОВ `git tag` — ВХОД ПО ВЕЛИЧИНЕ, А НЕ ПО ФОРМЕ ВЫЗОВА (взгляд на
+    #1482, правило 210). Вторая находка по этому предикату сказала остановить
+    дописывание вызовов поштучно. В списке, начатом `"git", "tag"`, судится
+    всякая строка вида номера выпуска (`RELEASE_NUMBER_RE`), в какой бы позиции
+    она ни стояла: `-a`, `-m` и сообщение тега формы не меняют.
     """
     sites = 0
     found: list[tuple[int, str]] = []
@@ -288,6 +299,16 @@ def release_line_sites(source: str) -> tuple[int, list[tuple[int, str]]]:
                     found.append((one.lineno, one.value))
         runs = node.args if isinstance(node, ast.Call) else []
         runs = node.elts if isinstance(node, ast.List | ast.Tuple) else runs
+        head = tuple(one.value for one in runs[: len(TAG_CALL)] if isinstance(one, ast.Constant))
+        if head == TAG_CALL:
+            sites += 1
+            found += [
+                (one.lineno, one.value)
+                for one in runs[len(TAG_CALL) :]
+                if isinstance(one, ast.Constant)
+                and isinstance(one.value, str)
+                and RELEASE_NUMBER_RE.fullmatch(one.value)
+            ]
         for flag, given in pairwise(runs):
             if isinstance(flag, ast.Constant) and flag.value == "--version":
                 sites += 1
@@ -305,6 +326,28 @@ def release_line_sites(source: str) -> tuple[int, list[tuple[int, str]]]:
             if isinstance(body, ast.Constant) and isinstance(body.value, str):
                 found.append((body.lineno, body.value))
     return sites, found
+
+
+#: Нижняя граница входов линии в наборе — от замера, а не «больше одного» (взгляд
+#: на #1482, правило 075 по смыслу). Замер 24.10.2026: входов 64. Предикат,
+#: переставший видеть большую часть, краснеет раньше, чем ослепнет до нуля.
+LINE_SITES_AT_LEAST: Final = 50
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '["git", "tag", "-a", "v0.5.0", "-m", "v0.5.0"]',
+        '("git", "tag", "v0.5.0")',
+        'run(["git", "tag", "v0.5.0-rc1"])',
+    ],
+    ids=["список-с-ключами", "кортеж", "в-вызове"],
+)
+def test_a_git_tag_literal_is_a_release_line_site(source: str) -> None:
+    """Номер в доводах `git tag` — вход линии выпусков по величине (`23c7cf5`, `5ceb313`)."""
+    sites, found = release_line_sites(source)
+    assert sites == 1
+    assert [said for _, said in found] and all(s.startswith("v0.5.0") for _, s in found)
 
 
 def test_a_release_line_in_the_suite_does_not_share_the_real_major() -> None:
@@ -327,7 +370,10 @@ def test_a_release_line_in_the_suite_does_not_share_the_real_major() -> None:
             for line, said in found
             if said.removeprefix("v").split(".")[0] == real
         ]
-    assert seen >= 2, f"входов линии выпусков в наборе {seen} — предикат смотрит не туда (075)"
+    assert seen >= LINE_SITES_AT_LEAST, (
+        f"входов линии выпусков в наборе {seen}, а замер {LINE_SITES_AT_LEAST} — "
+        "предикат перестал видеть входы (075)"
+    )
     assert not shared, (
         f"номер линии с мажором живого контракта {real}: {shared}. "
         "Берите FAKE_VERSION или считайте от next_after"
