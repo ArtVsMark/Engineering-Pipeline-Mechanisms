@@ -2,8 +2,8 @@
   "schema": "2.1",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Pipeline-Mechanisms — export/facts/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-24T06:22:46+00:00",
-  "commit": "6d8f241b19868c9b04a4a2f7919610a1e3f73d69",
+  "generated_at": "2026-10-24T06:36:04+00:00",
+  "commit": "f27f0051caae43d2bf06346999876aace40a8c6e",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,7 +19,7 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.10.0",
+  "version": "1.10.1",
   "release": "1.10",
   "coverage_percent": 94.3,
   "tests": {
@@ -511,9 +511,9 @@
                 "step-window-lifetime"
               ],
               "refs": [
-                "v1.9.0"
+                "v1.10.0"
               ],
-              "contract": ">=0.11,<0.12"
+              "contract": ">=0.12,<0.13"
             }
           ],
           "fresh": {
@@ -521,13 +521,12 @@
             "release": "v1.10.0",
             "steps": "0.12",
             "of": 2,
-            "fresh": 0,
+            "fresh": 1,
             "in_range": 0,
             "in_range_repos": [],
             "branch_repos": [],
             "behind_repos": [
-              "ArtVsMark/ArtVsMark",
-              "ArtVsMark/Engineering-Incidents-Playbook"
+              "ArtVsMark/ArtVsMark"
             ],
             "ahead_repos": [],
             "undeclared_repos": []
