@@ -1491,7 +1491,7 @@ def release_behind_tree(root: Path | None = None) -> list[Drift]:
         Drift(
             "release-behind",
             f"выпуск {pin} не несёт помеченного наружу: {len(missing)} из "
-            f"{len(check_shipped.shipped(where))} — {', '.join(missing)}",
+            f"{len(check_shipped.shipped_here(where))} — {', '.join(missing)}",
             f"нарезать выпуск с этими файлами: до него `scripts/onboard.py` "
             f"отказывает, а вызов по {pin} отказал бы у потребителя (158)",
         )

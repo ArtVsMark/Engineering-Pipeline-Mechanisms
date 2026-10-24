@@ -59,6 +59,7 @@ import gitcall
 import journal
 import paths
 import scope_areas
+import shipped_form
 import yaml
 
 DEFAULT_PATH: Final = paths.PIPELINE
@@ -583,6 +584,11 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
         scope_areas.areas_of(raw.get(scope_areas.SECTION))
     except scope_areas.BadAreas as exc:
         problems.append(str(exc))
+    # Вход и маркер отданного (#1625) — тем же приёмом, что форма фрагмента.
+    try:
+        shipped_form.form_of(raw.get(shipped_form.SECTION))
+    except shipped_form.NotRun as exc:
+        problems.append(str(exc))
     # Раздел путей — тем же приёмом (#1630): битый ключ отвергается сверкой
     # ответа, раньше, чем на нём споткнётся первый читатель таблицы.
     try:
@@ -610,6 +616,21 @@ def fragment_form(path: Path = DEFAULT_PATH) -> journal.FragmentForm:
     except (BadPolicy, yaml.YAMLError) as exc:
         raise journal.NotRun(f"{path} не прочитан: {exc}") from exc
     return journal.form_of(raw.get(journal.SECTION) if isinstance(raw, dict) else None)
+
+
+def shipped_form_at(path: Path = DEFAULT_PATH) -> shipped_form.Form:
+    """Вход и маркер отданного из ответа проекта; файла или раздела нет — наши (#1625).
+
+    Тем же приёмом, что `fragment_form`: отказ чтения и битый раздел —
+    `shipped_form.NotRun` с причиной.
+    """
+    if not path.is_file():
+        return shipped_form.DEFAULT_FORM
+    try:
+        raw = yaml.safe_load(file_text(path, "ответ проекта"))
+    except (BadPolicy, yaml.YAMLError) as exc:
+        raise shipped_form.NotRun(f"{path} не прочитан: {exc}") from exc
+    return shipped_form.form_of(raw.get(shipped_form.SECTION) if isinstance(raw, dict) else None)
 
 
 def project_paths(path: Path = DEFAULT_PATH) -> dict[str, Path]:

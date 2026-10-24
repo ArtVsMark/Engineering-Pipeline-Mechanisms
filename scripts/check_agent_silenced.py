@@ -38,7 +38,6 @@ repository's default branch». Шаг при этом объявлен `continue
 """
 
 import argparse
-import os
 import re
 import subprocess
 import sys
@@ -169,21 +168,8 @@ def callers(root: Path, base: str, found: set[str]) -> set[str]:
     return {caller for caller, _, _ in _calls(root, base, found)}
 
 
-def own_repo(root: Path) -> str:
-    """Своё имя `владелец/репозиторий`: площадка в прогоне, `origin` локально; пусто — неизвестно.
-
-    Неизвестное имя не исключает НИЧЕГО (`from_trunk`): предупреждение
-    скажет лишнее, но не промолчит о носителе — ошибка в сторону громкости (051).
-    """
-    said = os.environ.get("GITHUB_REPOSITORY", "").strip()
-    if said:
-        return said
-    try:
-        url = _git(root, "remote", "get-url", "origin").strip().removesuffix(".git")
-    except NotRun:
-        return ""
-    parts = url.replace(":", "/").split("/")
-    return f"{parts[-2]}/{parts[-1]}" if len(parts) >= 2 else ""
+#: Своё имя — общий ответ гейтов (`gitcall.own_repo`, #1624).
+own_repo = gitcall.own_repo
 
 
 def from_trunk(root: Path, base: str, found: set[str]) -> set[str]:

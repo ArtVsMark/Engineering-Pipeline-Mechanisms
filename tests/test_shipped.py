@@ -268,3 +268,91 @@ def test_unreleased_is_empty_when_the_pin_carries_everything(tmp_path: Path) -> 
     обходить (051).
     """
     assert module.unreleased("v1.0.0", history(tmp_path, tag_first=False)) == []
+
+
+shipped_form = load_script("shipped_form.py")
+pipeline_checks = load_script("pipeline_checks.py")
+
+
+def test_the_consumer_names_its_own_entrance_and_mark(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Вход и маркер из раздела `shipped:` — гейт судит их, а не наши (#1625).
+
+    Так устроен каталог: вход `CONNECT.md`, маркер «ОТДАЁТСЯ ПОТРЕБИТЕЛЮ».
+    Наш вход тот же дерево не несёт вовсе — пустота нашего входа не судится.
+    """
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "sync.py").write_text(
+        '"""ОТДАЁТСЯ ПОТРЕБИТЕЛЮ: зовите из своего прогона."""\n', encoding="utf-8"
+    )
+    (tmp_path / "CONNECT.md").write_text("Берите `scripts/sync.py`.\n", encoding="utf-8")
+    (tmp_path / ".pipeline.yml").write_text(
+        "shipped:\n  entry: CONNECT.md\n  marker: ОТДАЁТСЯ ПОТРЕБИТЕЛЮ\n", encoding="utf-8"
+    )
+    assert pipeline_checks.shipped_form_at(tmp_path / ".pipeline.yml") == shipped_form.Form(
+        Path("CONNECT.md"), "ОТДАЁТСЯ ПОТРЕБИТЕЛЮ"
+    )
+    assert module.main(["--root", str(tmp_path)]) == module.EXIT_OK
+    assert "scripts/sync.py" in capsys.readouterr().out
+    (tmp_path / "CONNECT.md").write_text("Берите что хотите.\n", encoding="utf-8")
+    assert module.main(["--root", str(tmp_path)]) == module.EXIT_REJECTED
+    said = capsys.readouterr().out
+    assert "на входе CONNECT.md не названо: scripts/sync.py" in said, said
+
+
+def test_without_the_section_our_entrance_and_mark_stay(tmp_path: Path) -> None:
+    """Раздела нет — наша форма: `README.md` и «ОТДАЁТСЯ НАРУЖУ»."""
+    root = tree(tmp_path, says=f"Отдаётся: {module.SAYS_EMPTY}.\n")
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    assert pipeline_checks.shipped_form_at(root / ".pipeline.yml") == shipped_form.DEFAULT_FORM
+
+
+@pytest.mark.parametrize(
+    ("section", "why"),
+    [
+        ("shipped: [CONNECT.md]\n", "ожидалось отображение"),
+        ("shipped:\n  entrance: CONNECT.md\n", "незнакомые ключи entrance"),
+        ("shipped:\n  entry: /CONNECT.md\n", "вне дерева"),
+        ("shipped:\n  entry: ../CONNECT.md\n", "вне дерева"),
+        ("shipped:\n  marker: ''\n", "marker — непустая строка"),
+        ("shipped:\n  entry: 7\n", "entry — непустой путь строкой"),
+    ],
+    ids=["не-отображение", "чужой-ключ", "абсолютный", "вверх", "пустой-маркер", "не-строка"],
+)
+def test_a_broken_section_is_named_by_the_gate_and_the_answer_check(
+    section: str, why: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Битый раздел — третий исход гейта с причиной и отказ сверки ответа, а не умолчание."""
+    root = tree(tmp_path, says=f"Отдаётся: {module.SAYS_EMPTY}.\n")
+    (root / ".pipeline.yml").write_text(section, encoding="utf-8")
+    assert module.main(["--root", str(root)]) == module.EXIT_BROKEN
+    assert why in capsys.readouterr().err
+    with pytest.raises(shipped_form.NotRun, match=why):
+        shipped_form.form_of(pipeline_checks.yaml.safe_load(section)["shipped"])
+
+
+def test_the_release_check_reads_the_trees_own_mark(tmp_path: Path) -> None:
+    """Сверка выпуска судит маркером из ответа дерева, а не нашим (взгляд на #1646).
+
+    Прежде `unreleased` звала `shipped(root)` с «ОТДАЁТСЯ НАРУЖУ», и у проекта
+    со своим маркером помеченного было ноль — выпуск «нёс всё».
+    """
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path)]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / "CONNECT.md").write_text("пусто\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "первый"], check=True)
+    subprocess.run([*git, "tag", "v1"], check=True)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "sync.py").write_text(
+        '"""ОТДАЁТСЯ ПОТРЕБИТЕЛЮ: зовите из своего прогона."""\n', encoding="utf-8"
+    )
+    (tmp_path / ".pipeline.yml").write_text(
+        "shipped:\n  entry: CONNECT.md\n  marker: ОТДАЁТСЯ ПОТРЕБИТЕЛЮ\n", encoding="utf-8"
+    )
+    assert module.shipped_here(tmp_path) == ["scripts/sync.py"]
+    assert module.unreleased("v1", tmp_path) == ["scripts/sync.py"]
+    (tmp_path / ".pipeline.yml").write_text("shipped: [CONNECT.md]\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="раздел shipped не разобран"):
+        module.shipped_here(tmp_path)
