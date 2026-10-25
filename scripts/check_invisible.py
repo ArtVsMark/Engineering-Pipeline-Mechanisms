@@ -73,7 +73,8 @@ U+FE0E и U+FE0F законны у него после любого знака `
   #1510). Селектор после чужой основы или два подряд — канал для скрытых
   данных, и он краснеет;
 * символы-теги внутри флага-эмодзи из перечня RGI — Англии, Шотландии и
-  Уэльса (`RGI_TAG_FLAGS`). Иная строка тегами — скрытая, даже внутри флага.
+  Уэльса (`RGI_Emoji_Tag_Sequence`, `tag-sequences.txt`). Иная строка тегами —
+  скрытая, даже внутри флага.
 
 ГРАНИЦЫ, И ОНИ НАЗВАНЫ.
 
@@ -125,6 +126,12 @@ UNICODE_SOURCE: Final = (
     "https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/ucd/"
     + UNICODE_VERSION
 )
+#: Данные эмодзи, которых в базе нет, — последовательности UTS #51: их консорциум
+#: кладёт в соседний каталог по версии эмодзи (16.0 для Unicode 16.0.0).
+EMOJI_SOURCE: Final = (
+    "https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/emoji/"
+    + UNICODE_VERSION.rsplit(".", 1)[0]
+)
 #: Дословные копии файлов стандарта — адрес и хеш. Выдержки называют источник
 #: своей шапкой, а копия шапки не имеет; совпадение хеша держит тест, и файл
 #: рукой не правится.
@@ -163,25 +170,24 @@ CR: Final = "\r"
 #: Флаг-эмодзи с тегами (UTS #51): основа, теги спецификации и завершающий тег.
 FLAG: Final = "\U0001f3f4"
 CANCEL_TAG: Final = "\U000e007f"
-#: ЗАКОННЫ ТОЛЬКО ФЛАГИ ИЗ ПЕРЕЧНЯ RGI (emoji-test.txt, Unicode 16.0), а не
-#: любая цепочка тегов: тегами пишется любой ASCII-текст, и «флаг» с
-#: произвольной строкой внутри был бы той же скрытой строкой (взгляд на #1444).
-RGI_TAG_FLAGS: Final = frozenset({"gbeng", "gbsct", "gbwls"})
-#: Селекторы вариантов по родам — свойство `Variation_Selector` (PropList.txt).
-#: Род решает, после какой основы селектор законен (взгляд на #1444): свободные
-#: монгольские — после монгольской буквы, идеографические — после иероглифа,
-#: стандартные — только в паре из данных Unicode. Монгольский род — диапазон
-#: U+180B–U+180F, но U+180E внутри него — разделитель гласных `Cf`: селектором
-#: его не считает `SELECTORS`, и судится он как формат.
+#: ЗАКОННЫ ТОЛЬКО ФЛАГИ ИЗ ПЕРЕЧНЯ RGI, а не любая цепочка тегов: тегами
+#: пишется любой ASCII-текст, и «флаг» с произвольной строкой внутри был бы той
+#: же скрытой строкой (взгляд на #1444). Перечень — `RGI_Emoji_Tag_Sequence` из
+#: данных (`tag-sequences.txt`), а не три имени рукой (#1469).
+#:
+#: Селекторы — свойство `Variation_Selector` из данных. Их РОД решает, после
+#: какой основы селектор законен (взгляд на #1444): свободные монгольские —
+#: после монгольской буквы, идеографические — после иероглифа, стандартные —
+#: только в паре из данных Unicode. Роды — диапазоны блоков, то есть устройство
+#: правила, а не перечень знаков; что каждый селектор данных лежит ровно в
+#: одном роде, держит тест. Монгольский род — U+180B–U+180F, но U+180E внутри
+#: него — разделитель гласных `Cf`: в `Variation_Selector` его нет, и судится
+#: он как формат.
 MONGOLIAN_SELECTORS: Final = (0x180B, 0x180F)
 IDEOGRAPHIC_SELECTORS: Final = (0xE0100, 0xE01EF)
 STANDARD_SELECTORS: Final = (0xFE00, 0xFE0F)
-SELECTORS: Final[tuple[tuple[int, int], ...]] = (
-    STANDARD_SELECTORS,
-    IDEOGRAPHIC_SELECTORS,
-    (0x180B, 0x180D),
-    (0x180F, 0x180F),
-)
+#: Роды селекторов — в порядке, в каком их сверяет `fits`.
+SELECTOR_KINDS: Final = (MONGOLIAN_SELECTORS, IDEOGRAPHIC_SELECTORS, STANDARD_SELECTORS)
 
 
 class NotRun(RuntimeError):
@@ -204,6 +210,10 @@ class Tables:
     ideographs: frozenset[int]
     #: Письмо `Mongolian` — из него основы монгольского селектора.
     mongolian: frozenset[int]
+    #: `Variation_Selector` — селекторы всех родов.
+    selectors: frozenset[int]
+    #: Флаги-эмодзи с тегами из перечня RGI — последовательностями целиком.
+    tag_flags: frozenset[str]
 
 
 def codes(field: str) -> range:
@@ -241,6 +251,18 @@ def sequence_pairs(name: str) -> frozenset[tuple[int, int]]:
         raise NotRun(f"данные Unicode {name} не разобраны: {exc}") from exc
 
 
+def sequences(name: str, wanted: str) -> frozenset[str]:
+    """Последовательности свойства `wanted`: точки первого поля через пробел — строкой."""
+    try:
+        return frozenset(
+            "".join(chr(int(one, 16)) for one in row[0].split())
+            for row in data_lines(name)
+            if row[1] == wanted
+        )
+    except ValueError as exc:
+        raise NotRun(f"данные Unicode {name} не разобраны: {exc}") from exc
+
+
 @cache
 def tables() -> Tables:
     """Свойства Unicode из `UNICODE`, прочитанные один раз за прогон."""
@@ -252,6 +274,8 @@ def tables() -> Tables:
         | sequence_pairs("emoji-variation-sequences.txt"),
         ideographs=property_codes("selector-bases.txt", "Unified_Ideograph"),
         mongolian=property_codes("selector-bases.txt", "Mongolian"),
+        selectors=property_codes("selector-bases.txt", "Variation_Selector"),
+        tag_flags=sequences("tag-sequences.txt", "RGI_Emoji_Tag_Sequence"),
     )
 
 
@@ -262,7 +286,7 @@ def within(code: int, span: tuple[int, int]) -> bool:
 
 def selector(char: str) -> bool:
     """Селектор варианта — из какого бы блока он ни был."""
-    return any(within(ord(char), span) for span in SELECTORS)
+    return ord(char) in tables().selectors
 
 
 def emoji(char: str) -> bool:
@@ -321,13 +345,12 @@ def always(char: str) -> str:
 def flag_tags(text: str) -> set[int]:
     """Места тегов, законных внутри флага-эмодзи: основа, теги, завершающий тег.
 
-    Законна только последовательность флага из `RGI_TAG_FLAGS`. Оборванная
+    Законна только последовательность флага из перечня RGI. Оборванная
     цепочка, теги без основы и флаг с иной строкой законными не считаются:
     это та же скрытая строка.
     """
     legal: set[int] = set()
-    for name in RGI_TAG_FLAGS:
-        sequence = FLAG + "".join(chr(0xE0000 + ord(one)) for one in name) + CANCEL_TAG
+    for sequence in tables().tag_flags:
         at = text.find(sequence)
         while at != -1:
             legal.update(range(at + 1, at + len(sequence)))
