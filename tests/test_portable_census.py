@@ -125,3 +125,20 @@ def test_main_prints_the_section_and_names_a_refusal(
     subprocess.run(["git", "-C", str(root), "commit", "-qam", "битая"], check=True)
     assert census.main(["--root", str(root)]) == census.EXIT_BROKEN
     assert "перепись отдачи не собрана" in capsys.readouterr().err
+
+
+def test_a_broken_census_on_the_previous_tag_is_a_refusal(tmp_path: Path) -> None:
+    """Перепись прошлого тега не разобрана — отказ с её местом, а не раздел без сравнения (045)."""
+    root = repo(tmp_path, [])
+    run = ["git", "-C", str(root)]
+    (root / ".rules").mkdir()
+    (root / ".rules" / "portable.json").write_text("{", encoding="utf-8")
+    subprocess.run([*run, "add", "-A"], check=True)
+    subprocess.run([*run, "commit", "--quiet", "-m", "битая"], check=True)
+    subprocess.run([*run, "tag", "v1.0.0"], check=True)
+    repo_tail = json.dumps(answers(a="as-is"))
+    (root / ".rules" / "portable.json").write_text(repo_tail, encoding="utf-8")
+    subprocess.run([*run, "commit", "--quiet", "-am", "целая"], check=True)
+    subprocess.run([*run, "tag", "v1.1.0"], check=True)
+    with pytest.raises(census.NotRun, match=r"v1\.0\.0:"):
+        census.for_release("v1.1.0", root)
