@@ -319,3 +319,101 @@ def test_a_shallow_branch_without_a_visible_trailer_is_refused(repo: Path, tmp_p
     shallow = shallow_clone_of(repo, tmp_path / "shallow")
     with pytest.raises(module.NotRun, match="свои коммиты ветки"):
         module.session_of(shallow)
+
+
+def fix_commit(repo: Path, line: str) -> None:
+    """Коммит окна с объявлением починки раздела 0 в теле."""
+    git(
+        repo,
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "починка",
+        "-m",
+        f"{line}\n\nClaude-Session: {MINE}",
+    )
+
+
+@pytest.mark.parametrize(("live", "code"), [(True, 0), (False, 1)], ids=["красно", "не-красно"])
+def test_a_fix_of_a_neighbours_red_passes_only_while_it_is_red(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, live: bool, code: int
+) -> None:
+    """«Чинит красное: #N» проходит предел, пока #N открыто и красно (#1659, взгляд на #1661)."""
+    platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
+    monkeypatch.setattr(module, "live_red", lambda *_: live)
+    fix_commit(repo, f"{module.changerefs.FIXES_RED_KEY} #12")
+    said_code, said = module.look(repo, "agent/новая")
+    assert said_code == code, said
+    assert ("раздел 0" in said) is live and ("красного открытого" in said) is not live
+
+
+@pytest.mark.parametrize(("red", "code"), [(True, 0), (False, 1)], ids=["красен", "зелёный"])
+def test_a_fix_of_main_passes_only_while_the_step_is_red(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, red: bool, code: int
+) -> None:
+    """«Чинит main: шаг» проходит предел, пока шаг красен; при зелёном — отказ с причиной."""
+    platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", lambda *_: red)
+    fix_commit(repo, f"{module.changerefs.FIXES_MAIN_KEY} tests")
+    said_code, said = module.look(repo, "agent/новая")
+    assert said_code == code, said
+    assert ("раздел 0" in said) is red and ("не красен" in said) is not red
+
+
+@pytest.mark.parametrize(("live", "count"), [(True, 2), (False, 3)], ids=["живая", "отжившая"])
+def test_an_open_fix_spends_the_limit_only_when_its_subject_is_gone(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, live: bool, count: int
+) -> None:
+    """Живая починка в счёт трёх не входит; позеленевший предмет — обычное изменение (#1661)."""
+    platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
+    fixes = {13: f"{module.changerefs.FIXES_RED_KEY} #5"}
+    opened = [{"number": one, "body": fixes.get(one, "")} for one in (11, 12, 13)]
+    monkeypatch.setattr(module, "own_open", lambda *_: opened)
+    monkeypatch.setattr(module, "live_red", lambda *_: live)
+    code, said = module.look(repo, "agent/новая")
+    assert code == (module.EXIT_OK if live else module.EXIT_OVER), said
+    assert f"открыто {count} изменений" in said
+    assert module.is_fix("o/r", "t", opened[2]) is live and not module.is_fix("o/r", "t", opened[0])
+    assert module.fix_declared(repo) == (None, [])
+    assert module.zero_pass("o/r", "t", None, []) is None, "не починка — общий предел"
+
+
+def test_live_red_asks_the_platform_about_the_neighbour(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Открыто и красно — да; закрыто или зелено — нет: вопрос площадке, а не объявлению."""
+    heads = {5: ("open", "aaa"), 6: ("closed", "bbb"), 7: ("open", "ccc")}
+    runs = {
+        "aaa": [{"name": "tests", "conclusion": "failure"}],
+        "ccc": [{"name": "tests", "conclusion": "success"}],
+    }
+
+    def request(_method: str, path: str, _token: str) -> Any:
+        state, sha = heads[int(path.rsplit("/", 1)[1])]
+        return {"state": state, "head": {"sha": sha}}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(
+        module.ghrest, "paginate", lambda path, *_, **__: iter(runs[path.split("/")[-2]])
+    )
+    assert [module.live_red("o/r", "t", one) for one in (5, 6, 7)] == [True, False, False]
+
+
+def test_main_red_asks_the_trunk_and_names_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красноту шага спрашивает тот же вопрос, что метка `fix-main`; отказ — третий исход."""
+    asked: list[tuple[str, ...]] = []
+
+    def red_on_trunk(repo: str, token: str, step: str, trunk: str) -> bool:
+        asked.append((repo, step, trunk))
+        return step == "tests"
+
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", red_on_trunk)
+    assert module.main_red("o/r", "t", "tests") is True
+    assert module.main_red("o/r", "t", "lint") is False
+    assert asked[0] == ("o/r", "tests", module.paths.TRUNK)
+
+    def refuse(*_: object) -> bool:
+        raise module.agent_pr.NotRun("площадка не ответила")
+
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", refuse)
+    with pytest.raises(module.NotRun, match="не ответила"):
+        module.main_red("o/r", "t", "tests")
