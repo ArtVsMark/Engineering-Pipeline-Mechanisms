@@ -82,9 +82,13 @@ def test_a_number_apart_from_the_prose_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`--contract` отвергает прозу на прежнем номере, а не только пропускает верную."""
-    prose = cf.CONTRACT_PATH.read_text(encoding="utf-8").replace(
-        "FACTS_CONTRACT: facts-v2.1.0", "FACTS_CONTRACT: facts-v1.6.0"
-    )
+    # Номер — из `facts.version`, а не строкой: вписанный рукой, он молча
+    # перестал бы совпадать с прозой при первом же подъёме договора, и подмена
+    # ничего не подменила бы (#1675).
+    number = (cf.CONTRACT_PATH.parent / "facts.version").read_text(encoding="utf-8").strip()
+    said = cf.CONTRACT_PATH.read_text(encoding="utf-8")
+    assert f"FACTS_CONTRACT: facts-v{number}" in said, "шаг для CI не назван номером договора"
+    prose = said.replace(f"FACTS_CONTRACT: facts-v{number}", "FACTS_CONTRACT: facts-v1.6.0")
     stale = tmp_path / "facts-contract.md"
     stale.write_text(prose, encoding="utf-8")
     monkeypatch.setattr(cf, "CONTRACT_PATH", stale)

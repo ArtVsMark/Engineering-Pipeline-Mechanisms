@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/export/facts/facts.schema.json",
-  "title": "facts.json — факты проекта семьи, договор фактов 2.1",
-  "$comment": "Один файл, единые требования: всё, что показывается о проекте, лежит здесь. Решение владельца 1 октября 2026; с 2.0 договор держал каталог (ArtVsMark/Engineering-Incidents-Playbook#843), с 2.1 — механизмы конвейера (ArtVsMark/Engineering-Pipeline-Mechanisms#1563). Проза к схеме — export/facts/facts-contract.md; проверка — scripts/check_facts.py. Схема — единственное место, где требования записаны: проза её объясняет, проверка её читает. Долей механизмов правил здесь нет намеренно: их считает каталог по ответу каждого проекта и публикует одной сводкой на всех — второй источник того же числа разошёлся бы с первым (правило 090). Номер договора — в export/facts/facts.version и только там: заголовок схемы и прозы сверяет с ним scripts/check_facts.py --contract. Выпуск договора — тег facts-vX.Y.Z механизмов, к странице прикреплены схема, проза, проверка и образец.",
+  "$id": "https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/blob/main/export/facts/facts.schema.json",
+  "title": "facts.json — факты проекта семьи, договор фактов 2.2",
+  "$comment": "Один файл, единые требования: всё, что показывается о проекте, лежит здесь. Решение владельца 1 октября 2026; с 2.0 договор держал каталог (ArtVsMark/Engineering-Incidents-Playbook#843), с 2.1 — механизмы конвейера (ArtVsMark/Engineering-Pipeline-Mechanisms#1563), с 2.2 и адрес схемы ($id) — у механизмов (ArtVsMark/Engineering-Pipeline-Mechanisms#1675). Проза к схеме — export/facts/facts-contract.md; проверка — scripts/check_facts.py. Схема — единственное место, где требования записаны: проза её объясняет, проверка её читает. Долей механизмов правил здесь нет намеренно: их считает каталог по ответу каждого проекта и публикует одной сводкой на всех — второй источник того же числа разошёлся бы с первым (правило 090). Номер договора — в export/facts/facts.version и только там: заголовок схемы и прозы сверяет с ним scripts/check_facts.py --contract. Выпуск договора — тег facts-vX.Y.Z механизмов, к странице прикреплены схема, проза, проверка и образец.",
   "type": "object",
   "required": [
     "schema",

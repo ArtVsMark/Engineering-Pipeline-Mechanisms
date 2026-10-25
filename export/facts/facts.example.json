@@ -1,6 +1,6 @@
 {
   "_": "Образец facts.json по договору фактов семьи: всё, что показывается о проекте, — значение или причина в none; своё сверх договора — в exchange по темам. Проверка — check_facts.py из того же выпуска.",
-  "schema": "2.1",
+  "schema": "2.2",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Incidents-Playbook — export/facts/facts-contract.md",
   "repo": "Owner/Project",
   "generated_at": "2026-10-09T09:00:00+00:00",
