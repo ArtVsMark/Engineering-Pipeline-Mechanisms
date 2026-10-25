@@ -1,0 +1,16 @@
+# emoji-sequences.txt
+# Date: 2024-05-01, 21:25:24 GMT
+# © 2024 Unicode®, Inc.
+# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
+# For terms of use and license, see https://www.unicode.org/terms_of_use.html
+#
+# Выдержка для scripts/check_invisible.py: флаги-эмодзи с тегами из перечня RGI —
+# строки RGI_Emoji_Tag_Sequence, дословно до знака «#» (хвост-комментарий снят:
+# в нём сами знаки, а гейт их судит).
+# Источник — https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/emoji/16.0/emoji-sequences.txt
+# (sha256 3fe3c77e72e8f26df302dc7d99b106c5d08fd808ef7246fb5d4502d659fe659c),
+# получено 25.10.2026 (#1469) командой:
+#   grep -E '; RGI_Emoji_Tag_Sequence *;' emoji-sequences.txt | cut -d'#' -f1 | sed 's/ *$//'
+1F3F4 E0067 E0062 E0065 E006E E0067 E007F; RGI_Emoji_Tag_Sequence; flag: England
+1F3F4 E0067 E0062 E0073 E0063 E0074 E007F; RGI_Emoji_Tag_Sequence; flag: Scotland
+1F3F4 E0067 E0062 E0077 E006C E0073 E007F; RGI_Emoji_Tag_Sequence; flag: Wales
