@@ -283,6 +283,7 @@ python3 scripts/preflight.py
 |---|---|
 | ссылка на правило ведёт в существующий файл | `scripts/check_rule_links.py` — имена берутся у каталога |
 | ссылка между своими документами разрешается | `tests/test_doc_links.py` |
+| путь в обратных кавычках в документе ведёт к живому файлу | `tests/test_doc_paths.py` |
 | трейлеры авторства в хвостовом блоке, автор — человек | джоб `attribution` в `ci.yml` |
 | счёт «правил на документах» в прозе не устарел | `tests/test_counted_numbers.py` |
 | ответ каталогу называет адреса, которые есть | `tests/test_bindings_addresses.py`, `tests/test_answers_are_checkable.py` |
