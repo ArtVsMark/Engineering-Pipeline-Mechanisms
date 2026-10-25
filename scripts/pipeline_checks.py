@@ -55,6 +55,7 @@ from functools import cache
 from pathlib import Path
 from typing import Any, Final
 
+import contract_form
 import gitcall
 import journal
 import paths
@@ -593,6 +594,23 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
     try:
         shipped_form.form_of(raw.get(shipped_form.SECTION))
     except shipped_form.NotRun as exc:
+        problems.append(str(exc))
+    # Объявленная поверхность контракта (#1664) — тем же приёмом, и пути её
+    # сверяются с деревом: поверхность из несуществующего — молчание (045).
+    try:
+        surface = contract_form.form_of(raw.get(contract_form.SECTION))
+        gone = contract_form.missing(surface, path.parent)
+        if gone:
+            problems.append(
+                f"раздел {contract_form.SECTION}: путей поверхности нет в дереве — "
+                + ", ".join(gone)
+            )
+        if linked := contract_form.linked(surface, path.parent):
+            problems.append(
+                f"раздел {contract_form.SECTION}: путь поверхности — символическая ссылка, "
+                "а по ссылкам обход не идёт — " + ", ".join(linked)
+            )
+    except contract_form.NotRun as exc:
         problems.append(str(exc))
     # Раздел путей — тем же приёмом (#1630): битый ключ отвергается сверкой
     # ответа, раньше, чем на нём споткнётся первый читатель таблицы.
@@ -1176,3 +1194,33 @@ def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, J
             "это ошибка входа, а не «проверять нечего» (075)"
         )
     return jobs
+
+
+def contract_form_at(path: Path = DEFAULT_PATH) -> contract_form.Form:
+    """Поверхность контракта и род её фрагмента из ответа проекта; нет — наши (#1664).
+
+    Тем же приёмом, что `shipped_form_at`: отказ чтения и битый раздел —
+    `contract_form.NotRun` с причиной.
+
+    ПУТИ СВЕРЯЮТСЯ С ДЕРЕВОМ ЗДЕСЬ, А НЕ ТОЛЬКО В СВЕРКЕ ОТВЕТА (взгляд на
+    #1672). Гейт `check_contract` берёт форму отсюда и в другом шаге: без этой
+    сверки путь без файла или путь-ссылка давали ему пустую поверхность и
+    зелёное без единого слова.
+    """
+    if not path.is_file():
+        return contract_form.DEFAULT_FORM
+    try:
+        raw = yaml.safe_load(file_text(path, "ответ проекта"))
+    except (BadPolicy, yaml.YAMLError) as exc:
+        raise contract_form.NotRun(f"{path} не прочитан: {exc}") from exc
+    form = contract_form.form_of(raw.get(contract_form.SECTION) if isinstance(raw, dict) else None)
+    if gone := contract_form.missing(form, path.parent):
+        raise contract_form.NotRun(
+            f"раздел {contract_form.SECTION}: путей поверхности нет в дереве — " + ", ".join(gone)
+        )
+    if linked := contract_form.linked(form, path.parent):
+        raise contract_form.NotRun(
+            f"раздел {contract_form.SECTION}: путь поверхности — символическая ссылка, "
+            "а по ссылкам обход не идёт — " + ", ".join(linked)
+        )
+    return form

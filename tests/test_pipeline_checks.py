@@ -1455,3 +1455,17 @@ def test_the_answer_check_refuses_a_bad_paths_section_early(tmp_path: Path) -> N
     )
     with pytest.raises(policy.BadPolicy, match="такого ключа нет"):
         policy.load(answer, supplier=None)
+
+
+def test_a_declared_contract_surface_must_exist_in_the_tree(tmp_path: Path) -> None:
+    """Раздел `contract-surface:` сверяется с деревом: пути без файла — отказ (#1664)."""
+    path = answered(tmp_path / "дерево")
+    supplier = supplier_at(tmp_path / "поставщик", "0.1.7")
+    path.write_text(
+        path.read_text(encoding="utf-8") + "contract-surface:\n  surface: [export]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(policy.BadPolicy, match="путей поверхности нет в дереве — export"):
+        policy.load(path, supplier=supplier)
+    (path.parent / "export").mkdir()
+    assert "lint" in policy.load(path, supplier=supplier)
