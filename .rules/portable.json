@@ -876,6 +876,12 @@
         ".pipeline.yml"
       ]
     },
+    "scripts/portable_census.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/portable.json"
+      ]
+    },
     "scripts/preflight.py": {
       "answer": "as-is"
     },
