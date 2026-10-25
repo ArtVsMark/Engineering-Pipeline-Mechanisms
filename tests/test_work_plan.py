@@ -1572,3 +1572,20 @@ def test_laid_out_writes_born_and_queued_rows_into_the_section_of_their_label(
     assert "#11" in four and module.BORN_TAIL in four
     assert "*Ожидаем действия соседей*\n- **#12**" in six
     assert "*Ждёт своей очереди*\n- **#20**" in six and "- **#13** — Вне плана" in six
+
+
+def test_a_row_moved_between_sections_is_not_counted_as_done(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Перенос строки меткой между 4 и 6 — не «снято сделанных» (взгляд на #1657)."""
+    quiet_platform(monkeypatch)
+    said: list[str] = []
+    for labels in ([], [{"name": module.WAITS_OWNER}]):
+        listed = [{"number": 642, "labels": labels}]
+        monkeypatch.setattr(module.debt, "open_listed", lambda *_, listed=listed: listed)
+        assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+        said.append(capsys.readouterr().out)
+    # Без метки снимается одна строка — находка, чьего отпечатка нет в реестре;
+    # перенос #642 в раздел 4 счёт не меняет.
+    assert "снято сделанных строк: 1" in said[0]
+    assert said[1] == said[0]

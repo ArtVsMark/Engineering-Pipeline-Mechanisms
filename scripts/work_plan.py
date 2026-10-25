@@ -1279,11 +1279,15 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
 
     said = without_refusal(said)
+    # СНЯТА — ЗНАЧИТ НЕТ НИ В ОДНОМ РУЧНОМ РАЗДЕЛЕ (взгляд на #1657): строку,
+    # которую метка перенесла между 4 и 6 (`routed`), счёт по своему разделу
+    # называл снятой сделанной при открытой задаче.
+    standing = {line for one in HELD for line in held[one]}
     gone = sum(
         1
         for one in HELD
         for line in section_rows(body, one)
-        if line.startswith("- ") and line not in held[one]
+        if line.startswith("- ") and line not in standing
     )
     written = [line for one in HELD for line in held[one] if line not in body]
     born = [line for line in written if BORN_TAIL in line]
