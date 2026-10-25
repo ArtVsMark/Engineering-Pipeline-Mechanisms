@@ -198,6 +198,16 @@ Refs #25
 что сделано — видно по закрытым задачам и журналу изменений, а не по разделу
 «история» в своде.
 
+## 📮 Недоработка механизма — задачей поставщику
+
+Механизмы конвейера общие у семьи, и чинятся они у поставщика, а не правкой
+своей копии: правленая копия отказывает обновлению `--update` целиком. Нашли
+недоработку — задача поставщику по шаблону, по роду случая:
+
+- [затор](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/new?template=consumer-jam.yml) — конвейер встал, слить нельзя;
+- [пробел](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/new?template=consumer-gap.yml) — случился инцидент, которого конвейер не ловит;
+- [расхождение](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/issues/new?template=consumer-mismatch.yml) — механизм есть, но у вас не подходит.
+
 ## 📓 Новое правило — в общий каталог
 
 Правило, выстраданное здесь, записывается в
