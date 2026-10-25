@@ -14,8 +14,12 @@
 читает и не исполняет; карта называет, а не решает: брать ли кандидата —
 слово владельца.
 
-КЛЕТКА — ОДИН ИЗ ШЕСТИ ИСХОДОВ (`HELD`): наш шаг вызовом; наш механизм,
-переписанный к себе; свой механизм проекта; прозой; никак; неприменимо.
+КЛЕТКА — ОДИН ИЗ СЕМИ ИСХОДОВ (`HELD`): наш механизм без переделки (вызов
+или копия — `family.TAKEN_KINDS`); наш механизм, переписанный к себе
+(`family.ADAPTED_KIND`); наш, но вид взятия не объявлен; свой механизм
+проекта; прозой; никак; неприменимо. Происхождение читается ТОЛЬКО у машинного
+ответа (`family.KINDS`), как у `family.origins`: документ с нашим `origin`
+механизмом не держится (взгляд на #1346, на #1668).
 
 ОЧЕРЕДИ (`QUEUES`):
 
@@ -45,15 +49,17 @@ EXIT_BROKEN: Final = 2
 #: Версия формы файла карты.
 SCHEMA: Final = "1.0"
 #: Исходы клетки — в порядке силы держания для печати.
-CALLED: Final = "наш шаг вызовом"
+TAKEN: Final = "наш механизм без переделки"
 REWRITTEN: Final = "наш механизм, переписан к себе"
+#: Вид взятия не назван: «не объявлено», а не «взято» и не «переписано» (045).
+UNDECLARED: Final = "наш механизм, вид взятия не объявлен"
 OWN: Final = "свой механизм"
 PROSE: Final = "прозой"
 NOTHING: Final = "никак"
 INAPPLICABLE: Final = "неприменимо"
-HELD: Final = (CALLED, REWRITTEN, OWN, PROSE, NOTHING, INAPPLICABLE)
+HELD: Final = (TAKEN, REWRITTEN, UNDECLARED, OWN, PROSE, NOTHING, INAPPLICABLE)
 #: Исходы, при которых правило держит машина.
-BY_MACHINE: Final = frozenset({CALLED, REWRITTEN, OWN})
+BY_MACHINE: Final = frozenset({TAKEN, REWRITTEN, UNDECLARED, OWN})
 #: Виды, которые держат правило прозой: документ и навык — их исполняет чтение.
 PROSE_KINDS: Final = frozenset({kinds.DOCUMENT, kinds.SKILL})
 #: Очереди кандидатов: ключ файла → что с ней делать.
@@ -65,15 +71,18 @@ QUEUES: Final = {
 
 
 def held(answer: dict[str, Any], status: str) -> str:
-    """Исход клетки по ответу проекта: происхождение сильнее вида механизма."""
+    """Исход клетки по ответу проекта: у машинного ответа происхождение сильнее вида."""
     if status == "not-applicable":
         return INAPPLICABLE
-    origin = str(answer.get("origin") or "")
-    if origin.casefold().startswith(family.OURS_ORIGIN.casefold()):
-        return CALLED if answer.get("origin_kind") == "called" else REWRITTEN
     mechanism = str(answer.get("mechanism") or "")
-    if mechanism in kinds.MACHINE:
-        return OWN
+    if mechanism in family.KINDS:
+        origin = str(answer.get("origin") or "")
+        if not origin.casefold().startswith(family.OURS_ORIGIN.casefold()):
+            return OWN
+        how = answer.get("origin_kind")
+        if how == family.ADAPTED_KIND:
+            return REWRITTEN
+        return TAKEN if how in family.TAKEN_KINDS else UNDECLARED
     if mechanism in PROSE_KINDS:
         return PROSE
     return NOTHING
@@ -128,7 +137,14 @@ def queues(found: dict[str, dict[str, dict[str, str]]], mine: str) -> dict[str, 
 
 
 def document(summary: dict[str, Any], mine: str) -> dict[str, Any]:
-    """Файл карты: форма, источник, счёт исходов, карта и очереди."""
+    """Файл карты: форма, источник, счёт исходов, карта и очереди.
+
+    НАС В СВОДКЕ НЕТ — ОТКАЗ, А НЕ ОЧЕРЕДЬ (взгляд на #1668): без своей строки
+    каждый свой гейт соседа ушёл бы в «раздать» правдоподобным списком (039).
+    """
+    repos = {str(one.get("repo") or "").casefold() for one in summary.get("consumers") or []}
+    if mine.casefold() not in repos:
+        raise family.NotRun(f"«{mine}» в сводке семьи нет — очереди не из чего сравнить")
     found = cells(summary)
     counted = {name: 0 for name in HELD}
     for row in found.values():

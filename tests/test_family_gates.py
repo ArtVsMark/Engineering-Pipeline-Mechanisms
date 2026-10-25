@@ -57,7 +57,18 @@ def summary() -> dict[str, Any]:
         (
             {"origin": f"{OURS}:x@v1", "origin_kind": "called", "mechanism": "pipeline"},
             "active",
-            "CALLED",
+            "TAKEN",
+        ),
+        (
+            {"origin": f"{OURS}:x@v1", "origin_kind": "copied", "mechanism": "gate"},
+            "active",
+            "TAKEN",
+        ),
+        ({"origin": f"{OURS}:x@v1", "mechanism": "gate"}, "active", "UNDECLARED"),
+        (
+            {"origin": f"{OURS}:x@v1", "origin_kind": "adapted", "mechanism": "document"},
+            "active",
+            "PROSE",
         ),
         (
             {"origin": f"{OURS}:x@v1", "origin_kind": "adapted", "mechanism": "gate"},
@@ -69,10 +80,20 @@ def summary() -> dict[str, Any]:
         ({"mechanism": "none"}, "active", "NOTHING"),
         ({"mechanism": "gate"}, "not-applicable", "INAPPLICABLE"),
     ],
-    ids=["вызов", "переписан", "свой", "навык-проза", "никак", "неприменимо"],
+    ids=[
+        "вызов",
+        "копия",
+        "вид-не-объявлен",
+        "документ-с-нашим-origin",
+        "переписан",
+        "свой",
+        "навык-проза",
+        "никак",
+        "неприменимо",
+    ],
 )
 def test_held_names_each_outcome(answer: dict[str, Any], status: str, said: str) -> None:
-    """Каждый исход клетки различим; происхождение сильнее вида механизма."""
+    """Каждый исход клетки различим; происхождение решает только у машинного ответа."""
     assert module.held(answer, status) == getattr(module, said)
 
 
@@ -105,3 +126,23 @@ def test_the_map_file_counts_and_names_its_source(tmp_path: Path) -> None:
     assert set(said["queues"]) == set(module.QUEUES) and "001" in said["rules"]
     assert module.document(summary(), OURS)["queues"] == said["queues"]
     assert module.main(["--summary", str(tmp_path / "нет.json"), "--out", str(out)]) == 2
+
+
+def test_a_copy_is_not_rework_and_a_prose_origin_is_not_a_machine() -> None:
+    """Копия — не в «доработать»; документ с нашим origin не снимает правило с «предложить»."""
+    data = summary()
+    neighbour = data["consumers"][1]["holds"]
+    neighbour["001"]["origin_kind"] = "copied"
+    neighbour["003"] = {"mechanism": "document", "origin": f"{OURS}:AGENTS.md", "where": ""}
+    said = module.queues(module.cells(data), OURS)
+    assert said["rework"] == [] and said["propose"] == ["003"]
+
+
+def test_a_repo_missing_from_the_summary_is_a_refusal(tmp_path: Path) -> None:
+    """Нас в сводке нет — код 2, а не правдоподобная очередь «раздать»."""
+    with pytest.raises(module.family.NotRun, match="в сводке семьи нет"):
+        module.document(summary(), "o/чужой")
+    where = tmp_path / "where.json"
+    where.write_text(json.dumps(summary()), encoding="utf-8")
+    out = tmp_path / "family-gates.json"
+    assert module.main(["--summary", str(where), "--out", str(out), "--repo", "o/чужой"]) == 2
