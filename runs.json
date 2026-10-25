@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-24T08:46:26+00:00",
+  "updated": "2026-10-25T09:01:52+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -7731,176 +7731,407 @@
     "2026-10-24": {
       "runs": {
         "verify-queue": {
-          "runs": 79,
+          "runs": 58,
           "red": 0,
-          "cancelled": 3,
-          "seconds": 1704,
-          "timed": 79,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "automerge": {
-          "runs": 171,
-          "red": 0,
-          "cancelled": 96,
-          "seconds": 4514,
-          "timed": 171,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "schedules-seen": {
-          "runs": 85,
-          "red": 0,
-          "cancelled": 3,
-          "seconds": 243,
-          "timed": 85,
+          "cancelled": 4,
+          "seconds": 1042,
+          "timed": 58,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "main-red": {
-          "runs": 98,
+          "runs": 79,
           "red": 0,
-          "cancelled": 6,
-          "seconds": 1165,
-          "timed": 98,
+          "cancelled": 7,
+          "seconds": 1488,
+          "timed": 79,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "ci-complete-wake": {
-          "runs": 85,
+        "schedules-seen": {
+          "runs": 57,
           "red": 0,
-          "cancelled": 3,
-          "seconds": 559,
-          "timed": 85,
+          "cancelled": 0,
+          "seconds": 178,
+          "timed": 57,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "stuck": {
-          "runs": 85,
+          "runs": 58,
           "red": 0,
-          "cancelled": 21,
-          "seconds": 2114,
-          "timed": 85,
+          "cancelled": 14,
+          "seconds": 1230,
+          "timed": 58,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 57,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 346,
+          "timed": 57,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "hail": {
-          "runs": 85,
+          "runs": 59,
           "red": 0,
-          "cancelled": 21,
-          "seconds": 1832,
-          "timed": 85,
+          "cancelled": 14,
+          "seconds": 1131,
+          "timed": 59,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 115,
+          "red": 0,
+          "cancelled": 59,
+          "seconds": 2642,
+          "timed": 115,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "work-plan": {
-          "runs": 85,
+          "runs": 57,
           "red": 0,
-          "cancelled": 26,
-          "seconds": 3333,
-          "timed": 85,
+          "cancelled": 17,
+          "seconds": 1924,
+          "timed": 57,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "ci-complete": {
-          "runs": 82,
-          "red": 4,
-          "cancelled": 62,
-          "seconds": 12710,
-          "timed": 82,
-          "red_jobs": {
-            "ci-complete": 4
-          },
-          "red_steps": {
-            "ci-complete · опросить проверки на голове": 4
-          },
-          "red_marks": {
-            "ci-complete · сводный гейт опросил голову раньше соседей": 3
-          },
-          "red_whose": {
-            "свой": 4
-          }
-        },
-        "ci": {
-          "runs": 84,
-          "red": 4,
-          "cancelled": 58,
-          "seconds": 14272,
-          "timed": 84,
-          "red_jobs": {
-            "lint / lint": 1,
-            "journal / journal": 2,
-            "test": 1,
-            "test-matrix (3.14)": 1,
-            "test-matrix (3.15)": 1
-          },
-          "red_steps": {
-            "lint / lint · типы": 1,
-            "journal / journal · новое приезжает со своим прогоном": 2,
-            "test · вердикт матрицы": 1,
-            "test-matrix (3.14) · тесты": 1,
-            "test-matrix (3.15) · тесты": 1
-          },
-          "red_marks": {},
-          "red_whose": {
-            "свой": 6
-          }
-        },
-        "claude": {
-          "runs": 15,
+          "runs": 54,
           "red": 0,
-          "cancelled": 0,
-          "seconds": 29,
-          "timed": 15,
+          "cancelled": 43,
+          "seconds": 8976,
+          "timed": 54,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+24)": {
-          "runs": 1,
+        "ci": {
+          "runs": 58,
+          "red": 0,
+          "cancelled": 39,
+          "seconds": 11138,
+          "timed": 58,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Перепись хуков на оболочке называет все пять, докстрока обхода — что их не судит никто (+16)": {
+          "runs": 2,
           "red": 0,
           "cancelled": 0,
-          "seconds": 148,
-          "timed": 1,
+          "seconds": 2764,
+          "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "agent-pr": {
-          "runs": 15,
+          "runs": 7,
           "red": 0,
           "cancelled": 0,
-          "seconds": 367,
-          "timed": 15,
+          "seconds": 156,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 12,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 7117,
+          "timed": 12,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "review": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 63,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 13,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 38,
+          "timed": 13,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 75,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
           "runs": 3,
           "red": 0,
           "cancelled": 0,
-          "seconds": 658,
+          "seconds": 107,
           "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 50,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт опасных форм прогонов у потребителя предупреждает, отказывает — входом enforce (+6)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1690,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Гейт опасных форм прогонов у потребителя предупреждает, отказывает — входом enforce (+4)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2221,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Ответ на 066 перечитан: граница — второй писатель, подменяющий живую цель": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 931,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Проба передачи поднята до v1.11.0": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1447,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "handover-probe": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 30,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "release": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 43,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "deps-intercept": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 17,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 94.3
+    },
+    "2026-10-25": {
+      "runs": {
+        "task-items": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 83,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 25,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 477,
+          "timed": 25,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 15,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 33,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 772,
+          "timed": 33,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 46,
+          "red": 1,
+          "cancelled": 17,
+          "seconds": 1172,
+          "timed": 46,
+          "red_jobs": {
+            "automerge / automerge": 1
+          },
+          "red_steps": {
+            "automerge / automerge · двигать очередь": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "verify-queue": {
+          "runs": 23,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 462,
+          "timed": 23,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 23,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 145,
+          "timed": 23,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 23,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 915,
+          "timed": 23,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 23,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 466,
+          "timed": 23,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 37,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 23,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 90,
+          "timed": 23,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -7909,20 +8140,9 @@
         "badges": {
           "runs": 6,
           "red": 0,
-          "cancelled": 1,
-          "seconds": 4512,
+          "cancelled": 2,
+          "seconds": 3624,
           "timed": 6,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Отказ сборщика плана виден в самом плане и красным прогоном": {
-          "runs": 2,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 2584,
-          "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -7932,7 +8152,7 @@
           "runs": 2,
           "red": 0,
           "cancelled": 0,
-          "seconds": 32,
+          "seconds": 30,
           "timed": 2,
           "red_jobs": {},
           "red_steps": {},
@@ -7943,125 +8163,103 @@
           "runs": 2,
           "red": 0,
           "cancelled": 0,
-          "seconds": 36,
+          "seconds": 60,
           "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "task-items": {
-          "runs": 3,
+        "ci": {
+          "runs": 22,
           "red": 0,
-          "cancelled": 0,
-          "seconds": 146,
-          "timed": 3,
+          "cancelled": 13,
+          "seconds": 4554,
+          "timed": 22,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+23)": {
-          "runs": 1,
+        "ci-complete": {
+          "runs": 20,
           "red": 0,
-          "cancelled": 1,
-          "seconds": 1444,
-          "timed": 1,
+          "cancelled": 13,
+          "seconds": 3805,
+          "timed": 20,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+22)": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 1,
-          "seconds": 102,
-          "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+21)": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 1,
-          "seconds": 191,
-          "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Сверка числа в заголовке скелета — целыми словами, а не подстрокой (+10)": {
+        "Ответ на 066 перечитан: граница — второй писатель, подменяющий живую цель (+2)": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 71,
+          "seconds": 821,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Повтор реестра потребителей с разными полями — отказ, а не молча первая запись (+20)": {
-          "runs": 2,
+        "agent-pr": {
+          "runs": 4,
           "red": 0,
           "cancelled": 0,
-          "seconds": 1830,
-          "timed": 2,
+          "seconds": 104,
+          "timed": 4,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Сверка числа в заголовке скелета — целыми словами, а не подстрокой (+9)": {
-          "runs": 2,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 2620,
-          "timed": 2,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "Запускатель механизмов у потребителя: любой скрипт поставщика против его дерева (+4)": {
+        "Ответ на 066 перечитан: граница — второй писатель, подменяющий живую цель (+1)": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 531,
+          "seconds": 522,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Запускатель механизмов у потребителя: любой скрипт поставщика против его дерева (+3)": {
+        "Ответ на 066 перечитан: граница — второй писатель, подменяющий живую цель": {
           "runs": 1,
           "red": 0,
           "cancelled": 1,
-          "seconds": 136,
+          "seconds": 61,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "Запускатель механизмов у потребителя: любой скрипт поставщика против его дерева (+2)": {
-          "runs": 2,
+        "Перепись хуков на оболочке называет все пять, докстрока обхода — что их не судит никто (+17)": {
+          "runs": 1,
           "red": 0,
-          "cancelled": 1,
-          "seconds": 853,
-          "timed": 2,
+          "cancelled": 0,
+          "seconds": 727,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify e1500ed": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 26,
+          "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         }
       },
-      "coverage": 94.3
+      "coverage": 94.4
     }
   }
 }
