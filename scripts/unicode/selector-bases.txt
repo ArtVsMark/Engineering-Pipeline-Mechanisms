@@ -3,16 +3,22 @@
 # Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
 # For terms of use and license, see https://www.unicode.org/terms_of_use.html
 #
-# Выдержка для scripts/check_invisible.py: основы, после которых законен селектор
-# вариантов своего рода, — свойство Unified_Ideograph и письмо Mongolian, дословно
-# до знака «#» (хвост-комментарий снят).
+# Выдержка для scripts/check_invisible.py: сами селекторы вариантов — свойство
+# Variation_Selector — и основы, после которых законен селектор своего рода, —
+# свойство Unified_Ideograph и письмо Mongolian, дословно до знака «#»
+# (хвост-комментарий снят).
 # Источники — https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/ucd/16.0.0/PropList.txt
 # (sha256 53d614508e2a0b2305a8aa21cd60d993de9326cdf65993660dfcce4503548583) и
 # https://raw.githubusercontent.com/unicode-org/unicodetools/main/unicodetools/data/ucd/16.0.0/Scripts.txt
 # (sha256 9e88f0a677df47311106340be8ede2ecdacd9c1c931831218d2be6d5508e0039),
-# получено 22.10.2026 командами:
+# получено 22.10.2026 (Variation_Selector — 25.10.2026, #1469) командами:
+#   grep -E '; Variation_Selector *#' PropList.txt | cut -d'#' -f1 | sed 's/ *$//'
 #   grep -E '; Unified_Ideograph *#' PropList.txt | cut -d'#' -f1 | sed 's/ *$//'
 #   grep -E '; Mongolian *#' Scripts.txt | cut -d'#' -f1 | sed 's/ *$//'
+180B..180D    ; Variation_Selector
+180F          ; Variation_Selector
+FE00..FE0F    ; Variation_Selector
+E0100..E01EF  ; Variation_Selector
 3400..4DBF    ; Unified_Ideograph
 4E00..9FFF    ; Unified_Ideograph
 FA0E..FA0F    ; Unified_Ideograph

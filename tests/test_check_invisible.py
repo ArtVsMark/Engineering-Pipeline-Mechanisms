@@ -325,7 +325,8 @@ def test_extracts_name_their_source_and_command() -> None:
     assert extracts, "выдержек нет"
     for one in extracts:
         head = one.read_text(encoding="utf-8")
-        assert module.UNICODE_SOURCE in head and "sha256" in head and "grep" in head, one.name
+        sourced = module.UNICODE_SOURCE in head or module.EMOJI_SOURCE in head
+        assert sourced and "sha256" in head and "grep" in head, one.name
 
 
 @pytest.fixture
@@ -488,6 +489,34 @@ def test_tables_hold_the_four_properties() -> None:
     assert isinstance(tables, module.Tables)
     assert 0x034F in tables.ignorable and 0x1F9D1 in tables.pictographic
     assert 0x1F3FB in tables.modifiers and (0x26A0, 0xFE0F) in tables.variants
+
+
+def test_selector_kinds_cover_the_data_and_flags_come_from_it() -> None:
+    """Каждый селектор данных — ровно в одном роде; флаги с тегами — из данных (#1469).
+
+    Роды — диапазоны блоков, то есть устройство правила; сверка с
+    `Variation_Selector` не даёт им разойтись с данными молча. Внутри рода
+    вне данных — только разделитель гласных U+180E, и он не селектор.
+    """
+    tables = module.tables()
+    assert tables.selectors
+    for code in tables.selectors:
+        kinds = [span for span in module.SELECTOR_KINDS if module.within(code, span)]
+        assert len(kinds) == 1, hex(code)
+    inside = {
+        code
+        for low, high in module.SELECTOR_KINDS
+        for code in range(low, high + 1)
+        if code not in tables.selectors
+    }
+    assert inside == {0x180E}
+    # ОЖИДАНИЕ СОБРАНО НЕЗАВИСИМО ОТ РАЗБОРА (взгляд на #1662): прежнее равенство
+    # с `sequences(...)` выполнялось всегда — `tables()` строит флаги тем же вызовом.
+    flags = {
+        "\U0001f3f4" + "".join(chr(0xE0000 + ord(one)) for one in region) + "\U000e007f"
+        for region in ("gbeng", "gbsct", "gbwls")
+    }
+    assert tables.tag_flags == flags
 
 
 def test_within_holds_both_ends() -> None:
