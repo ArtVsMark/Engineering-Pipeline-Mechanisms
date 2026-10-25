@@ -30,7 +30,12 @@
 3. **предложить каталогу** — правило, которое машиной не держит никто в
    семье: кандидат на новый общий гейт.
 
-Исходы (правило 039): ``0`` карта собрана · ``2`` не отработал.
+ЖИВАЯ ЗАДАЧА (шаг 2 #1425): `--map` читает собранный файл и переписывает тело
+задачи с меткой `MARKER` целиком — три очереди с адресами. Ведёт её механизм,
+а не рука (049); пустых очередей задача не заводит.
+
+Исходы (правило 039): ``0`` карта собрана или задача записана · ``2`` не
+отработал.
 """
 
 import argparse
@@ -41,7 +46,10 @@ from typing import Any, Final
 
 import family
 import family_uptake
+import findings
+import ghrest
 import kinds
+import report
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -160,16 +168,104 @@ def document(summary: dict[str, Any], mine: str) -> dict[str, Any]:
     }
 
 
+#: Метка живой задачи с очередями карты.
+MARKER: Final = findings.marker("family-gates")
+#: Заголовок живой задачи.
+TITLE: Final = "Карта гейтов семьи: три очереди кандидатов"
+
+
+def render_issue(said: dict[str, Any]) -> str:
+    """Тело живой задачи: источник карты, счёт исходов и три очереди с адресами."""
+    source = said.get("source") or {}
+    queued = said.get("queues") or {}
+    lines = [
+        MARKER,
+        "",
+        "> **Читатель:** владелец, раскладывающий кандидатов по выпускам, и окно,",
+        "> берущее кандидата в работу. Брать ли его — слово владельца: карта называет,",
+        "> а не решает (#1425).",
+        "",
+        "Тело переписывается целиком при каждой сборке карты (`badges.yml`) и ведётся",
+        "механизмом, а не рукой (049). Файл карты — `family-gates.json` на ветке `badges`.",
+        "",
+        f"Сводка каталога: форма {source.get('summary')}, снята {source.get('at')}.",
+        "",
+        "**Исходы клеток:** "
+        + " · ".join(f"{name} {count}" for name, count in (said.get("held") or {}).items()),
+    ]
+    for key, meaning in QUEUES.items():
+        rows = queued.get(key) or []
+        lines += ["", f"## {meaning} — {len(rows)}", ""]
+        if not rows:
+            lines.append("Пусто.")
+        for row in rows:
+            if isinstance(row, dict):
+                origin = f" · от `{row['origin']}`" if row.get("origin") else ""
+                lines.append(
+                    f"- {row['rule']} · {row['repo']} · `{row.get('where') or '—'}`{origin}"
+                )
+            else:
+                lines.append(f"- {row}")
+    return "\n".join(lines) + "\n"
+
+
+def save(repo: str, token: str, said: dict[str, Any], *, apply: bool) -> None:
+    """Переписывает живую задачу по месту или заводит одну — как задача дрейфа.
+
+    `ghrest.TransportError` — наверх: зовущий объявляет его третьим исходом.
+    """
+    body = render_issue(said)
+    number, current = findings.live_issue(repo, token, MARKER)
+    if not apply:
+        print(f"{report.DRY} {'обновил бы' if number else 'завёл бы'} задачу карты гейтов")
+        return
+    if number is None:
+        if not any(said.get("queues", {}).values()):
+            print("очереди пусты — задачу карты не завожу")
+            return
+        fresh = ghrest.request(
+            "POST", f"repos/{repo}/issues", token, {"title": TITLE, "body": body}
+        )
+        print(f"заведена задача карты гейтов #{(fresh or {}).get('number')}")
+        return
+    if current.strip() == body.strip():
+        print(f"задача карты гейтов #{number} уже описывает это состояние")
+        return
+    ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": body})
+    print(f"задача карты гейтов #{number} обновлена")
+
+
+def write_issue(path: Path, repo: str, *, apply: bool) -> int:
+    """Живая задача по собранному файлу карты; нет файла или площадка молчит — исход 2."""
+    token = ghrest.token_from_env()
+    if not token:
+        print("задача карты не записана: нет токена площадки", file=sys.stderr)
+        return EXIT_BROKEN
+    try:
+        said = json.loads(path.read_text(encoding="utf-8"))
+        save(repo, token, said, apply=apply)
+    except (OSError, ValueError, KeyError, ghrest.TransportError) as exc:
+        print(f"задача карты не записана: {report.cut(str(exc))}", file=sys.stderr)
+        return EXIT_BROKEN
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Точка входа: карта по сводке семьи — в файл `--out`."""
+    """Точка входа: карта по сводке семьи — в файл `--out`; с `--map` — живая задача."""
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--summary", type=Path, required=True, help="сводка каталога where.json")
-    parser.add_argument("--out", type=Path, required=True, help="куда положить карту")
+    parser.add_argument("--summary", type=Path, help="сводка каталога where.json")
+    parser.add_argument("--out", type=Path, help="куда положить карту")
+    parser.add_argument("--map", type=Path, help="собранная карта: записать по ней живую задачу")
+    parser.add_argument("--apply", action="store_true", help="с --map: записать, а не показать")
     parser.add_argument("--repo", default=family_uptake.OURS, help="наш репозиторий")
     args = parser.parse_args(argv)
+    if args.map is not None:
+        return write_issue(args.map, args.repo, apply=args.apply)
+    if args.summary is None or args.out is None:
+        parser.error("нужны --summary и --out, либо --map")
     try:
         said = document(family.load(args.summary), args.repo)
         args.out.parent.mkdir(parents=True, exist_ok=True)

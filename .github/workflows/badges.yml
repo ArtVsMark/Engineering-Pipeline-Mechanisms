@@ -366,3 +366,46 @@ jobs:
           # БЕЗ --force: факты общего шага на ветке не затираются (#1001).
           git push -q origin HEAD:refs/heads/badges
           echo "опубликовано: https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/badges/.github/badges/"
+
+  # ЖИВАЯ ЗАДАЧА КАРТЫ ГЕЙТОВ (шаг 2 #1425): три очереди кандидатов из файла,
+  # собранного джобом `inputs`. Право писать задачи — у этого джоба одного, а не
+  # у всего прогона: остальным оно не нужно (125). Совещательный: задача не
+  # записалась — предупреждение, а карта на ветке и без неё на месте (084).
+  gates-task:
+    name: gates-task
+    needs: inputs
+    if: >-
+      github.event_name != 'workflow_run'
+      || contains(fromJSON('["push", "workflow_dispatch", "schedule"]'), github.event.workflow_run.event)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - run: python -m pip install --quiet "pyyaml>=6,<7" ./packages/transport
+      - name: взять карту гейтов семьи
+        id: map
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: family-gates
+          path: ${{ runner.temp }}/gates
+      - name: переписать живую задачу очередей
+        if: steps.map.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/family_gates.py --map "${RUNNER_TEMP}/gates/family-gates.json" --apply || rc=$?
+          if [ "$rc" != 0 ]; then
+            echo "::warning::живая задача карты гейтов не записана (код $rc) — карта на ветке badges на месте"
+          fi

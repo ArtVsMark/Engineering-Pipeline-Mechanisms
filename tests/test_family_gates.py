@@ -146,3 +146,59 @@ def test_a_repo_missing_from_the_summary_is_a_refusal(tmp_path: Path) -> None:
     where.write_text(json.dumps(summary()), encoding="utf-8")
     out = tmp_path / "family-gates.json"
     assert module.main(["--summary", str(where), "--out", str(out), "--repo", "o/чужой"]) == 2
+
+
+def test_the_live_issue_names_each_queue_with_its_addresses() -> None:
+    """Тело живой задачи: метка, источник, счёт и три очереди с адресами (шаг 2 #1425)."""
+    said = module.document(summary(), OURS)
+    body = module.render_issue(said)
+    assert body.startswith(module.MARKER)
+    assert "доработать у нас" in body and "o/сосед · `scripts/b.py` · от `" in body
+    assert "- 002 · o/сосед · `scripts/c.py`" in body and "- 003" in body
+    empty = {**said, "queues": {"rework": [], "spread": [], "propose": []}}
+    assert module.render_issue(empty).count("Пусто.") == 3
+
+
+def test_the_live_issue_is_patched_in_place_and_not_opened_empty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Задача есть — правится по месту; нет и очереди пусты — не заводится; иначе заводится."""
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        module.ghrest, "request", lambda method, path, *_a, **_k: sent.append((method, path)) or {}
+    )
+    said = module.document(summary(), OURS)
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_: (7, "прежнее"))
+    module.save("o/r", "t", said, apply=True)
+    assert sent == [("PATCH", "repos/o/r/issues/7")]
+    sent.clear()
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_: (None, ""))
+    empty = {**said, "queues": {"rework": [], "spread": [], "propose": []}}
+    module.save("o/r", "t", empty, apply=True)
+    assert sent == [] and "не завожу" in capsys.readouterr().out
+    module.save("o/r", "t", said, apply=True)
+    assert sent == [("POST", "repos/o/r/issues")]
+    sent.clear()
+    module.save("o/r", "t", said, apply=False)
+    assert sent == []
+
+
+def test_the_live_issue_mode_names_its_refusals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Без токена, без файла карты и при отказе площадки — исход 2, а не молчание (039)."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    out = tmp_path / "map.json"
+    out.write_text(json.dumps(module.document(summary(), OURS)), encoding="utf-8")
+    assert module.main(["--map", str(out)]) == module.EXIT_BROKEN
+    monkeypatch.setenv("GH_TOKEN", "t")
+    assert module.main(["--map", str(tmp_path / "нет.json")]) == module.EXIT_BROKEN
+
+    def refuse(*_a: object, **_k: object) -> None:
+        raise module.ghrest.TransportError("площадка молчит")
+
+    monkeypatch.setattr(module.findings, "live_issue", refuse)
+    assert module.main(["--map", str(out), "--apply"]) == module.EXIT_BROKEN
+    with pytest.raises(SystemExit):
+        module.main(["--out", str(out)])
