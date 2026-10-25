@@ -1520,7 +1520,7 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
     ),
     "090": (
         "ci.yml — джоб attribution, гейт переехал к нам; держит scripts/check_attribution.py",
-        "69bc912cfb49",
+        "356011635627",
     ),
     "100": (
         "ci.yml — поле timeout-minutes у своих шагов; держит scripts/ci_complete.py",
@@ -1528,7 +1528,7 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
     ),
     "123": (
         "ci.yml — джоб attribution, гейт переехал к нам; держит scripts/check_attribution.py",
-        "16f7930656e5",
+        "b7d214e5b3e8",
     ),
     "133": (
         "ci.yml — свой джоб parts; держит scripts/change_parts.py",
