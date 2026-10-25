@@ -3504,3 +3504,16 @@ def test_an_unread_neighbour_names_itself_and_the_queue_goes_on(
     marked = module.red_fixers("o/r", [fixer], [change(5), fixer], "t")
     assert not marked[0].fixes_red
     assert "#5 не прочитано — 502" in capsys.readouterr().out
+
+
+def test_red_names_takes_only_a_real_red_and_the_worst_per_name() -> None:
+    """Красным считается настоящий красный исход, и на имя — худшая запись (#1659)."""
+    runs = [
+        {"name": "tests", "conclusion": "success", "status": "completed"},
+        {"name": "tests", "conclusion": "failure", "status": "completed"},
+        {"name": "lint", "conclusion": "cancelled", "status": "completed"},
+        {"name": "docs", "conclusion": "success", "status": "completed"},
+    ]
+    assert module.red_names(runs) == "tests"
+    green = [{"name": "docs", "conclusion": "success", "status": "completed"}]
+    assert module.red_names(green) == ""

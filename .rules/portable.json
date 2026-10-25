@@ -790,6 +790,10 @@
       "answer": "ours",
       "why": "@family"
     },
+    "scripts/family_gates.py": {
+      "answer": "ours",
+      "why": "@family"
+    },
     "scripts/family_uptake.py": {
       "answer": "ours",
       "why": "@family"
@@ -874,6 +878,12 @@
       "answer": "configured",
       "where": [
         ".pipeline.yml"
+      ]
+    },
+    "scripts/portable_census.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/portable.json"
       ]
     },
     "scripts/preflight.py": {

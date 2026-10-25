@@ -155,6 +155,15 @@ NO_RELEASE: Final = "выпусков ещё не было"
 LOCAL_CALL: Final = "./.github/workflows/"
 #: Прогон, джобами которого подключаются шаги конвейера.
 PIPELINE_FLOW: Final = "ci.yml"
+#: Шаги ОБ ИЗМЕНЕНИИ: на толчке в общую ветку изменения нет, и вызов идёт с
+#: `ON_CHANGE_ONLY`. Одна таблица на заготовку и наш `ci.yml` — сверяет тест
+#: (#1663, 214): прежде условие стояло у нас руками, а заготовка звала шаги и
+#: на толчке, и у потребителя краснела общая ветка.
+ABOUT_A_CHANGE: Final = frozenset(
+    {"attribution", "contract", "journal", "pr-meta", "rulebook-fresh", "window-lifetime"}
+)
+#: Условие вызова шага об изменении — дословно как в нашем `ci.yml`.
+ON_CHANGE_ONLY: Final = "github.event_name != 'push'"
 #: Сводный гейт: заготовка его не кладёт, а называет — он пока копируется.
 SUMMARY_FLOW: Final = "ci-complete.yml"
 #: Значок проекта на ветке `badges` потребителя: его кладёт общий шаг фактов
@@ -1134,6 +1143,7 @@ KIT_REFUSED: Final = {
     paths.RELEASE_DOC: "шаги называют документ ссылкой в сообщении; порядок выпуска — ваш",
     paths.DECISIONS: "записи ваших решений; пустой каталог законен",
     paths.ENTRANCE: "ваш вход: он называет ВАШЕ отданное; другой файл — разделом shipped",
+    paths.PORTABLE: "перепись того, что ВЫ отдаёте; нет файла — нет её раздела на странице выпуска",
 }
 #: Пути области в заготовке: ЛЮБОЙ путь — в корне и вглубь (`review_map.matches`).
 #: Не пустые: пустой `paths` карта читает «поверхности нет» и правила области
@@ -1550,9 +1560,11 @@ def summary_kit(root: Path, repo: str, pin: str) -> str:
 
 def caller(name: str, repo: str, pin: str) -> str:
     """Джоб вызывающего для одного шага — то, что потребитель кладёт к себе."""
+    when = f"    if: {ON_CHANGE_ONLY}\n" if name in ABOUT_A_CHANGE else ""
     return (
         f"  {name}:\n"
         f"    name: {name}\n"
+        f"{when}"
         f"    uses: {repo}/.github/workflows/{STEP_PREFIX}{name}.yml@{pin}\n"
         f"    permissions:\n"
         f"      contents: read\n"

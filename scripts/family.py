@@ -122,7 +122,9 @@ KINDS: Final = kinds.MACHINE
 READS_SCHEMA: Final = "1.7"
 #: Модули, читающие сводку семьи: через `family.load` или по адресу
 #: `catalogue.WHERE_URL`. Перечень, а не счёт в прозе — его держит тест.
-SUMMARY_READERS: Final = frozenset({"family", "build_facts", "drift", "family_uptake"})
+SUMMARY_READERS: Final = frozenset(
+    {"family", "build_facts", "drift", "family_uptake", "family_gates"}
+)
 
 
 class NotRun(RuntimeError):

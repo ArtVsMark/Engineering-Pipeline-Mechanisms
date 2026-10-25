@@ -130,6 +130,32 @@ jobs:
           curl -sSfL -o "$RUNNER_TEMP/where.json" \
             https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook/badges/export/where.json \
             || echo "::warning::Сводка семьи не скачалась — числа общих механизмов будут объявлены непрочитанными."
+      # КАРТА ГЕЙТОВ СЕМЬИ (#1425): правило × проект → чем держится, и три
+      # очереди кандидатов. Собирается ЗДЕСЬ, рядом со сводкой, по тому же её
+      # файлу, что факты, и едет к публикации своим артефактом (взгляды на
+      # #1668): у джоба `badges` свой раннер и свой `RUNNER_TEMP`, файла сводки
+      # там нет, а вторая загрузка могла бы взять другую сводку. Выпуск не
+      # держит: не собралась — предупреждение, на ветке остаётся прежняя (045).
+      - name: собрать карту гейтов семьи
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          rc=0
+          [ -s "${RUNNER_TEMP}/where.json" ] || rc=3
+          if [ "$rc" = 0 ]; then
+            python scripts/family_gates.py --summary "${RUNNER_TEMP}/where.json" \
+              --out "${RUNNER_TEMP}/gates/family-gates.json" || rc=$?
+          fi
+          if [ "$rc" != 0 ]; then
+            echo "::warning::карта гейтов семьи не собрана (код $rc) — на ветке badges остаётся прежняя"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
+        with:
+          name: family-gates
+          path: ${{ runner.temp }}/gates
+          if-no-files-found: warn
+          retention-days: 1
       # ПОКРЫТИЕ СЧИТАЕТСЯ ПРОГОНОМ, И СЧЁТЧИК ОБЯЗАН ВИДЕТЬ ПОДПРОЦЕССЫ. Гейты
       # проверяются ЗАПУСКОМ, и без ключа `COVERAGE_SUBPROCESS` счётчик показывал
       # ноль у полностью проверенных модулей: 66% против настоящих 77%. Обёртку
@@ -305,6 +331,14 @@ jobs:
             --out-dir "${RUNNER_TEMP}/badges" \
             --root "${RUNNER_TEMP}/at-facts" \
             --supplier "$GITHUB_REPOSITORY"
+      # Карту собрал джоб `inputs` (там лежит сводка); здесь она только ложится
+      # к значкам. Нет артефакта — прежняя карта на ветке остаётся (045).
+      - name: положить карту гейтов семьи
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: family-gates
+          path: ${{ runner.temp }}/badges/.github/badges
       - name: опубликовать в ветку badges
         run: |
           set -euo pipefail
