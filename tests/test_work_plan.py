@@ -1602,13 +1602,32 @@ def test_zero_fixes_pair_a_fix_with_the_red_it_holds_from_either_side(
         {"number": 33, "body": f"{module.changerefs.FIXES_MAIN_KEY} tests"},
         {"number": 34, "body": f"{module.changerefs.WAITS_KEY} #41"},
         {"number": 37, "body": f"{module.changerefs.FIXES_RED_KEY} #36"},
+        {"number": 38, "body": f"{module.changerefs.WAITS_KEY} #39"},
+        {"number": 40, "body": "починка соседа"},
+        {"number": 42, "body": f"{module.changerefs.FIXES_MAIN_KEY} lint"},
     ]
     monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(pulls))
-    red = ["#31 — красное", "#32 — красное", "#35 — своё красное"]
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", lambda _r, _t, step, _b: step == "tests")
+    red = ["#31 — красное", "#32 — красное", "#35 — своё красное", "#38 — красное"]
     main_rows, rows, held = module.zero_fixes("o/r", "t", red)
-    assert main_rows == ["**#33** — чинит «tests» на общей ветке"]
+    assert main_rows == ["**#33** — чинит «tests» на общей ветке"], "зелёный lint у #42 — не 0а"
     assert rows == ["**#30** — держит #31", "**#40** — держит #32"]
-    assert held == {31, 32}, "зелёное #34 с «Ждёт:» и не красное #36 держимыми не названы"
+    assert held == {31, 32}, "зелёное #34, не красное #36 и #38 с закрытой #39 не держимы"
+
+
+def test_zero_fixes_keeps_a_main_fix_whose_red_was_not_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Краснота шага не спрошена — строка 0а остаётся с причиной, а не пропадает (039)."""
+    pulls = [{"number": 33, "body": f"{module.changerefs.FIXES_MAIN_KEY} tests"}]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(pulls))
+
+    def refuse(*_: object) -> bool:
+        raise module.agent_pr.NotRun("голова не прочитана")
+
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", refuse)
+    main_rows, _, _ = module.zero_fixes("o/r", "t", [])
+    assert main_rows == ["**#33** — чинит «tests»; краснота не спрошена: голова не прочитана"]
 
 
 def test_the_built_plan_splits_zero_and_moves_the_held_red_out_of_two(

@@ -80,6 +80,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+import agent_pr
 import changerefs
 import debt
 import drift
@@ -380,23 +381,32 @@ def zero_fixes(repo: str, token: str, red: list[str]) -> tuple[list[str], list[s
     Возвращает строки 0а сверх красноты, строки 0б и номера держимого.
     """
     reds = {int(one[1:].split(" ", 1)[0]) for one in red if one.startswith("#")}
+    # ПАРА ЖИВА, ПОКА ОТКРЫТА ПОЧИНКА И КРАСЕН ЕЁ ПРЕДМЕТ — у всех трёх форм
+    # (взгляды на #1661, перечень форм по 210): «Чинит main:» сверяет шаг на
+    # общей ветке тем же вопросом, что предел трёх; «Ждёт: #N» — что #N открыта.
+    opened = list(ghrest.paginate(f"repos/{repo}/pulls?state=open", token))
+    numbers = {int(change.get("number") or 0) for change in opened}
     main_rows: list[str] = []
     pairs: dict[tuple[int, int], None] = {}
-    for change in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
+    for change in opened:
         number = int(change.get("number") or 0)
         body = str(change.get("body") or "")
         step = changerefs.fixes_main_in(body)
         if step:
-            main_rows.append(f"**#{number}** — чинит «{step}» на общей ветке")
-        # Пара — только при красном держимом (взгляд на #1661): позеленевшее
-        # или слитое #M строкой 0б больше не держится, как и пара из «Ждёт:».
+            try:
+                if agent_pr.red_on_trunk(repo, token, step, paths.TRUNK):
+                    main_rows.append(f"**#{number}** — чинит «{step}» на общей ветке")
+            except agent_pr.NotRun as exc:
+                # НЕ СПРОШЕНО — НЕ «ЗЕЛЕНО» (039): строка остаётся с причиной.
+                main_rows.append(f"**#{number}** — чинит «{step}»; краснота не спрошена: {exc}")
         for held in changerefs.fixes_red_in(body):
             if held in reds:
                 pairs[(number, held)] = None
         waits = changerefs.held_in(body)
         if number in reds and waits:
             for fix in ISSUE_RE.findall(waits):
-                pairs[(int(fix), number)] = None
+                if int(fix) in numbers:
+                    pairs[(int(fix), number)] = None
     rows = [f"**#{fix}** — держит #{held}" for fix, held in pairs]
     return main_rows, rows, {held for _, held in pairs}
 
