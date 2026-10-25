@@ -305,6 +305,24 @@ jobs:
             --out-dir "${RUNNER_TEMP}/badges" \
             --root "${RUNNER_TEMP}/at-facts" \
             --supplier "$GITHUB_REPOSITORY"
+      # КАРТА ГЕЙТОВ СЕМЬИ (#1425): правило × проект → чем держится, и три
+      # очереди кандидатов. Собирается по той же сводке каталога, что факты,
+      # и выпуск не держит: не собралась — предупреждение, а на ветке остаётся
+      # прежняя карта со своей датой источника внутри (045).
+      - name: собрать карту гейтов семьи
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          rc=0
+          curl -sSfL -o "${RUNNER_TEMP}/where.json" \
+            https://raw.githubusercontent.com/ArtVsMark/Engineering-Incidents-Playbook/badges/export/where.json || rc=$?
+          if [ "$rc" = 0 ]; then
+            python scripts/family_gates.py --summary "${RUNNER_TEMP}/where.json" \
+              --out "${RUNNER_TEMP}/badges/.github/badges/family-gates.json" || rc=$?
+          fi
+          if [ "$rc" != 0 ]; then
+            echo "::warning::карта гейтов семьи не собрана (код $rc) — на ветке badges остаётся прежняя"
+          fi
       - name: опубликовать в ветку badges
         run: |
           set -euo pipefail

@@ -527,6 +527,8 @@ def published_names() -> list[str]:
 
 #: Архив находок на той же ветке: пишет его `findings_archive.py` шагом `badges.yml`.
 ARCHIVE: Final = "findings.json"
+#: Карта гейтов семьи на той же ветке: пишет её `family_gates.py` шагом `badges.yml` (#1425).
+FAMILY_GATES: Final = "family-gates.json"
 
 
 #: Файлы общего шага `step-facts.yml` на той же ветке — его имена, а не наши:
@@ -546,7 +548,7 @@ def branch_files() -> list[str]:
     от живого. Перечень выводится из инвентаря, а не из списка снятых по
     имени: значок, убранный из `BADGES`, уходит с ветки следующим заходом.
     """
-    return sorted({*published_names(), *SHARED_STEP, UNIFIED, ARCHIVE})
+    return sorted({*published_names(), *SHARED_STEP, UNIFIED, ARCHIVE, FAMILY_GATES})
 
 
 def prune(directory: Path) -> list[str]:
