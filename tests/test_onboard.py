@@ -2785,3 +2785,24 @@ def test_the_mechanism_rules_kit_carries_every_rule_of_our_census() -> None:
     assert sorted(kit["rules"]) == sorted(ours["rules"])
     assert all(places == {} for places in kit["rules"].values()), "в заготовке наши места"
     assert kit["места"] == {}
+
+
+def test_a_step_about_a_change_is_not_called_on_the_trunk_push() -> None:
+    """Шаг об изменении зовётся с условием «не толчок», прочие — без (#1663)."""
+    flow = yaml.safe_load(module.thin_ci(["journal", "lint"], "o/r", "v1.0.0"))
+    assert flow["jobs"]["journal"]["if"] == module.ON_CHANGE_ONLY
+    assert "if" not in flow["jobs"]["lint"]
+
+
+def test_our_ci_and_the_kit_share_one_table_of_steps_about_a_change() -> None:
+    """Наш `ci.yml` ставит условие ровно у шагов из `ABOUT_A_CHANGE` (#1663, 214)."""
+    ours = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / module.PIPELINE_FLOW).read_text("utf-8")
+    )
+    said = {
+        name
+        for name, job in ours["jobs"].items()
+        if str(job.get("uses") or "").startswith(module.LOCAL_CALL + module.STEP_PREFIX)
+        and job.get("if") == module.ON_CHANGE_ONLY
+    }
+    assert said == module.ABOUT_A_CHANGE

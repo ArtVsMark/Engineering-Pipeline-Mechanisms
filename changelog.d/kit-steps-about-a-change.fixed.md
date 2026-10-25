@@ -1,0 +1,3 @@
+Заготовка `ci.yml` у `onboard.py` зовёт шаги об изменении (`pr-meta`, `journal`, `attribution`, `contract`, `window-lifetime`, `rulebook-fresh`) с условием `github.event_name != 'push'`, как наш `ci.yml`: на толчке в общую ветку потребителя они больше не краснеют. Состав — одна таблица `onboard.ABOUT_A_CHANGE`, наш `ci.yml` сверяется с ней тестом.
+
+#1663

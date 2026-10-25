@@ -419,6 +419,8 @@ def rules_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None
     except ghrest.TransportError as exc:
         return Source(unread=f"«входящие» каталога не прочитаны: {exc}")
     numbers = debt.rules_debt(inbox)
+    if numbers is None and debt.catalogue_tree(repo):
+        return Source(note=debt.CATALOGUE_TREE)
     if numbers is None:
         return Source(unread="числа каталога не найдены во «входящих»")
     tasks, queue, unheld = numbers
