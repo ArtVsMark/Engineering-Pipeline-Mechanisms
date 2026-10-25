@@ -734,8 +734,11 @@
       "answer": "as-is"
     },
     "scripts/check_shipped.py": {
-      "answer": "ours",
-      "why": "@provider"
+      "answer": "configured",
+      "where": [
+        ".pipeline.yml",
+        "README.md"
+      ]
     },
     "scripts/check_version.py": {
       "answer": "ours",
