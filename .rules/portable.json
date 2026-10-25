@@ -756,6 +756,12 @@
       "answer": "ours",
       "why": "@provider"
     },
+    "scripts/contract_form.py": {
+      "answer": "configured",
+      "where": [
+        ".pipeline.yml"
+      ]
+    },
     "scripts/contract.py": {
       "answer": "ours",
       "why": "@contract"

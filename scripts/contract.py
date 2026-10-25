@@ -32,10 +32,12 @@
 """
 
 import ast
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Final
 
+import contract_form
 import paths
 import pipeline_checks as policy
 import yaml
@@ -120,8 +122,12 @@ def checks_surface(path: Path = paths.PIPELINE) -> dict[str, Any]:
     return {"schema": document.get("schema"), "checks": classes}
 
 
-def surface(root: Path = Path()) -> dict[str, Any]:
-    """Полный снимок поверхности контракта."""
+def surface(
+    root: Path = Path(), form: contract_form.Form = contract_form.DEFAULT_FORM
+) -> dict[str, Any]:
+    """Полный снимок поверхности контракта; объявленная поверхность — вместо нашей (#1664)."""
+    if form.surface:
+        return {"declared": declared_surface(root, form.surface)}
     return {
         "workflows": workflows_surface(root / paths.WORKFLOWS),
         "answer": checks_surface(root / paths.PIPELINE),
@@ -129,6 +135,48 @@ def surface(root: Path = Path()) -> dict[str, Any]:
         # `paths:` своего ответа, и снятый или переименованный ключ ломает его.
         "paths": path_keys(root),
     }
+
+
+def declared_surface(root: Path, where: tuple[Path, ...]) -> dict[str, str]:
+    """Отпечатки файлов объявленной поверхности: путь → sha256 содержимого.
+
+    ОТПЕЧАТОК, А НЕ РАЗБОР (#1664): объявленная поверхность — чужая форма, и
+    разбирать её нам нечем. Каталог называет выгрузку и действия; правка их
+    текста — правка поверхности, и переформатирование здесь честно считается
+    правкой. Каталог обходится целиком, файлы — в порядке путей.
+    """
+    found: dict[str, str] = {}
+    for one in where:
+        for path in below(root / one):
+            if not path.is_file():
+                continue
+            try:
+                found[path.relative_to(root).as_posix()] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+            except OSError as exc:
+                raise policy.BadPolicy(f"{path} не прочитан: {exc}") from exc
+    return found
+
+
+def below(start: Path) -> list[Path]:
+    """Файлы объявленного пути: сам файл или каталог спуском вниз, в порядке путей.
+
+    СПУСК, А НЕ ПОИСК: путь назван ответом проекта, и обходится только он. Не
+    `git ls-files` — «до» снимается с распакованного архива базы, git там нет.
+
+    СИМВОЛИЧЕСКИЕ ССЫЛКИ НЕ ОБХОДЯТСЯ (взгляд на #1672): ссылка на предка
+    зациклила бы спуск, а ссылка за пределы дерева внесла бы в отпечаток чужие
+    файлы. Ссылка поверхностью не считается.
+    """
+    if start.is_symlink():
+        return []
+    if not start.is_dir():
+        return [start] if start.is_file() else []
+    found: list[Path] = []
+    for one in sorted(start.iterdir()):
+        found += below(one)
+    return found
 
 
 def path_keys(root: Path) -> list[str]:
@@ -192,6 +240,9 @@ BREAKING_MARKS: Final = (
     # Ключ таблицы путей, который проект называет в разделе `paths:`, исчез:
     # ответ проекта отказывает неизвестным ключом (#1630).
     "ключ путей снят",
+    # Файл объявленной поверхности исчез (#1664): потребитель читает его по
+    # адресу, и адрес перестал отвечать.
+    "файл поверхности снят",
 )
 
 
@@ -279,6 +330,17 @@ def differences(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     них значило бы приучить обходить гейт (051).
     """
     found: list[str] = []
+    if "declared" in before or "declared" in after:
+        was_files = before.get("declared") or {}
+        now_files = after.get("declared") or {}
+        for name in sorted(set(was_files) | set(now_files)):
+            if name not in now_files:
+                found.append(f"файл поверхности снят: {name}")
+            elif name not in was_files:
+                found.append(f"файл поверхности добавлен: {name}")
+            elif was_files[name] != now_files[name]:
+                found.append(f"файл поверхности изменён: {name}")
+        return found
     for file, shape in sorted(after.get("workflows", {}).items()):
         was = (before.get("workflows") or {}).get(file)
         if was is None:
