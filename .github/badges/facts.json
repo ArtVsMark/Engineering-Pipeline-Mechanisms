@@ -2,8 +2,8 @@
   "schema": "2.1",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Pipeline-Mechanisms — export/facts/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-25T16:55:49+00:00",
-  "commit": "e4449b911d3e0c905a5f01267c5a03e3d1b7766a",
+  "generated_at": "2026-10-25T17:43:45+00:00",
+  "commit": "ccee557aa07b0d8c6db3316203403a36debcd20d",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,12 +19,12 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.11.11",
+  "version": "1.11.12",
   "release": "1.11",
   "coverage_percent": 94.5,
   "tests": {
-    "functions": 4545,
-    "modules": 191
+    "functions": 4550,
+    "modules": 192
   },
   "checks_per_pr": {
     "count": 23,
@@ -66,8 +66,8 @@
       "schema_of": "общий шаг фактов механизмов: детали покрытия и полнота версии",
       "coverage": {
         "read": true,
-        "covered": 18076,
-        "lines": 19135
+        "covered": 18177,
+        "lines": 19238
       },
       "version_whole": true
     },
@@ -76,7 +76,7 @@
       "schema_of": "числа поставщика механизмов: разрез семьи и исполняемые скрипты",
       "family": {
         "schema_read": "1.7",
-        "snapshot_at": "2026-10-25T16:41:31+00:00",
+        "snapshot_at": "2026-10-25T16:52:13+00:00",
         "consumers": 6,
         "held_by_machine": 911,
         "adopted": {
@@ -576,7 +576,7 @@
         ]
       },
       "scripts": {
-        "runnable": 83,
+        "runnable": 84,
         "started": 30
       }
     }
