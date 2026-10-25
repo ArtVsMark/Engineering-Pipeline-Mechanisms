@@ -170,6 +170,18 @@ CLOSED_ITEM_RE: Final = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+#: КАНДИДАТ КАРТЫ ГЕЙТОВ, ВЗЯТЫЙ В РАБОТУ (шаг 3 #1425): строка в теле коммита
+#: `Кандидат: <очередь> · <правило> · <проект>`. Её переносит тело уплотнения, а
+#: читает страница выпуска — так выпуск называет, что он взял из очередей карты.
+#: Очереди — ключи `family_gates.QUEUES`; совпадение держит тест, а не память.
+CANDIDATE_KEY: Final = "Кандидат:"
+CANDIDATE_QUEUES: Final = ("rework", "spread", "propose")
+CANDIDATE_RE: Final = re.compile(
+    rf"^\s*(?P<mark>{re.escape(CANDIDATE_KEY)})\s*(?P<text>(?P<queue>{'|'.join(CANDIDATE_QUEUES)})"
+    r"\s*·\s*(?P<rule>\d{3})\s*·\s*(?P<repo>[\w.-]+/[\w.-]+))\s*$",
+    re.MULTILINE,
+)
+
 #: ЗАДЕРЖКА, ОБЪЯВЛЕННАЯ ДО ОТКРЫТИЯ. Стоп-метку `hold` можно поставить только
 #: ПОСЛЕ того, как изменение открыто, а согласие очереди шаг открытия ставит
 #: сразу — между этими мгновениями изменение полностью готово к слиянию.
@@ -898,4 +910,15 @@ def closed_items_in_all(texts: Iterable[str]) -> list[str]:
             if key not in seen:
                 seen.add(key)
                 found.append(item)
+    return found
+
+
+def candidates_in_all(texts: Iterable[str]) -> list[str]:
+    """Строки «Кандидат: …» всех текстов — приведённые, без повторов, в порядке появления."""
+    found: list[str] = []
+    for text in texts:
+        for match in marked_lines(text, CANDIDATE_RE):
+            line = f"{CANDIDATE_KEY} {match['queue']} · {match['rule']} · {match['repo']}"
+            if line not in found:
+                found.append(line)
     return found
