@@ -139,7 +139,7 @@ def test_the_footer_is_not_read_as_a_row() -> None:
     подпись — включая «механизма сборки ещё нет» — и подпись пережила бы сам
     механизм ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
     """
-    rows = module.rows_of(BODY, module.HEADS[6])
+    rows = module.section_rows(BODY, 6)
     assert not any("Собрано" in one for one in rows), rows
     assert any("#642" in one for one in rows)
 
@@ -1048,7 +1048,7 @@ SECTION_FOUR: Final = [
     "*Ждёт владельца*",
     "- **#703** — ждёт решения",
     "",
-    "*Ждёт срока или чужого*",
+    "*Отложено до 01.11*",
     "- **#704** — пересмотр 01.11.2026",
 ]
 
@@ -1059,16 +1059,16 @@ def test_section_four_is_laid_out_by_labels() -> None:
     assert module.grouped(SECTION_FOUR, labels) == [
         "*Пояснение владельца.*",
         "",
-        "*Сейчас в работе*",
+        "*Работаем сейчас*",
         "- **#702** — в работе",
         "",
         "*Ждёт решения*",
         "- **#703** — ждёт решения",
         "",
-        "*Ждёт выпуска*",
+        "*Ожидаем выпуска*",
         "- **#701** — ждёт выпуска",
         "",
-        "*Ждёт срока или чужого*",
+        "*Отложено до 01.11*",
         "- **#704** — пересмотр 01.11.2026",
     ]
 
@@ -1076,8 +1076,8 @@ def test_section_four_is_laid_out_by_labels() -> None:
 def test_a_row_without_a_label_leaves_a_hand_group_for_now() -> None:
     """Без метки строка из «Ждёт владельца» встаёт в «Сейчас»: группу держит метка, а не тело."""
     said = module.grouped(SECTION_FOUR, {})
-    assert "*Ждёт решения*" not in said and "*Ждёт выпуска*" not in said
-    assert said[said.index("*Сейчас в работе*") + 1 : said.index("*Сейчас в работе*") + 4] == [
+    assert "*Ждёт решения*" not in said and "*Ожидаем выпуска*" not in said
+    assert said[said.index("*Работаем сейчас*") + 1 : said.index("*Работаем сейчас*") + 4] == [
         "- **#701** — ждёт выпуска",
         "- **#702** — в работе",
         "- **#703** — ждёт решения",
@@ -1093,8 +1093,8 @@ def test_a_born_row_joins_now_even_after_a_hand_group() -> None:
     """
     born = ["- **#705** — рождённая без метки", "- **#706** — рождённая с меткой выпуска"]
     said = module.grouped(SECTION_FOUR, {706: {module.WAITS_RELEASE}}, born)
-    now, release = said.index("*Сейчас в работе*"), said.index("*Ждёт выпуска*")
-    hand = said.index("*Ждёт срока или чужого*")
+    now, release = said.index("*Работаем сейчас*"), said.index("*Ожидаем выпуска*")
+    hand = said.index("*Отложено до 01.11*")
     assert born[0] in said[now:release]
     assert born[1] in said[release:hand]
     assert said[hand + 1 :] == ["- **#704** — пересмотр 01.11.2026"]
@@ -1113,8 +1113,8 @@ def test_the_built_plan_groups_section_four(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(module.debt, "open_listed", lambda *_: listed)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
     four = written[0].split("## 4 ·", 1)[1].split("## 5 ·", 1)[0]
-    assert "*Сейчас в работе*\n- **#700**" in four
-    assert "*Ждёт выпуска*\n- **#640**" in four
+    assert "*Работаем сейчас*\n- **#700**" in four
+    assert "*Ожидаем выпуска*\n- **#640**" in four
 
 
 def test_unread_labels_leave_section_four_as_written(
@@ -1128,7 +1128,7 @@ def test_unread_labels_leave_section_four_as_written(
 
     monkeypatch.setattr(module.debt, "open_listed", refuse)
     module.main(["--repo", "o/r", "--apply"])
-    assert "*Сейчас в работе*" not in written[0]
+    assert "*Работаем сейчас*" not in written[0]
     out = capsys.readouterr().out
     assert "раздел 4 оставлен как в теле" in out
     assert "рождённые задачи встанут следующим заходом" in out
@@ -1287,12 +1287,12 @@ def test_continuations_and_hand_groups_keep_their_rows() -> None:
     assert said == [
         "*Пояснение.*",
         "",
-        "*Сейчас в работе*",
+        "*Работаем сейчас*",
         "- **#1** — первая",
         "  продолжение первой",
         "  - вложенный пункт",
         "",
-        "*Ждёт выпуска*",
+        "*Ожидаем выпуска*",
         "- **#3** — ждёт выпуска",
         "",
         "*Отложено*",
@@ -1470,3 +1470,105 @@ def test_a_multiline_reason_stays_one_quoted_line() -> None:
     assert block.count("\n") == 0 and block.startswith(">"), block
     assert "строка один строка два" in block and "…" in block
     assert len(block) < module.REASON_LIMIT + 200
+
+
+def test_section_four_has_five_groups_and_the_hand_date_group_is_gone() -> None:
+    """Повтор и срок — группы по метке; прежняя ручная «Ждёт срока или чужого» снята (#1655)."""
+    lines = [
+        "*Ждёт срока или чужого — пересмотр 25.10.2026*",
+        "*Ждёт срока или чужого*",
+        "- **#1** — неделя локальной работы",
+        "- **#2** — анализ отдачи после выпуска",
+        "- **#3** — в работе",
+    ]
+    said = module.grouped(lines, {1: {module.WAITS_DATE}, 2: {module.RECURRING}})
+    assert said[said.index("*Работаем сейчас*") + 1] == "- **#3** — в работе"
+    assert (
+        said[said.index("*Повторяющиеся действия*") + 1] == "- **#2** — анализ отдачи после выпуска"
+    )
+    assert said[said.index("*Ожидаем до даты*") + 1] == "- **#1** — неделя локальной работы"
+    assert "*Ждёт срока или чужого*" not in said
+    assert [head for head, _ in module.GROUPS][1:] == [
+        "*Ждёт решения*",
+        "*Ожидаем выпуска*",
+        "*Повторяющиеся действия*",
+        "*Ожидаем до даты*",
+    ]
+
+
+def test_section_of_sends_neighbours_to_six_and_four_labels_to_four() -> None:
+    """Соседи — раздел 6 и сильнее групп раздела 4; без метки строка остаётся, где стоит."""
+    assert module.section_of({module.WAITS_NEIGHBOUR, module.WAITS_OWNER}, 4) == 6
+    assert module.section_of({module.WAITS_OWNER}, 6) == 4
+    assert module.section_of({"enhancement"}, 6) == 6
+    assert module.section_of(set(), 4) == 4
+
+
+def test_routed_moves_a_row_with_its_indented_continuation() -> None:
+    """Строка уходит в раздел своей метки вместе с продолжением под отступом (#1655)."""
+    held = {
+        4: ["*Пояснение.*", "- **#1** — ждёт соседа", "  продолжение", "- **#2** — наша"],
+        6: ["- **#3** — ждёт решения", "- **#4** — своя очередь"],
+    }
+    labels = {1: {module.WAITS_NEIGHBOUR}, 3: {module.WAITS_OWNER}}
+    kept, moved = module.routed(held, labels)
+    assert kept == {4: ["*Пояснение.*", "- **#2** — наша"], 6: ["- **#4** — своя очередь"]}
+    assert moved == {4: ["- **#3** — ждёт решения"], 6: ["- **#1** — ждёт соседа", "  продолжение"]}
+
+
+def test_queued_rows_name_open_tasks_the_plan_lacks() -> None:
+    """Открытая задача без строки встаёт в очередь; план, реестр, изменение и стоящее — нет."""
+    listed = [
+        {"number": 9, "title": "Интеграция", "state": "open", "body": ""},
+        {"number": 8, "title": "Стоит в плане", "state": "open", "body": ""},
+        {"number": 7, "title": "Изменение", "state": "open", "body": "", "pull_request": {}},
+        {"number": 6, "title": "План", "state": "open", "body": module.MARKER},
+        {"number": 5, "title": "Закрыта", "state": "closed", "body": ""},
+    ]
+    assert module.queued_rows("o/r", listed, {8}) == [
+        f"- **#9** — Интеграция *({module.QUEUED_TAIL})*"
+    ]
+
+
+def test_the_built_plan_routes_rows_and_queues_the_missing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Сборка: раздел 6 под новым именем, соседская строка в 6, не стоявшая в плане — очередью."""
+    written = quiet_platform(monkeypatch)
+    listed = [
+        {"number": 640, "labels": [{"name": module.WAITS_NEIGHBOUR}]},
+        {"number": 711, "title": "Без строки", "state": "open", "body": "", "labels": []},
+    ]
+    monkeypatch.setattr(module.debt, "open_listed", lambda *_: listed)
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    assert f"## {module.HEADS[6]}" in written[0] and "## 6 · План автора" not in written[0]
+    six = written[0].split(f"## {module.HEADS[6]}", 1)[1]
+    assert "*Ожидаем действия соседей*\n- **#640**" in six
+    assert "*Ждёт своей очереди*\n- **#642**" in six
+    assert f"- **#711** — Без строки *({module.QUEUED_TAIL})*" in six
+    assert "#642" not in written[0].split("## 4 ·", 1)[1].split("## 5 ·", 1)[0]
+    assert "дописано задач, которых в плане не было: 1" in capsys.readouterr().out
+
+
+def test_laid_out_writes_born_and_queued_rows_into_the_section_of_their_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Рождённая — в 4, не стоявшая в плане — в 6, но обе по метке: соседская — в 6 (#1655)."""
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([]))
+    held = {4: ["- **#10** — наша"], 6: ["- **#20** — своя очередь"]}
+    listed = [
+        {"number": 11, "title": "Рождённая", "state": "open", "body": "Refs #10", "labels": []},
+        {
+            "number": 12,
+            "title": "Вне плана, ждёт соседа",
+            "state": "open",
+            "body": "",
+            "labels": [{"name": module.WAITS_NEIGHBOUR}],
+        },
+        {"number": 13, "title": "Вне плана", "state": "open", "body": "", "labels": []},
+    ]
+    said = module.laid_out("o/r", "t", held, frozenset(), listed)
+    four, six = "\n".join(said[4]), "\n".join(said[6])
+    assert "#11" in four and module.BORN_TAIL in four
+    assert "*Ожидаем действия соседей*\n- **#12**" in six
+    assert "*Ждёт своей очереди*\n- **#20**" in six and "- **#13** — Вне плана" in six
