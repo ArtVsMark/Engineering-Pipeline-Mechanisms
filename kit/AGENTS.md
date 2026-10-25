@@ -131,8 +131,7 @@ Refs #25
 заходом**, что и правка свода: здесь остаётся формулировка и ссылка, инцидент и
 границы применимости живут там
 ([080](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/080-every-new-rule-goes-into-the-catalogue.md)).
-Канал предложений — очередь предложений каталогу
-(`bash .claude/mechanisms.sh paths.py proposals`).
+Канал предложений — очередь предложений каталогу (ключ `proposals` таблицы путей).
 
 Не идёт в каталог то, у чего не нашлось инцидента: это предпочтение, а не
 правило.

@@ -148,7 +148,7 @@ def code_problems(source: str, names: dict[str, str]) -> list[str]:
             isinstance(up, ast.Attribute) and up.attr == "name"
         ):
             continue
-        scope = node
+        scope: ast.AST = node
         while scope in parent and not isinstance(
             scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
         ):
