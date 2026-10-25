@@ -396,3 +396,24 @@ def test_live_red_asks_the_platform_about_the_neighbour(monkeypatch: pytest.Monk
         module.ghrest, "paginate", lambda path, *_, **__: iter(runs[path.split("/")[-2]])
     )
     assert [module.live_red("o/r", "t", one) for one in (5, 6, 7)] == [True, False, False]
+
+
+def test_main_red_asks_the_trunk_and_names_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красноту шага спрашивает тот же вопрос, что метка `fix-main`; отказ — третий исход."""
+    asked: list[tuple[str, ...]] = []
+
+    def red_on_trunk(repo: str, token: str, step: str, trunk: str) -> bool:
+        asked.append((repo, step, trunk))
+        return step == "tests"
+
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", red_on_trunk)
+    assert module.main_red("o/r", "t", "tests") is True
+    assert module.main_red("o/r", "t", "lint") is False
+    assert asked[0] == ("o/r", "tests", module.paths.TRUNK)
+
+    def refuse(*_: object) -> bool:
+        raise module.agent_pr.NotRun("площадка не ответила")
+
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", refuse)
+    with pytest.raises(module.NotRun, match="не ответила"):
+        module.main_red("o/r", "t", "tests")
