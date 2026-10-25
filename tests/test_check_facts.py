@@ -61,7 +61,10 @@ def test_major_1_passes_with_a_move_advice(tmp_path: Path) -> None:
     )
     done = run("--file", str(path), "--repo", "Owner/Project")
     assert done.returncode == 0
-    assert "facts-v2.1.0 механизмов" in done.stdout
+    # Номер — из `facts.version`: вписанный строкой, он не поймал бы совет на
+    # прежнем теге после подъёма договора (взгляд на #1679).
+    number = (EXAMPLE.parent / "facts.version").read_text(encoding="utf-8").strip()
+    assert f"facts-v{number} механизмов" in done.stdout
 
 
 def test_without_a_file_is_the_third_outcome() -> None:
@@ -82,9 +85,13 @@ def test_a_number_apart_from_the_prose_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`--contract` отвергает прозу на прежнем номере, а не только пропускает верную."""
-    prose = cf.CONTRACT_PATH.read_text(encoding="utf-8").replace(
-        "FACTS_CONTRACT: facts-v2.1.0", "FACTS_CONTRACT: facts-v1.6.0"
-    )
+    # Номер — из `facts.version`, а не строкой: вписанный рукой, он молча
+    # перестал бы совпадать с прозой при первом же подъёме договора, и подмена
+    # ничего не подменила бы (#1675).
+    number = (cf.CONTRACT_PATH.parent / "facts.version").read_text(encoding="utf-8").strip()
+    said = cf.CONTRACT_PATH.read_text(encoding="utf-8")
+    assert f"FACTS_CONTRACT: facts-v{number}" in said, "шаг для CI не назван номером договора"
+    prose = said.replace(f"FACTS_CONTRACT: facts-v{number}", "FACTS_CONTRACT: facts-v1.6.0")
     stale = tmp_path / "facts-contract.md"
     stale.write_text(prose, encoding="utf-8")
     monkeypatch.setattr(cf, "CONTRACT_PATH", stale)
@@ -172,3 +179,9 @@ def test_read_manifest_tells_absent_from_broken(tmp_path: Path) -> None:
     assert cf.read_manifest(tmp_path / "битый.json") == "не JSON"
     (tmp_path / "верный.json").write_text('{"family": "1.0"}', encoding="utf-8")
     assert cf.read_manifest(tmp_path / "верный.json") == {"family": "1.0"}
+
+
+def test_the_move_advice_names_the_contract_it_judges_by() -> None:
+    """Совет о переезде называет тег и формат того договора, которым судят, а не вписанный."""
+    said = cf.moved("2.7")
+    assert "facts-v2.7.0" in said and "schema «2.7»" in said
