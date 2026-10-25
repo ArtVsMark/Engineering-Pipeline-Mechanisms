@@ -590,6 +590,40 @@ def test_path_keys_are_read_from_the_tree_not_the_import(tmp_path: Path) -> None
     assert said == ["ключ путей снят: «b»"] and contract.breaking(said), said
 
 
+def declared_lines(tmp_path: Path) -> list[str]:
+    """Различия на подделке объявленной поверхности (#1664): снят, изменён, добавлен файл."""
+    form = load_script("contract_form.py").Form((Path("export"),), "changed")
+    trees = {}
+    for name, files in (
+        ("before", {"rules.json": "1", "where.json": "2"}),
+        ("after", {"rules.json": "1+", "new.json": "3"}),
+    ):
+        where = tmp_path / "declared" / name
+        (where / "export").mkdir(parents=True)
+        for file, text in files.items():
+            (where / "export" / file).write_text(text, encoding="utf-8")
+        trees[name] = contract.surface(where, form)
+    return list(contract.differences(trees["before"], trees["after"]))
+
+
+def test_a_declared_surface_replaces_ours(tmp_path: Path) -> None:
+    """Объявленная поверхность снимается отпечатками файлов, а не прогонами (#1664)."""
+    said = declared_lines(tmp_path)
+    assert said == [
+        "файл поверхности добавлен: export/new.json",
+        "файл поверхности изменён: export/rules.json",
+        "файл поверхности снят: export/where.json",
+    ]
+    assert contract.breaking(said) == ["файл поверхности снят: export/where.json"]
+    flows = tmp_path / "flows" / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "ci.yml").write_text("jobs:\n  a: {}\n", encoding="utf-8")
+    form = load_script("contract_form.py").Form((Path("export"),), "changed")
+    assert contract.surface(flows.parent.parent, form) == {"declared": {}}, (
+        "прогоны вне объявленного"
+    )
+
+
 def test_every_breaking_mark_is_actually_printed(tmp_path: Path) -> None:
     """У каждой приметы несовместимого есть ПРАВКА, на которой она печатается.
 
@@ -604,7 +638,11 @@ def test_every_breaking_mark_is_actually_printed(tmp_path: Path) -> None:
     внешний взгляд на #242
     ([140](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/140-a-gate-is-tested-by-what-it-must-reject.md)).
     """
-    said = planted_lines(tmp_path) + key_removal_lines(tmp_path / "keys-removal")
+    said = (
+        planted_lines(tmp_path)
+        + key_removal_lines(tmp_path / "keys-removal")
+        + declared_lines(tmp_path / "declared-removal")
+    )
     orphans = [mark for mark in contract.BREAKING_MARKS if not any(mark in line for line in said)]
     assert not orphans, (
         f"приметы, которых не печатает ни одна подделанная правка: {orphans}. "
@@ -781,10 +819,48 @@ def test_a_breaking_change_without_a_transition_is_the_findings_outcome(
     monkeypatch.setattr(gate.journal, "base_from_env", lambda: "база")
     monkeypatch.setattr(gate.journal, "common_ancestor", lambda base: "предок")
     monkeypatch.setattr(gate, "base_tree", lambda base, into: into)
-    monkeypatch.setattr(gate.contract, "surface", lambda root=None: {})
+    monkeypatch.setattr(gate.contract, "surface", lambda root=None, form=None: {})
     monkeypatch.setattr(
         gate.contract, "differences", lambda before, after: ["ci.yml: джобов не стало — ['lint']"]
     )
-    monkeypatch.setattr(gate, "declared", lambda base: [fragment])
+    monkeypatch.setattr(gate, "declared", lambda base, kind="contract": [fragment])
     assert gate.main([]) == gate.EXIT_FINDINGS
     assert "НЕСОВМЕСТИМАЯ" in capsys.readouterr().out
+
+
+def test_a_declared_surface_is_judged_with_its_declared_kind(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Каталог (#1664): правка прогонов поверхность не трогает, правка выгрузки — трогает.
+
+    Род фрагмента объявлен `changed`: им правка и называется, а не родом
+    `contract`, которого в журнале каталога нет.
+    """
+    answer = ANSWER + "contract-surface:\n  surface: [export]\n  kind: changed\n"
+    root = tree(tmp_path / "tree", answer=answer)
+    (root / "export").mkdir()
+    (root / "export" / "rules.json").write_text("{}\n", encoding="utf-8")
+    git(root, "init", "-q", "--initial-branch=main")
+    git(root, "config", "user.name", "Artem Markitanov")
+    git(root, "config", "user.email", "a@b.c")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "основание")
+    git(root, "checkout", "-q", "-b", "work")
+    flow = root / ".github" / "workflows" / "ci.yml"
+    flow.write_text(flow.read_text(encoding="utf-8").replace("lint", "tests"), encoding="utf-8")
+    git(root, "commit", "-qam", "переименован джоб")
+    with contextlib.chdir(root):
+        assert gate.main(["--base", "main"]) == gate.EXIT_CLEAN
+    assert "не тронута" in capsys.readouterr().out
+    (root / "export" / "rules.json").write_text('{"rules": []}\n', encoding="utf-8")
+    git(root, "commit", "-qam", "выгрузка изменена")
+    with contextlib.chdir(root):
+        assert gate.main(["--base", "main"]) == gate.EXIT_FINDINGS
+    said = capsys.readouterr().out
+    assert "файл поверхности изменён: export/rules.json" in said and "`changed`" in said
+    (root / "changelog.d").mkdir()
+    (root / "changelog.d" / "export-rules.changed.md").write_text("Выгрузка.\n\n#1\n", "utf-8")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "фрагмент")
+    with contextlib.chdir(root):
+        assert gate.main(["--base", "main"]) == gate.EXIT_CLEAN

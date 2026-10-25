@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Final
 
 import contract
+import contract_form
 import gitcall
 import journal
 import paths
@@ -119,8 +120,8 @@ def untracked() -> list[str]:
     return [line[3:].strip() for line in done.stdout.splitlines() if line[3:].strip()]
 
 
-def declared(base: str) -> list[Path]:
-    """Фрагменты рода `contract`, принесённые изменением.
+def declared(base: str, kind: str = contract_form.DEFAULT_KIND) -> list[Path]:
+    """Фрагменты объявленного рода (по умолчанию `contract`), принесённые изменением.
 
     ОТКАЗ ЧТЕНИЯ ЗДЕСЬ — ТРЕТИЙ ИСХОД, А НЕ ТРАССИРОВКА. `changed_files` кидает
     `journal.NotRun`, а зовут эту функцию уже ПОСЛЕ разбора поверхности, где
@@ -137,7 +138,7 @@ def declared(base: str) -> list[Path]:
     return [
         Path(name)
         for name in names
-        if name.startswith(f"{paths.FRAGMENTS}/") and name.endswith(CONTRACT_KIND)
+        if name.startswith(f"{paths.FRAGMENTS}/") and name.endswith(f".{kind}.md")
     ]
 
 
@@ -183,9 +184,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--show", action="store_true", help="напечатать снимок и выйти")
     args = parser.parse_args(argv)
 
+    # ПОВЕРХНОСТЬ И РОД — ИЗ ОТВЕТА ГОЛОВЫ (#1664): что наружу, решает проект, и
+    # оба снимка — до и после — снимаются по одной и той же форме.
+    try:
+        form = pipeline_checks.contract_form_at()
+    except contract_form.NotRun as exc:
+        print(f"гейт не отработал: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+
     if args.show:
         try:
-            print(contract.as_text(contract.surface()))
+            print(contract.as_text(contract.surface(form=form)))
         except pipeline_checks.BadPolicy as exc:
             print(f"гейт не отработал: {exc}", file=sys.stderr)
             return EXIT_BROKEN
@@ -199,8 +208,8 @@ def main(argv: list[str] | None = None) -> int:
         # удалён целиком» — шаг пришёл в базу с #1492 после ветвления.
         fork = journal.common_ancestor(base)
         with tempfile.TemporaryDirectory() as room:
-            before = contract.surface(base_tree(fork, Path(room)))
-        after = contract.surface()
+            before = contract.surface(base_tree(fork, Path(room)), form)
+        after = contract.surface(form=form)
         changes = contract.differences(before, after)
     except (journal.NotRun, pipeline_checks.BadPolicy) as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
@@ -218,13 +227,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {line}")
 
     try:
-        fragments = declared(base)
+        fragments = declared(base, form.kind)
     except NotRun as exc:
         print(f"гейт не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     breaks = contract.breaking(changes)
     if fragments and not breaks:
-        print("\nизменение объявило это фрагментом рода `contract` — так и надо")
+        print(f"\nизменение объявило это фрагментом рода `{form.kind}` — так и надо")
         return EXIT_CLEAN
     if fragments and migration_named(fragments):
         print("\nправка несовместима, и фрагмент называет переход — так и надо")
@@ -233,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "\nЭто НЕСОВМЕСТИМАЯ правка:\n  "
             + "\n  ".join(breaks)
-            + "\n\nФрагмент рода `contract` есть, а перехода в нём нет. Потребитель живёт на\n"
+            + f"\n\nФрагмент рода `{form.kind}` есть, а перехода в нём нет. Потребитель живёт на\n"
             "своей версии, и миграция идёт ОТ НЕЁ, а не от нуля (114): «поставьте свежее\n"
             "и настройте заново» переписывает ему уже работающее, и он этого не сделает.\n"
             "Скажите, ЧТО было и что стало — удалённое имя джоба потребитель держит в\n"
@@ -244,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "\nЭто видит потребитель: имена джобов попадают в его защиту ветки дословно,\n"
         "входы кнопки — в его вызовы, классы проверок — в его ответ. Изменение,\n"
-        f"тронувшее поверхность, обязано нести фрагмент рода `contract` в\n"
+        f"тронувшее поверхность, обязано нести фрагмент рода `{form.kind}` в\n"
         f"{paths.FRAGMENTS}/ и называть словами, ЧТО именно изменилось —\n"
         "не «обновите механизмы». Форма — changelog.d/README.md."
     )
