@@ -261,7 +261,8 @@ def test_the_skill_and_the_record_name_each_other() -> None:
     skill = ROOT / ".claude" / "skills" / "close-a-finding" / "SKILL.md"
     said = skill.read_text(encoding="utf-8")
     assert "scripts/finding_kinds.py" in said, "навык не зовёт механизма родов"
-    assert "finding-kinds.json" in said, "навык не называет, куда записывать род"
+    # Куда записывать род — ключом таблицы путей, а не путём (#1623).
+    assert "paths.py finding-kinds" in said, "навык не называет, куда записывать род"
 
 
 def test_the_walk_names_the_kinds(run_script) -> None:  # type: ignore[no-untyped-def]
