@@ -257,8 +257,8 @@ def true_values(text: str) -> list[yaml.ScalarNode]:
         if not isinstance(given, yaml.MappingNode):
             continue
         value = merged(given).get(PERSIST)
-        # Узел — на каждую выгрузку, даже общий у псевдонима: счёт сверяется с
-        # разбором по выгрузкам; одинаковую строку снимает `unreasoned`.
+        # Узел — на каждую выгрузку, даже общий у псевдонима; одинаковую
+        # строку находки по общему узлу снимает `unreasoned`.
         if isinstance(value, yaml.ScalarNode) and is_true(value):
             found.append(value)
     return found
