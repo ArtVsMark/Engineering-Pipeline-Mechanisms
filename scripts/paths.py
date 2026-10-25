@@ -17,7 +17,9 @@
 принял бы его за свой — ровно тот отказ, из-за которого правило записано.
 """
 
+import argparse
 import re
+import sys
 from pathlib import Path
 from typing import Final
 
@@ -383,3 +385,43 @@ CONSUMER_ONLY: Final = (PREFLIGHT_LOADER, LAUNCHER)
 #: сообщений судит их тем, что пишущий у якоря назван, а не существованием.
 #: Список закрытый (068): первый такой адрес — перечень положенного (`f7e5ee4`).
 CONSUMER_WRITTEN: Final = (KIT_LAID,)
+
+
+#: Исходы точки входа (039): адрес напечатан · ключа нет или таблица не разобрана.
+EXIT_OK: Final = 0
+EXIT_BROKEN: Final = 2
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Точка входа: адрес ключа таблицы путей этого дерева — для навыков и документов (#1623).
+
+    Навык называет ключ, а не путь (решение владельца 25.10.2026): адрес у
+    потребителя приходит из ЕГО таблицы во время вызова, а снятый при кладке
+    устарел бы со сменой `paths:`. Неизвестный ключ и битая таблица — отказ с
+    причиной, а не путь умолчания молча (045).
+    """
+    # Разбор `.pipeline.yml` — у `pipeline_checks` (214); он сам импортирует
+    # этот модуль, поэтому импорт здесь, а не в шапке.
+    import pipeline_checks
+
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("key", help="ключ таблицы путей, например bindings")
+    parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
+    args = parser.parse_args(argv)
+    if args.key not in PROJECT:
+        print(
+            f"ключа «{args.key}» в таблице путей нет; ключи: {', '.join(sorted(PROJECT))}",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
+    try:
+        where = pipeline_checks.project_path(args.key, args.root)
+    except BadPaths as exc:
+        print(f"таблица путей не разобрана: {exc}", file=sys.stderr)
+        return EXIT_BROKEN
+    print(where.as_posix())
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

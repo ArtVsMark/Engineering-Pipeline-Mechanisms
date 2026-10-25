@@ -1405,6 +1405,23 @@ def test_project_path_reads_the_override_and_falls_back_to_the_default(tmp_path:
     assert policy.project_paths(tmp_path / ".pipeline.yml")["roles"] == Path("handbook/roles.md")
 
 
+def test_the_paths_entry_point_prints_the_address_of_a_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`paths.py <ключ>` печатает адрес по таблице дерева; чужой ключ и битая — отказ (#1623)."""
+    anchors = policy.paths
+    (tmp_path / ".pipeline.yml").write_text("paths:\n  bindings: cfg/answer.json\n", "utf-8")
+    assert anchors.main(["bindings", "--root", str(tmp_path)]) == anchors.EXIT_OK
+    assert capsys.readouterr().out.strip() == "cfg/answer.json"
+    assert anchors.main(["roles", "--root", str(tmp_path)]) == anchors.EXIT_OK
+    assert capsys.readouterr().out.strip() == anchors.ROLES.as_posix()
+    assert anchors.main(["nope", "--root", str(tmp_path)]) == anchors.EXIT_BROKEN
+    assert "ключа «nope»" in capsys.readouterr().err
+    (tmp_path / ".pipeline.yml").write_text("paths:\n  bindings: /abs.json\n", "utf-8")
+    assert anchors.main(["bindings", "--root", str(tmp_path)]) == anchors.EXIT_BROKEN
+    assert "вне дерева" in capsys.readouterr().err
+
+
 def test_project_paths_of_reads_text_and_names_a_broken_answer() -> None:
     """Из текста ответа — та же таблица; не разобранный YAML — `BadPaths` с местом."""
     said = policy.project_paths_of("paths:\n  review-roles: cfg/roles.json\n", "main:.pipeline.yml")
