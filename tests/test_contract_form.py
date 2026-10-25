@@ -18,6 +18,9 @@ def test_without_the_section_our_surface_and_kind_stay(tmp_path: Path) -> None:
 
 def test_the_consumer_names_its_surface_and_kind(tmp_path: Path) -> None:
     """Каталог: выгрузка и действия, род `changed`."""
+    (tmp_path / "export").mkdir()
+    (tmp_path / "export" / "rules.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".github" / "actions").mkdir(parents=True)
     (tmp_path / ".pipeline.yml").write_text(
         "contract-surface:\n  surface: [export/rules.json, .github/actions/]\n  kind: changed\n",
         encoding="utf-8",
@@ -74,3 +77,16 @@ def test_a_declared_path_that_is_a_link_is_named(tmp_path: Path) -> None:
     form = module.Form((Path("export"), Path("real")), "changed")
     assert module.missing(form, tmp_path) == []
     assert module.linked(form, tmp_path) == ["export"]
+
+
+def test_the_form_reader_of_the_gate_refuses_a_missing_or_linked_path(tmp_path: Path) -> None:
+    """Читатель формы для `check_contract` сверяет пути сам (взгляд на #1672)."""
+    answer = tmp_path / ".pipeline.yml"
+    answer.write_text("contract-surface:\n  surface: [нет]\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="нет в дереве — нет"):
+        pipeline_checks.contract_form_at(answer)
+    (tmp_path / "real").mkdir()
+    (tmp_path / "export").symlink_to(tmp_path / "real")
+    answer.write_text("contract-surface:\n  surface: [export]\n", encoding="utf-8")
+    with pytest.raises(module.NotRun, match="символическая ссылка"):
+        pipeline_checks.contract_form_at(answer)

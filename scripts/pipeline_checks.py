@@ -1201,6 +1201,11 @@ def contract_form_at(path: Path = DEFAULT_PATH) -> contract_form.Form:
 
     Тем же приёмом, что `shipped_form_at`: отказ чтения и битый раздел —
     `contract_form.NotRun` с причиной.
+
+    ПУТИ СВЕРЯЮТСЯ С ДЕРЕВОМ ЗДЕСЬ, А НЕ ТОЛЬКО В СВЕРКЕ ОТВЕТА (взгляд на
+    #1672). Гейт `check_contract` берёт форму отсюда и в другом шаге: без этой
+    сверки путь без файла или путь-ссылка давали ему пустую поверхность и
+    зелёное без единого слова.
     """
     if not path.is_file():
         return contract_form.DEFAULT_FORM
@@ -1208,4 +1213,14 @@ def contract_form_at(path: Path = DEFAULT_PATH) -> contract_form.Form:
         raw = yaml.safe_load(file_text(path, "ответ проекта"))
     except (BadPolicy, yaml.YAMLError) as exc:
         raise contract_form.NotRun(f"{path} не прочитан: {exc}") from exc
-    return contract_form.form_of(raw.get(contract_form.SECTION) if isinstance(raw, dict) else None)
+    form = contract_form.form_of(raw.get(contract_form.SECTION) if isinstance(raw, dict) else None)
+    if gone := contract_form.missing(form, path.parent):
+        raise contract_form.NotRun(
+            f"раздел {contract_form.SECTION}: путей поверхности нет в дереве — " + ", ".join(gone)
+        )
+    if linked := contract_form.linked(form, path.parent):
+        raise contract_form.NotRun(
+            f"раздел {contract_form.SECTION}: путь поверхности — символическая ссылка, "
+            "а по ссылкам обход не идёт — " + ", ".join(linked)
+        )
+    return form
