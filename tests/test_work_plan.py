@@ -1651,3 +1651,12 @@ def test_the_built_plan_splits_zero_and_moves_the_held_red_out_of_two(
     assert f"*{module.ZERO_TITLES[0]}*\n- **tests** — держит слияние" in zero
     assert f"*{module.ZERO_TITLES[1]}*\n- **#30** — держит #31" in zero
     assert "#31" not in two and "#35 — своё красное" in two
+
+
+def test_rules_half_on_the_catalogue_tree_is_inapplicable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """На дереве каталога чисел во «входящих» нет по построению: заметка, а не «не прочитано»."""
+    monkeypatch.setattr(module.debt, "closed_issues", lambda *_: [])
+    monkeypatch.setattr(module.debt, "inbox_body", lambda *_: ("", "", ""))
+    monkeypatch.setattr(module.debt, "rules_debt", lambda _: None)
+    said = module.rules_part(module.debt.catalogue.REPO, "t")
+    assert said == module.Source(note=module.debt.CATALOGUE_TREE)

@@ -50,6 +50,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+import catalogue
 import ci_complete
 import coverage_floor
 import findings
@@ -758,6 +759,24 @@ def remind(has_debt: bool, unread: dict[int, list[str]] | None = None) -> None:
         print(f"Источник {source} прочитан не весь: {'; '.join(whys)} — это НЕ «пусто» (045).")
 
 
+#: Ответ о долге по правилам на дереве самого каталога (#1666).
+CATALOGUE_TREE: Final = (
+    "неприменимо: дерево — сам каталог, «входящие» — понятие потребителя; "
+    "долг по правилам у каталога считает его `check_bindings.py` (ступень 0)"
+)
+
+
+def catalogue_tree(repo: str) -> bool:
+    """Дерево — сам каталог: «входящих» у него нет по построению (#1666).
+
+    ГРАНИЦА — ТОЧНОЕ ИМЯ, как у `check_foreign_why` (#1624, взгляд на #1646):
+    форк или переименованный каталог снова спрашивает «входящие» и громко
+    называет их отсутствие. Опознание по содержимому отдало бы «неприменимо»
+    любому дереву, сложенному похоже, — ошибка в сторону тишины (051).
+    """
+    return repo.casefold() == catalogue.REPO.casefold()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает остаток долга и возвращает исход."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -889,7 +908,9 @@ def main(argv: list[str] | None = None) -> int:
     partial = False
     numbers = rules_debt(inbox)
     note = contract_note(inbox)
-    if numbers is None:
+    if numbers is None and catalogue_tree(args.repo):
+        print(f"правила: {CATALOGUE_TREE}")
+    elif numbers is None:
         partial = True
         print(
             "правила: «входящие» не найдены или без строки счёта — ночной прогон каталога\n"

@@ -1408,3 +1408,18 @@ def test_open_changes_are_the_pull_requests_of_the_listing() -> None:
         {"number": 7, "pull_request": {"x": 1}},
     ]
     assert debt.open_changes(listed) == frozenset({5, 7})
+
+
+@pytest.mark.parametrize(
+    ("repo", "said"),
+    [
+        (debt.catalogue.REPO, True),
+        (debt.catalogue.REPO.upper(), True),
+        ("someone/Engineering-Incidents-Playbook", False),
+        ("o/r", False),
+    ],
+    ids=["каталог", "регистр", "форк", "потребитель"],
+)
+def test_only_the_catalogue_itself_has_no_inbox(repo: str, said: bool) -> None:
+    """«Входящих» нет у самого каталога, и только у него — форк спрашивает их громко (#1666)."""
+    assert debt.catalogue_tree(repo) is said
