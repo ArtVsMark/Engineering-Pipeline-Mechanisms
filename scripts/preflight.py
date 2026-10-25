@@ -394,18 +394,41 @@ def chosen_scope(root: Path, *, everything: bool) -> scope.Choice | None:
     return said
 
 
+#: Ссылка, которой `--push` помечает толкнутую им голову: зелёная по вердикту,
+#: а не по порядку окна. Локальная: на площадку не уходит.
+GREEN_REF: Final = "refs/preflight/green/"
+
+
 def pushed(root: Path) -> str:
     """Толкнутая голова ветки окна — прежняя зелёная (#1602); не толкнута — пусто.
 
-    Зелёной её делает порядок окна: ветку толкает `--push` после зелёной
-    предполётной. Ветки нет на площадке или git не ответил — пусто, и суд идёт
-    от общего предка: ошибка в сторону «больше» (039).
+    ЗЕЛЁНОЙ ЕЁ ДЕЛАЕТ ПОМЕТКА, А НЕ ПОРЯДОК ОКНА (находка `1f6094a`). Прежде
+    `origin/<ветка>` считалась зелёной без проверки: толкнутая простым `git
+    push` или с красной предполётной, она сужала суд до правок после себя.
+    Теперь `--push` после толчка ставит `GREEN_REF<ветка>` на толкнутую
+    голову, и голова площадки засчитывается, только совпав с пометкой. Иначе —
+    толчок мимо `--push`, голова, подтянутая очередью, — пусто, и суд идёт от
+    общего предка: ошибка в сторону «больше» (039). Ветки нет на площадке или
+    git не ответил — тоже пусто.
     """
     try:
         name = gitcall.branch(scope.NotRun, cwd=str(root))
-        return scope.git(root, "rev-parse", "--verify", "--quiet", f"origin/{name}").strip()
+        remote = scope.git(root, "rev-parse", "--verify", "--quiet", f"origin/{name}").strip()
+        green = scope.git(root, "rev-parse", "--verify", "--quiet", GREEN_REF + name).strip()
     except scope.NotRun:
         return ""
+    return remote if remote and remote == green else ""
+
+
+def mark_green(root: Path, branch: str) -> None:
+    """Помечает толкнутую голову зелёной; отказ git — слово, а не трасса (039)."""
+    try:
+        scope.git(root, "update-ref", GREEN_REF + branch, "HEAD")
+    except scope.NotRun as exc:
+        print(
+            f"голова не помечена зелёной — следующий заход судит от предка: {report.cut(str(exc))}",
+            file=sys.stderr,
+        )
 
 
 def journal_base() -> str:
@@ -743,6 +766,7 @@ def push_branch(root: Path) -> int:
     if said.returncode != 0:
         print(f"толчок не прошёл: {report.cut(said.stderr.strip())}", file=sys.stderr)
         return EXIT_BROKEN
+    mark_green(root, branch)
     print(f"толкнуто: {branch}")
     return EXIT_OK
 
@@ -757,10 +781,12 @@ NOT_A_TREE: Final = "not a git repository"
 INSTALLED: Final = ("site-packages", "dist-packages")
 
 
-def code_origin(root: Path) -> str:
+def code_origin(root: Path, supplier: Path | None = None) -> str:
     """Откуда ШАГИ импортируют транспорт — спрошено у их же среды, а не выведено (216).
 
-    Спрашивает тот же `bash` с тем же `PATH` и корнем, что у шагов (`run`):
+    Спрашивает тот же `bash` с тем же `PATH`, корнем и `MECHANISMS`, что у шагов
+    (`run`): у потребителя код конвейера — выкачка `supplier`, а не его дерево
+    (находка `26bdccb`).
     ответ про импорт знает только импортирующий, а корень прогона об установке
     не знает ничего. Не ответила среда — пустая строка: молчание называет
     `source_line`, а не прячет.
@@ -779,7 +805,7 @@ def code_origin(root: Path) -> str:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env={**environment(), MECHANISMS: str(root.resolve())},
+            env={**environment(), MECHANISMS: str((supplier or root).resolve())},
             timeout=gitcall.LOCAL,
         )
     except OSError, subprocess.TimeoutExpired:
@@ -787,8 +813,13 @@ def code_origin(root: Path) -> str:
     return done.stdout.strip() if done.returncode == 0 else ""
 
 
-def source_line(origin: str, root: Path) -> tuple[str, bool]:
+def source_line(origin: str, root: Path, supplier: Path | None = None) -> tuple[str, bool]:
     """Строка отчёта об источнике проверяемого кода и признак предупреждения (216).
+
+    ВЫКАЧКА ПОСТАВЩИКА — ЗАКОННЫЙ ИСТОЧНИК (находка `26bdccb`). У потребителя
+    транспорт берётся из кеша механизмов, у которого свой git: сверка только с
+    корнем давала ложное «НЕ из проверяемого дерева» первой строкой каждого
+    захода. Источник, совпавший с `supplier`, называется выкачкой.
 
     ПРЕДУПРЕЖДЕНИЕ, А НЕ ОТКАЗ (051). Окно ставит пакеты дерева в `.venv`
     РЕДАКТИРУЕМОЙ установкой из того дерева, где оно собралось (хук старта), а
@@ -815,6 +846,8 @@ def source_line(origin: str, root: Path) -> tuple[str, bool]:
         return f"код транспорта: {where} — дерево не установлено: {report.cut(str(exc))}", False
     if owner == root.resolve():
         return f"код транспорта: из этого дерева, {where}", False
+    if supplier is not None and owner == supplier.resolve():
+        return f"код транспорта: из выкачки поставщика, {where}", False
     return (
         f"⚠ код транспорта НЕ из проверяемого дерева: импортируется {where},"
         f" а прогон идёт в {root.resolve()} — правку транспорта здесь видят только"
@@ -939,7 +972,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.list:
         # ПЕРВОЙ СТРОКОЙ — ЧЕЙ КОД ПРОВЕРЯЕТСЯ (216): остальные ответы прогона
         # имеют смысл только после неё.
-        print(source_line(code_origin(args.root), args.root)[0])
+        print(source_line(code_origin(args.root, args.mechanisms), args.root, args.mechanisms)[0])
         gap = environment_gap(args.root)
         if gap:
             print("окружение окна расходится с тем, что ставит прогон:")

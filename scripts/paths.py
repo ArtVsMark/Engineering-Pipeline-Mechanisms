@@ -161,6 +161,11 @@ PREFLIGHT_LOADER: Final = Path(".claude/preflight.sh")
 #: Запускатель механизмов у потребителя (#1552): выкачивает их по тому же тегу
 #: и зовёт любой их скрипт против его дерева; `PREFLIGHT_LOADER` — частный случай.
 LAUNCHER: Final = Path(".claude/mechanisms.sh")
+#: Перечень положенного потребителю (находка `f7e5ee4`, решение владельца
+#: 24.10.2026): путь хука или навыка → имя git-объекта текста, который заход
+#: положил последним. По нему `--update` узнаёт устаревшую копию, даже когда
+#: подстановка с тех пор изменилась и история её уже не воспроизводит.
+KIT_LAID: Final = Path(".claude/kit-laid.json")
 #: Хуки окна (#1554): заход подключения кладёт их потребителю — свои как есть,
 #: `floor.sh` и хук старта заготовкой из `kit/data/`.
 HOOKS: Final = Path(".claude/hooks")
@@ -264,6 +269,11 @@ def table_of(section: object) -> dict[str, Path]:
         if path.is_absolute() or ".." in path.parts:
             problems.append(f"«{key}»: «{value}» вне дерева — путь от корня без `..`")
             continue
+        if not path.parts:
+            # `.` — корень, а не путь данных: `git show base:.` отдал бы список
+            # файлов, и читатель принял бы его за текст (взгляд на #1631).
+            problems.append(f"«{key}»: «{value}» — корень дерева, а не путь данных")
+            continue
         table[key] = path
     if problems:
         raise BadPaths("раздел путей: " + "; ".join(problems))
@@ -348,6 +358,7 @@ ALL: Final = (
     ATTRIBUTION_SINCE,
     PREFLIGHT_LOADER,
     LAUNCHER,
+    KIT_LAID,
     HOOKS,
     SETTINGS,
     FLOOR,
@@ -366,3 +377,9 @@ WINDOW_DATA: Final = (SKILL_RUNS,)
 #: сообщений (`tests/test_messages_point_somewhere.py`) судит их заготовкой, а
 #: не существованием. Список закрытый (068).
 CONSUMER_ONLY: Final = (PREFLIGHT_LOADER, LAUNCHER)
+
+#: Адреса, которые ПИШЕТ заход подключения у потребителя, — без заготовки: у
+#: нас их нет, а содержимое — отчёт о кладке (`onboard.write_laid`). Гейт
+#: сообщений судит их тем, что пишущий у якоря назван, а не существованием.
+#: Список закрытый (068): первый такой адрес — перечень положенного (`f7e5ee4`).
+CONSUMER_WRITTEN: Final = (KIT_LAID,)

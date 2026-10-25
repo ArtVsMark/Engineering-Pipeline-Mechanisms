@@ -256,6 +256,11 @@ def window_of(one: family_uptake.Took, token: str) -> str | None:
     (`NotFound`) или он не разбирается (`BadAnswer`) — тоже его состояние, и
     без оповещения шаг выпуска краснел бы на каждом миноре (взгляд на #1591,
     195).
+
+    404 НА ФАЙЛ — ЕЩЁ НЕ «ФАЙЛА НЕТ». Площадка отдаёт его и на репозиторий,
+    закрытый для токена или удалённый: тогда это сбой доступа, а не состояние
+    соседа, и оповещать некого. Различает второй запрос — к самому
+    репозиторию (`seen`): виден он — файла нет; не виден — `NotRun`.
     """
     if one.span:
         return one.span
@@ -263,12 +268,27 @@ def window_of(one: family_uptake.Took, token: str) -> str | None:
         raise NotRun("окно не прочитано: обход его не застал, а токена площадки нет")
     try:
         span = consumers.answer_of(one.repo, token).get("contract")
-    except ghrest.NotFound, consumers.BadAnswer:
+    except ghrest.NotFound:
+        seen(one.repo, token)
+        return None
+    except consumers.BadAnswer:
         return None
     except (consumers.NotRun, ghrest.TransportError, ValueError) as exc:
         # ValueError — битый base64 или не UTF-8 в чужом файле: тоже «не прочитано» (039).
         raise NotRun(f"окно не прочитано: {exc}") from exc
     return str(span) if span else None
+
+
+def seen(repo: str, token: str) -> None:
+    """Виден ли токену сам репозиторий соседа; не виден — `NotRun`, а не «файла нет»."""
+    try:
+        ghrest.request("GET", f"repos/{repo}", token)
+    except ghrest.NotFound as exc:
+        raise NotRun(
+            f"окно не прочитано: {repo} не виден токену — закрыт или удалён, а не без файла"
+        ) from exc
+    except ghrest.TransportError as exc:
+        raise NotRun(f"окно не прочитано: {exc}") from exc
 
 
 def covers(span: str, now: str) -> bool:

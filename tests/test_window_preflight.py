@@ -831,6 +831,34 @@ def test_a_platform_refusal_does_not_hold_the_push(
     assert "не проверено" in capsys.readouterr().err
 
 
+def test_only_a_push_that_happened_marks_the_head_green(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Толчок удался — голова помечена зелёной; не удался — пометки нет (`1f6094a`)."""
+    import subprocess
+
+    (tmp_path / "дерево").mkdir()
+    root = branch_tree(tmp_path / "дерево", "agent/работа")
+    for gate in (preflight.check_branch_revival, preflight.check_open_limit):
+        monkeypatch.setattr(gate, "look", lambda *_: (0, "чисто"))
+    mark = preflight.GREEN_REF + "agent/работа"
+
+    def marked() -> bool:
+        said = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", mark], cwd=root, capture_output=True
+        )
+        return said.returncode == 0
+
+    assert preflight.push_branch(root) == preflight.EXIT_BROKEN  # origin нет
+    assert not marked()
+    bare = tmp_path / "площадка.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=root, check=True)
+    assert preflight.push_branch(root) == preflight.EXIT_OK
+    assert marked()
+    assert preflight.pushed(root) != ""
+
+
 # --- тишина взгляда называется на КАЖДОМ заходе (#616) ------------------------
 
 
@@ -1286,6 +1314,39 @@ def test_the_source_line_warns_only_on_another_tree(
         assert "mypy_path" in line, "не сказано, какие шаги правку видят"
 
 
+def test_the_suppliers_download_is_a_lawful_source(tmp_path: Path) -> None:
+    """У потребителя транспорт из выкачки поставщика — не предупреждение (`26bdccb`).
+
+    Выкачка — свой git, как у кеша запускателя; без `supplier` та же строка
+    предупреждает, как прежде.
+    """
+    root, cache = tmp_path / "потребитель", tmp_path / "кеш"
+    for tree in (root, cache):
+        tree.mkdir()
+        subprocess.run(["git", "init", "--quiet"], cwd=tree, check=True)
+    origin = str(cache / "packages" / "transport" / "ghrest.py")
+    (cache / "packages" / "transport").mkdir(parents=True)
+    line, warned = preflight.source_line(origin, root, cache)
+    assert warned is False and "из выкачки поставщика" in line, line
+    assert preflight.source_line(origin, root)[1] is True
+
+
+def test_the_origin_is_asked_with_the_suppliers_mechanisms(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Среда вопроса несёт `MECHANISMS` выкачки, как у шагов `run`, а не корень (`26bdccb`)."""
+    seen: list[str] = []
+
+    def spy(*_: object, env: dict[str, str], **__: object) -> subprocess.CompletedProcess[str]:
+        seen.append(env[preflight.MECHANISMS])
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(preflight.subprocess, "run", spy)
+    preflight.code_origin(tmp_path, tmp_path / "кеш")
+    preflight.code_origin(tmp_path)
+    assert seen == [str((tmp_path / "кеш").resolve()), str(tmp_path.resolve())]
+
+
 def test_the_owning_tree_is_named_by_git(tmp_path: Path) -> None:
     """Хозяина пути называет git: вложенное дерево — своё, путь вне деревьев — ничей."""
     clone, nested = tmp_path / "clone", tmp_path / "clone" / ".claude" / "worktrees" / "x"
@@ -1337,7 +1398,9 @@ def test_the_source_is_the_first_line_of_the_report(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Строка об источнике идёт первой: остальное имеет смысл только после неё (216)."""
-    monkeypatch.setattr(preflight, "code_origin", lambda root: "/elsewhere/ghrest.py")
+    monkeypatch.setattr(
+        preflight, "code_origin", lambda root, supplier=None: "/elsewhere/ghrest.py"
+    )
     monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
     monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
     monkeypatch.setattr(preflight, "BEFORE_PUSH", [preflight.Step("зелёный", "true")])

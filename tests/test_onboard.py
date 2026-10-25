@@ -2424,6 +2424,66 @@ def test_plan_tree_sorts_current_stale_and_edited(tmp_path: Path) -> None:
         assert name in getattr(plan, where), (mine, plan)
 
 
+def test_the_write_lays_the_record_of_what_it_laid(tmp_path: Path) -> None:
+    """Подключение пишет перечень положенного: путь → имя объекта текста (`f7e5ee4`)."""
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    laid = module.laid_of(consumer)
+    guard = module.paths.HOOKS / "push_guard.py"
+    mine = module.unsigned(guard, (consumer / guard).read_text(encoding="utf-8"))
+    assert laid[guard] == module.blob_of(mine)
+    assert set(laid) <= module.LAID_KINDS and module.SKILLS_KITTED[0] in laid
+    # Настройки окна — файл проекта: `plan_tree` их не судит, в перечне им не место.
+    assert module.paths.SETTINGS not in laid
+    said = json.loads((consumer / module.paths.KIT_LAID).read_text(encoding="utf-8"))
+    assert next(iter(said)) == "_license", "перечень положен без подписи"
+
+
+def test_a_copy_the_history_no_longer_shapes_is_stale_by_the_record(tmp_path: Path) -> None:
+    """Копия, положенная прежней подстановкой, — устаревшая по перечню, а не правленая.
+
+    История пропускается через нынешнюю подстановку и такой копии не
+    воспроизводит; без перечня `--update` отказал бы на неправленом (`f7e5ee4`).
+    """
+    root = tree(tmp_path / "наше", **{"step-пример": MARKED})
+    name = module.paths.HOOKS / "push_guard.py"
+    ours = {name: "#!/bin/sh\n# новый\n"}
+    consumer = tmp_path / "потребитель"
+    before = "#!/bin/sh\n# положен подстановкой, которой больше нет\n"
+    module.lay(consumer, {name: before}, "o/r")
+    plan = module.Update()
+    module.plan_tree(plan, consumer, ours, root, "o/r")
+    assert name in plan.write, plan
+    (consumer / name).write_text("# свой\n", encoding="utf-8")
+    plan = module.Update()
+    module.plan_tree(plan, consumer, ours, root, "o/r")
+    assert name in plan.edited, "правленая копия перечнем не прощается"
+
+
+def test_write_laid_keeps_the_record_sorted_and_signed(tmp_path: Path) -> None:
+    """`write_laid` пишет пути по порядку и с подписью; `laid_of` читает то же (`f7e5ee4`)."""
+    hook, skill = module.paths.HOOKS / "b.py", module.paths.HOOKS / "a.py"
+    record = {hook: "1" * 40, skill: "2" * 40}
+    module.write_laid(tmp_path, record, "o/r")
+    said = json.loads((tmp_path / module.paths.KIT_LAID).read_text(encoding="utf-8"))
+    assert list(said) == ["_license", "_", "laid"] and list(said["laid"]) == sorted(
+        str(one) for one in record
+    )
+    assert module.laid_of(tmp_path) == record
+
+
+def test_a_broken_record_is_not_run(tmp_path: Path) -> None:
+    """Битый перечень — «не отработал» с выходом, а не тихая история (045)."""
+    (tmp_path / module.paths.KIT_LAID).parent.mkdir(parents=True)
+    for said in ('{"laid": {"a": "не-имя"}}', "[]", "{"):
+        (tmp_path / module.paths.KIT_LAID).write_text(said, encoding="utf-8")
+        with pytest.raises(module.NotRun, match="удалите его"):
+            module.laid_of(tmp_path)
+    (tmp_path / module.paths.KIT_LAID).unlink()
+    assert module.laid_of(tmp_path) == {}
+
+
 # --- навыки окна копией (#1552) ---------------------------------------------
 
 
@@ -2599,15 +2659,25 @@ def test_the_bindings_note_reads_the_consumers_path_table(tmp_path: Path) -> Non
 
 
 def test_a_kitted_skill_names_no_supplier_file_without_its_address() -> None:
-    """Наш файл в навыке потребителя — ссылкой на дерево поставщика, а не именем (#1637)."""
+    """Наш файл в навыке потребителя — ссылкой на дерево поставщика, а не именем (#1637).
+
+    И не ссылкой внутри ссылки: подпись с адресом в ней адресом не считается
+    (`aa56ac6`) — такая разметка ломается, и имя снова без адреса.
+    """
     bare = re.compile(r"(?<!\[)`([^`\s]+)` поставщика")
-    left = {
-        str(skill): bare.findall(
-            module.skill_kit((ROOT / skill).read_text(encoding="utf-8"), "o/r")
-        )
-        for skill in module.SKILLS_KITTED
-    }
+    nested = re.compile(r"\[[^\]\n]*\[[^\]\n]*\]\([^)\s]*\)[^\]\n]*\]\(")
+    left = {}
+    for skill in module.SKILLS_KITTED:
+        laid = module.skill_kit((ROOT / skill).read_text(encoding="utf-8"), "o/r")
+        left[str(skill)] = bare.findall(laid) + [one[0] for one in nested.finditer(laid)]
     assert {skill: names for skill, names in left.items() if names} == {}
+
+
+def test_the_gate_sees_a_link_inside_a_link() -> None:
+    """Сам гейт краснеет на ссылке в ссылке — подпись с адресом не прячет имя (`aa56ac6`)."""
+    nested = re.compile(r"\[[^\]\n]*\[[^\]\n]*\]\([^)\s]*\)[^\]\n]*\]\(")
+    assert nested.search("[см. [`scripts/x.py`](https://o/r) поставщика](../a.md)")
+    assert not nested.search("[`scripts/x.py`](https://o/r) поставщика и [b](../a.md)")
 
 
 @pytest.mark.parametrize(
@@ -2624,9 +2694,10 @@ def test_a_kitted_skill_names_no_supplier_file_without_its_address() -> None:
             " поставщика",
         ),
         ("[`docs/x.md`](https://a/b) уже адрес", "[`docs/x.md`](https://a/b) уже адрес"),
+        ("[см. `scripts/x.py`](https://a/b) адрес", "[см. `scripts/x.py`](https://a/b) адрес"),
         ("`docs/agent/roles.md` свой", "`docs/agent/roles.md` свой"),
     ],
-    ids=["имя", "хвост-функции-и-подпись", "уже-ссылка", "кладётся-потребителю"],
+    ids=["имя", "хвост-функции-и-подпись", "уже-ссылка", "имя-в-подписи", "кладётся-потребителю"],
 )
 def test_a_supplier_name_becomes_a_link_to_its_file(said: str, laid: str) -> None:
     """Имя — ссылкой на файл, хвост `::функция` — на свой файл; адрес и своё не трогаются."""

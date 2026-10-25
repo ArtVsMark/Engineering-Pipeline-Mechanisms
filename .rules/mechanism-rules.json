@@ -76,7 +76,7 @@
     },
     "167": {
       "paths.SOURCES": "исключено: правило об именах переменных оболочки, а paths.SOURCES — Python: code_files берёт *.py, файлов *.sh в scripts/ и packages/transport/ — 0 (find)",
-      ".claude/hooks": "не построено: оболочечные хуки (floor.sh, push_guard.sh, session-start.sh, skill_log.sh) на латиницу имён не сверяются — tests/test_source_hygiene.py::test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 17.10.2026 тем же SHELL_ASSIGN_RE по .claude/hooks/*.sh: присваиваний 11, не ASCII 0",
+      ".claude/hooks": "не построено: оболочечные хуки (floor.sh, install_floor.sh, push_guard.sh, session-start.sh, skill_log.sh) на латиницу имён не сверяются — tests/test_source_hygiene.py::test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 24.10.2026 тем же SHELL_ASSIGN_RE по .claude/hooks/*.sh: хуков 5, присваиваний 15, не ASCII 0 (17.10.2026: хуков 4, присваиваний 11)",
       ".github": "tests/test_source_hygiene.py",
       "kit/data": "не построено: оболочечный загрузчик на латиницу имён не сверяется — test_shell_variable_names_are_ascii обходит только .github/workflows/*.yml — замер 23.10.2026: присваиваний 6, не ASCII 0; после выноса выкачки в запускатель (#1552) — присваиваний 8 (запускатель 7, загрузчик 1), не ASCII 0 (замер 24.10.2026); заготовка хука старта и floor.sh (#1554) — присваиваний 2, не ASCII 0 (замер 24.10.2026)"
     },

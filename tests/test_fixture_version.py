@@ -300,7 +300,13 @@ def release_line_sites(source: str) -> tuple[int, list[tuple[int, str]]]:
         runs = node.args if isinstance(node, ast.Call) else []
         runs = node.elts if isinstance(node, ast.List | ast.Tuple) else runs
         head = tuple(one.value for one in runs[: len(TAG_CALL)] if isinstance(one, ast.Constant))
-        if head == TAG_CALL:
+        # Место номера — вызов, в котором номеру есть где стоять: не одни флаги
+        # (`git tag --list` — не место, иначе он раздувал бы счёт против
+        # слепоты `LINE_SITES_AT_LEAST`, `feb946c`).
+        if head == TAG_CALL and any(
+            not (isinstance(one, ast.Constant) and str(one.value).startswith("-"))
+            for one in runs[len(TAG_CALL) :]
+        ):
             sites += 1
             found += [
                 (one.lineno, one.value)
@@ -348,6 +354,14 @@ def test_a_git_tag_literal_is_a_release_line_site(source: str) -> None:
     sites, found = release_line_sites(source)
     assert sites == 1
     assert [said for _, said in found] and all(s.startswith("v0.5.0") for _, s in found)
+
+
+@pytest.mark.parametrize(
+    "source", ['["git", "tag", "--list"]', '["git", "tag", "-l", "-n"]'], ids=["list", "флаги"]
+)
+def test_a_git_tag_of_flags_only_is_not_a_site(source: str) -> None:
+    """`git tag --list` номеру места не даёт — и счёт против слепоты не раздувает (`feb946c`)."""
+    assert release_line_sites(source) == (0, [])
 
 
 def test_a_release_line_in_the_suite_does_not_share_the_real_major() -> None:
