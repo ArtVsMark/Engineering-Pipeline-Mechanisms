@@ -798,10 +798,10 @@
     "090": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/ci.yml — джоб attribution подключён действием каталога, а не переписан здесь; packages/transport/ghrest.py — общий транспорт вместо пяти копий, и tests/test_ghrest.py краснеет на появлении шестой",
-      "analysed": "2026-10-22",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.1.0",
-      "origin_kind": "called"
+      "where": ".github/workflows/ci.yml — джоб attribution зовёт scripts/check_attribution.py, перенесённый из каталога с источником в шапке (ArtVsMark/Engineering-Pipeline-Mechanisms#1670), а не написанный здесь заново; packages/transport/ghrest.py — общий транспорт вместо пяти копий, и tests/test_ghrest.py краснеет на появлении шестой",
+      "analysed": "2026-10-25",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:scripts/check_attribution.py@4e8bc3e",
+      "origin_kind": "adapted"
     },
     "091": {
       "status": "active",
@@ -1063,10 +1063,10 @@
     "123": {
       "status": "active",
       "mechanism": "gate",
-      "where": ".github/workflows/ci.yml — джоб attribution с отметкой cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b; отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть однозначным, и отметка тогда указывает не туда. Тот же полный отпечаток стоит в .github/workflows/ci.yml и в docs/decisions/001-attribution-of-merged-1.md — три места, одно написание. .github/authors.txt — список согласованных имён",
-      "analysed": "2026-10-22",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.1.0",
-      "origin_kind": "called"
+      "where": ".github/workflows/ci.yml — джоб attribution с отметкой cb26ec48dd6a53c0b47af7dd0ec7cda2e07a748b; отпечаток ЦЕЛИКОМ, а не короткий: короткий однажды перестаёт быть однозначным, и отметка тогда указывает не туда. Тот же полный отпечаток стоит в .github/workflows/ci.yml и в docs/decisions/001-attribution-of-merged-1.md — три места, одно написание. .github/authors.txt — список согласованных имён Гейт — scripts/check_attribution.py, перенесённый из каталога.",
+      "analysed": "2026-10-25",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:scripts/check_attribution.py@4e8bc3e",
+      "origin_kind": "adapted"
     },
     "124": {
       "status": "active",
@@ -1168,9 +1168,9 @@
       "status": "active",
       "mechanism": "gate",
       "where": ".github/workflows/attribution-history.yml — личность записи узнаётся ЗАПИСЬЮ: первопредками общей ветки, а не тем, что окно объявило о себе. Гейт на изменении этого не видит по построению — он спрашивает коммиты ветки, а в общую ветку едет уплотнение, тело которому составляет очередь. Замер 10.09.2026: из ста первопредков после объявленной отметки шестнадцать шли без строки соавтора, и все они старше того дня, когда очередь научилась переносить трейлеры. Отметка `since` объявлена в прогоне: старый хвост переписать нечем, а вечное красное — фон, а не сигнал (051). Плюс CLAUDE.md, раздел «Подпись и открытие изменения».",
-      "analysed": "2026-10-22",
-      "origin": "ArtVsMark/Engineering-Incidents-Playbook:.github/actions/attribution/action.yml@v2.1.0",
-      "origin_kind": "called",
+      "analysed": "2026-10-25",
+      "origin": "ArtVsMark/Engineering-Incidents-Playbook:scripts/check_attribution.py@4e8bc3e",
+      "origin_kind": "adapted",
       "note": "Правило заменено правилом 221 в выгрузке 1.8 (superseded_by): действующий ответ — запись 221, эта — состояние на день замены, а не находка (export/README.md каталога). Правится ответ 221, а не этот: два ответа на один вопрос, правленные порознь, разойдутся молча (071)."
     },
     "136": {

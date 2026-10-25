@@ -1,6 +1,6 @@
 """Объявленное начало отсчёта — коммит, а не дата.
 
-Прогон `attribution-history` подключает гейт каталога и подаёт ему отметку, с
+Прогон `attribution-history` зовёт гейт атрибуции и подаёт ему отметку, с
 которой атрибуция обязательна. Вход называется `since`, и это располагает
 подать дату: слово «начало» звучит как время. У гейта же `since` — РЕВИЗИЯ, из
 неё строится диапазон `<since>..<ref>`.
@@ -17,13 +17,14 @@
 задним числом (139).
 
 ВТОРОЙ ПРЕДМЕТ ЗДЕСЬ — НЕПУСТОТА ДИАПАЗОНА. Отметку двигают вперёд, и доехав
-до головы, она гасит прогон целиком: гейт каталога на пустом диапазоне говорит
+до головы, она гасит прогон целиком: гейт атрибуции на пустом диапазоне говорит
 «проверять нечего» и возвращает ноль. Снаружи такая зелень неотличима от
 проверенной истории, и это ровно тот случай, о котором 192: гейт, заведённый
 вместе с правкой, обязан ловить и НОЛЬ.
 """
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Final
@@ -33,11 +34,11 @@ import yaml
 
 from tests.conftest import needs_history
 
-#: Общий шаг, который подключает гейт каталога и читает отметку (#1556).
+#: Общий шаг, который зовёт гейт атрибуции и читает отметку (#1556).
 STEP: Final = Path(".github/workflows/step-attribution-history.yml")
 
-#: Шаг, подключающий гейт каталога.
-GATE: Final = "attribution@"
+#: Шаг, зовущий гейт: с #1670 — наш скрипт, а не действие каталога.
+GATE: Final = "scripts/check_attribution.py"
 
 #: Шаг, который называет отметку: его `run` исполняется здесь как есть.
 SINCE_STEP: Final = "since"
@@ -52,7 +53,7 @@ def step_jobs() -> list[dict[str, Any]]:
 def gate_step() -> dict[str, Any]:
     """Шаг подключения гейта из общего шага — вместе со всеми его входами."""
     for step in step_jobs():
-        if GATE in str(step.get("uses", "")):
+        if GATE in str(step.get("run", "")):
             return step
     raise AssertionError(f"в {STEP} нет шага, подключающего гейт атрибуции")
 
@@ -109,7 +110,9 @@ def test_the_step_hands_the_boundary_to_the_gate() -> None:
     бы всю историю, и вечное красное стояло бы у каждого потребителя с хвостом
     до подключения (051).
     """
-    assert gate_step()["with"].get("since") == "${{ steps.since.outputs.since }}"
+    step = gate_step()
+    assert step["env"].get("SINCE") == "${{ steps.since.outputs.since }}"
+    assert '--since "${SINCE:-}"' in str(step["run"])
 
 
 def git(tree: Path, *args: str) -> str:
@@ -127,7 +130,7 @@ def git(tree: Path, *args: str) -> str:
 def test_without_the_file_the_boundary_is_the_connection(tmp_path: Path) -> None:
     """У потребителя файла нет — отметка его коммит подключения, а не наш (#1556).
 
-    Наш коммит в его истории не разбирается, и гейт каталога дал бы третий
+    Наш коммит в его истории не разбирается, и гейт атрибуции дал бы третий
     исход «диапазон не разобран» на каждом заходе (039). Коммит подключения
     — тот, что добавил `.pipeline.yml`: всё до него механизмы не держали.
     """
@@ -206,7 +209,7 @@ def test_the_boundary_is_a_commit_not_a_date() -> None:
     since = boundary()
     assert since, "отметка не задана: без неё гейт спрашивает всю историю"
     assert revision(since) is not None, (
-        f"отметка «{since}» не разбирается как коммит. У гейта каталога `since` — "
+        f"отметка «{since}» не разбирается как коммит. У гейта атрибуции `since` — "
         "РЕВИЗИЯ, из неё строится диапазон `<since>..<ref>`; дата даёт третий исход "
         "«диапазон не разобран», а не проверку"
     )
@@ -220,7 +223,8 @@ def shared_branch() -> str:
     положить, — и проверка по `HEAD` краснела бы на КАЖДОМ изменении. Предмет
     же у прогона другой: история общей ветки, `origin/main`.
     """
-    for name in (str(gate_step()["with"].get("ref", "")).strip(), "origin/main", "HEAD"):
+    said = re.search(r"--ref\s+(\S+)", str(gate_step()["run"]))
+    for name in (said.group(1) if said else "", "origin/main", "HEAD"):
         if name and revision(name):
             return name
     return "HEAD"
@@ -245,7 +249,7 @@ def test_the_boundary_leaves_a_subject_behind_it() -> None:
 
     ГЕЙТ ОБЯЗАН ЛОВИТЬ И НОЛЬ
     ([192](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/192-changing-the-actor-invalidates-the-measurement.md)).
-    Гейт каталога на пустом диапазоне печатает «новых коммитов нет — проверять
+    Гейт атрибуции на пустом диапазоне печатает «новых коммитов нет — проверять
     нечего» и возвращает ноль — законно для него самого, но снаружи вечная
     зелень неотличима от проверенной истории
     ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).

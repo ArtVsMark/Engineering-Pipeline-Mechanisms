@@ -68,9 +68,26 @@ def test_only_an_outsider_from_a_fork_is_not_judged(
     assert ("сливает человек" in done.stdout) is external
 
 
+#: Шаги общего блока «код конвейера своим checkout» (#990): они берут наш код
+#: по тегу вызова, дерева вилки не читают и потому под ответом сверки не стоят.
+#: Блок обязан совпадать во всех шагах дословно —
+#: `tests/test_reusable_steps.py::test_the_code_block_is_one_in_every_step`, —
+#: и условия ему не добавить (#1670).
+OUR_CODE_BLOCK = frozenset(
+    {
+        "коммит и репозиторий вызова названы",
+        "код конвейера — на коммите вызова",
+        "унести код конвейера из дерева потребителя",
+    }
+)
+
+
 def test_the_gate_waits_for_the_answer() -> None:
-    """Выкачка и гейт идут под ответом сверки, а сверка — первой."""
+    """Выкачка дерева и гейт идут под ответом сверки, а сверка — первой."""
     names = steps()
     assert names[0].get("id") == "who", "сверка автора не первая"
+    assert {str(one.get("name")) for one in names} >= OUR_CODE_BLOCK, "блок нашего кода не найден"
     for one in names[1:]:
+        if one.get("name") in OUR_CODE_BLOCK:
+            continue
         assert "steps.who.outputs.external != 'yes'" in str(one.get("if") or ""), one

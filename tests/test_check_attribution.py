@@ -1,0 +1,727 @@
+"""Гейт атрибуции: трейлеры, список согласованных имён и три исхода.
+
+Самый важный скрипт каталога — на нём держится правило 123. Тесты строят
+НАСТОЯЩИЕ репозитории во временном каталоге, а не подсовывают разбор строк:
+проверка ходит в git, и подделка её входа проверяла бы регулярку, а не гейт.
+
+Отдельно закрыт краевой случай, ради которого скрипт и переписывали: пустой
+диапазон — это исход 2, а не «чисто». Проверка, которой нечего смотреть, не
+подтверждает ничего (правило 075).
+
+ПЕРЕЕХАЛИ ИЗ КАТАЛОГА вместе со скриптом (#1670): источник — `tests/test_check_attribution.py`
+каталога на коммите `4e8bc3e`. Своё здесь — обвязка набора механизмов: модуль
+берётся `load_script`, фикстуры и пометки типов — наши.
+"""
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from tests.conftest import load_script
+
+ca = load_script("check_attribution.py")
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """Пустой каталог под поддельный репозиторий: предмет проверки задаёт тест."""
+    return tmp_path
+
+
+def write(path: Path, text: str) -> Path:
+    """Кладёт файл вместе с недостающими каталогами и возвращает его путь."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+AGREED = "Claude <noreply@anthropic.com>"
+
+
+def run(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+
+
+def commit(
+    repo: Path,
+    subject: str,
+    body: str = "",
+    author: tuple[str, str] = ("Владелец", "owner@example.com"),
+) -> None:
+    write(repo / "f.txt", subject)
+    run(repo, "add", "-A")
+    message = f"{subject}\n\n{body}" if body else subject
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", message],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "HOME": str(repo),
+            "GIT_AUTHOR_NAME": author[0],
+            "GIT_AUTHOR_EMAIL": author[1],
+            "GIT_COMMITTER_NAME": "Владелец",
+            "GIT_COMMITTER_EMAIL": "owner@example.com",
+        },
+        timeout=60,
+    )
+
+
+def make_repo(repo: Path) -> Path:
+    run(repo, "init", "-q", "-b", "main")
+    run(repo, "config", "user.name", "Владелец")
+    run(repo, "config", "user.email", "owner@example.com")
+    return repo
+
+
+def authors_file(repo: Path, text: str = AGREED) -> Path:
+    return write(repo / ".github" / "authors.txt", text + "\n")
+
+
+OWNER = "Владелец <owner@example.com>"
+BOT = ("claude[bot]", "209825114+claude[bot]@users.noreply.github.com")
+
+
+def test_список_имён_без_комментариев_и_пустых(repo: Path) -> None:
+    path = authors_file(repo, f"# комментарий\n\n{AGREED}\n")
+    co, people = ca.agreed(path)
+    assert co == {AGREED} and people == set()
+
+
+# ── разрешительный список авторов ─────────────────────────────────────────
+#
+# Проверка автора была ЗАПРЕТИТЕЛЬНОЙ: «автором не должен стоять известный
+# соавтор». Она ловит ровно одно написание и молчит на `claude[bot]`, у
+# которого другое имя и другая почта. Так изменение #78 и уехало в общую ветку
+# авторства бота, а переписать там нечем (068, 114, задача #79).
+#
+# Ключ отдельный и по умолчанию выключен: у проекта раздела «[авторы]» может
+# не быть, и требовать его тогда — отказ на пустом месте.
+
+
+def test_раздел_авторов_читается_отдельно_от_соавторов(repo: Path) -> None:
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    co, people = ca.agreed(path)
+    # Соавтор — точной строкой, автор — почтой: списки сверяются по-разному,
+    # и это не небрежность. Соавтора пишут рукой, автора подставляет машина.
+    assert co == {AGREED} and people == {"owner@example.com"}
+
+
+def test_объявленный_автор_проходит(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "второй", f"Co-Authored-By: {AGREED}")
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--require-declared-author",
+        ],
+    )
+    assert ca.main() == 0
+
+
+def test_бот_автором_это_находка(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Тот самый случай: имя и почта другие, запрет молчал."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "от бота", f"Co-Authored-By: {AGREED}", author=BOT)
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--require-declared-author",
+        ],
+    )
+    assert ca.main() == 1
+    assert "не объявлен в разделе" in capsys.readouterr().err
+
+
+def test_то_же_лицо_под_другим_именем_проходит(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Здоровый предмет у самой границы, и он же — замер этого репозитория:
+    за одни сутки один человек подписался двумя написаниями имени. Почта та
+    же. Краснеть на смене настройки машины значило бы ловить не то (097)."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "второй", f"Co-Authored-By: {AGREED}", author=("owner", "owner@example.com"))
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--require-declared-author",
+        ],
+    )
+    assert ca.main() == 0
+
+
+def test_почта_в_другом_регистре_отказом_не_считается(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "второй", f"Co-Authored-By: {AGREED}", author=("Владелец", "Owner@Example.com"))
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--require-declared-author",
+        ],
+    )
+    assert ca.main() == 0
+
+
+def test_без_ключа_бот_автором_проходит_как_раньше(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Здоровый предмет у границы: ключ не должен ломать старых потребителей."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "от бота", f"Co-Authored-By: {AGREED}", author=BOT)
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+        ],
+    )
+    assert ca.main() == 0
+
+
+def test_ключ_без_раздела_авторов_это_третий_исход(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "второй", f"Co-Authored-By: {AGREED}")
+    path = authors_file(repo, AGREED)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--require-declared-author",
+        ],
+    )
+    assert ca.main() == 2
+    assert "требовать нечем" in capsys.readouterr().err
+
+
+def test_чистая_история_проходит(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "второй", f"Co-Authored-By: {AGREED}")
+    assert ca.first_parents(repo, "main", None, {AGREED}) == 0
+    assert "без атрибуции 0" in capsys.readouterr().out
+
+
+def test_коммит_без_трейлера_это_находка(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    make_repo(repo)
+    commit(repo, "с подписью", f"Co-Authored-By: {AGREED}")
+    commit(repo, "без подписи")
+    assert ca.first_parents(repo, "main", None, {AGREED}) == 1
+    err = capsys.readouterr().err
+    assert "без атрибуции 1" in err
+    assert "без подписи" in err
+
+
+def test_соавтор_вне_списка_это_находка(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    make_repo(repo)
+    commit(repo, "чужой", "Co-Authored-By: Кто-то Другой <x@example.com>")
+    assert ca.first_parents(repo, "main", None, {AGREED}) == 1
+    assert "вне списка" in capsys.readouterr().err
+
+
+def test_объявленное_начало_подрезает_долг(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    make_repo(repo)
+    commit(repo, "старый без подписи")
+    old = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        timeout=60,
+    ).stdout.strip()
+    commit(repo, "новый", f"Co-Authored-By: {AGREED}")
+    # Без --since долг виден числом; с ним — спрашивается только новое.
+    assert ca.first_parents(repo, "main", None, {AGREED}) == 1
+    assert ca.first_parents(repo, "main", old, {AGREED}) == 0
+
+
+def test_недоступная_ветка_это_третий_исход(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    make_repo(repo)
+    commit(repo, "один", f"Co-Authored-By: {AGREED}")
+    assert ca.first_parents(repo, "такой-ветки-нет", None, {AGREED}) == 2
+    assert "не отработала" in capsys.readouterr().err
+
+
+def test_пустой_диапазон_это_третий_исход(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    make_repo(repo)
+    commit(repo, "один", f"Co-Authored-By: {AGREED}")
+    head = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        timeout=60,
+    ).stdout.strip()
+    # Диапазон от головы до головы пуст. Зелёное здесь означало бы, что гейт
+    # подтвердил историю, которую не смотрел.
+    assert ca.first_parents(repo, "main", head, {AGREED}) == 2
+    assert "подтверждать нечего" in capsys.readouterr().err
+
+
+# ── трейлер в хвостовом блоке, а не в прозе (156) ──────────────────────────
+
+СООБЩЕНИЕ = """Заголовок изменения
+
+Абзац объясняет, почему площадка дописывает
+Co-authored-by: github-actions[bot] в уплотнённый коммит. #83 сделал автором.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Claude-Session: https://example/session
+"""
+
+
+def test_proza_ne_treyler() -> None:
+    """Инцидент ArtVsMark/ArtVsMark#95: середина фразы после переноса строки
+    оказалась первой в ней, и гейт назвал её соавтором. Изменение чинило
+    красную общую ветку — отказ задержал починку самого этого гейта."""
+    assert ca.COAUTHOR.findall(ca.tail(СООБЩЕНИЕ)) == ["Claude <noreply@anthropic.com>"]
+
+
+def test_nastoyashchiy_treyler_chitaetsya() -> None:
+    """Обратная сторона: хвост обязан читаться, иначе гейт перестанет держать
+    атрибуцию вовсе."""
+    assert "Claude-Session" in ca.tail(СООБЩЕНИЕ)
+
+
+def test_hvost_s_prozoy_blokom_ne_schitaetsya() -> None:
+    """Один прозаический хвост делает абзац прозой ЦЕЛИКОМ: иначе разбор снова
+    начнёт угадывать, где кончается объяснение."""
+    смешанный = (
+        "Заголовок\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nи вот почему так вышло\n"
+    )
+    assert ca.tail(смешанный) == ""
+
+
+def test_soobshchenie_bez_hvosta_daet_pustotu() -> None:
+    assert ca.tail("Просто заголовок\n") == ""
+
+
+def test_odin_abzac_iz_treylerov_eto_hvost() -> None:
+    """Сообщение без тела: заголовок и сразу трейлеры — законная форма."""
+    assert "Claude" in ca.tail("Заголовок\n\nCo-Authored-By: Claude <x@y>\n")
+
+
+def test_proza_v_tele_ne_otvergaet_izmenenie(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """ГЕЙТ, А НЕ РЕГУЛЯРКА (150): случай спрашивает решение гейта на живом
+    коммите, чьё тело объясняет атрибуцию словами. Именно так и вышло 30
+    августа: изменение витрины #95 чинило красную общую ветку, а этот гейт
+    отверг его, приняв середину фразы за соавтора."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(
+        repo,
+        "объясняет атрибуцию",
+        "Абзац про то, почему площадка дописывает\n"
+        "Co-authored-by: github-actions[bot] в уплотнённый коммит.\n\n"
+        f"Co-Authored-By: {AGREED}",
+    )
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--require-declared-author",
+        ],
+    )
+
+    assert ca.main() == 0
+
+
+def test_chuzhoy_soavtor_v_hvoste_po_prezhnemu_nahodka(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Обратная сторона той же починки: настоящий несогласованный соавтор в
+    хвостовом блоке обязан отвергаться, иначе гейт перестал держать атрибуцию."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "с чужим соавтором", "Co-Authored-By: Кто-то <nobody@example.com>")
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--require-declared-author",
+        ],
+    )
+
+    assert ca.main() == 1
+
+
+def test_подпись_проекта_это_первая_строка_раздела(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Прогон выпуска подписывается ею: порядок в файле значим, а не случаен."""
+    make_repo(repo)
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\nВторой <second@example.com>\n")
+    monkeypatch.setattr(
+        "sys.argv", ["check_attribution.py", "--authors", str(path), "--print-author"]
+    )
+
+    assert ca.main() == 0
+    assert capsys.readouterr().out.strip() == OWNER
+
+
+def test_пустой_раздел_авторов_подписи_не_даёт(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Обратная сторона (140): подпись, которой нет, — исход 2, а не пустота.
+
+    Пустую строку прогон выпуска подставил бы в git config и упал бы ниже с
+    чужой ошибкой — «страж, не нашедший предмета, обязан краснеть» (075).
+    """
+    make_repo(repo)
+    path = authors_file(repo, f"{AGREED}\n")
+    monkeypatch.setattr(
+        "sys.argv", ["check_attribution.py", "--authors", str(path), "--print-author"]
+    )
+
+    assert ca.main() == 2
+    assert capsys.readouterr().out.strip() == ""
+
+
+# ── слияние только уплотнением: поле автора не проверяется (#695) ─────────
+
+
+def _окно(repo: Path) -> Path:
+    """Ветка облачного окна: автором честно стоит согласованный соавтор."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "от окна", f"Co-Authored-By: {AGREED}", author=("Claude", "noreply@anthropic.com"))
+    return authors_file(repo)
+
+
+def test_окно_автором_при_merge_находка(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _окно(repo)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+        ],
+    )
+    assert ca.main() == 1
+    assert "СОАВТОР, а не автор" in capsys.readouterr().err
+
+
+def test_окно_автором_при_squash_проходит_и_это_названо(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ложный отказ из #695: при уплотнении поле автора в историю не едет."""
+    path = _окно(repo)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--merge-method",
+            "squash",
+        ],
+    )
+    assert ca.main() == 0
+    assert "поле автора не проверялось" in capsys.readouterr().out
+
+
+def test_squash_не_снимает_проверку_трейлеров(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    commit(repo, "чужой", "Co-Authored-By: Чужой <x@example.com>")
+    path = authors_file(repo)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--merge-method",
+            "squash",
+        ],
+    )
+    assert ca.main() == 1
+    assert "соавтор вне списка" in capsys.readouterr().err
+
+
+def test_squash_вместе_с_объявленным_автором_это_третий_исход(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Требовать поле, которое в историю не едет, нечем — противоречие входов
+    называется, а не решается молча за проект."""
+    path = _окно(repo)
+    write(path, f"{AGREED}\n\n[авторы]\n{OWNER}\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+            "--merge-method",
+            "squash",
+            "--require-declared-author",
+        ],
+    )
+    assert ca.main() == 2
+    assert "снимите один из ключей" in capsys.readouterr().err
+
+
+# ── объявление squash сверяется с общей веткой (обзор #784) ────────────────
+
+
+def test_squash_при_слиянии_в_общей_ветке_предупреждает(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Устаревший вход снимал бы проверку автора молча: коммит слияния
+    в общей ветке называется предупреждением."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    run(repo, "checkout", "-q", "-b", "тема")
+    write(repo / "тема.txt", "своё")  # другой файл: слияние без конфликта
+    run(repo, "add", "-A")
+    run(repo, "commit", "-q", "-m", f"в теме\n\nCo-Authored-By: {AGREED}")
+    run(repo, "checkout", "-q", "main")
+    commit(repo, "в main", f"Co-Authored-By: {AGREED}")
+    run(repo, "merge", "-q", "--no-ff", "-m", "слияние темы", "тема")
+    run(repo, "branch", "база", "main")
+    commit(repo, "от окна", f"Co-Authored-By: {AGREED}", author=("Claude", "noreply@anthropic.com"))
+    path = authors_file(repo)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "база..HEAD",
+            "--authors",
+            str(path),
+            "--merge-method",
+            "squash",
+            "--baseline",
+            "",
+        ],
+    )
+    assert ca.main() == 0
+    вывод = capsys.readouterr().out
+    assert вывод.count("::warning::") == 1 and "верните merge" in вывод
+
+
+def test_squash_без_слияний_молчит(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _окно(repo)
+    run(repo, "branch", "база", "HEAD~1")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "база..HEAD",
+            "--authors",
+            str(path),
+            "--merge-method",
+            "squash",
+            "--baseline",
+            "",
+        ],
+    )
+    assert ca.main() == 0
+    assert "::warning::" not in capsys.readouterr().out
+
+
+def test_squash_после_перехода_молчит(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Старые слияния объявлению не противоречат: после первого уплотнения
+    предупреждение кончается само (обзор #787)."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    run(repo, "checkout", "-q", "-b", "тема")
+    write(repo / "тема.txt", "своё")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-q", "-m", f"в теме\n\nCo-Authored-By: {AGREED}")
+    run(repo, "checkout", "-q", "main")
+    run(repo, "merge", "-q", "--no-ff", "-m", "старое слияние", "тема")
+    commit(repo, "уплотнённое", f"Co-Authored-By: {AGREED}")
+    run(repo, "branch", "база", "main")
+    commit(repo, "от окна", f"Co-Authored-By: {AGREED}", author=("Claude", "noreply@anthropic.com"))
+    path = authors_file(repo)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "база..HEAD",
+            "--authors",
+            str(path),
+            "--merge-method",
+            "squash",
+            "--baseline",
+            "",
+        ],
+    )
+    assert ca.main() == 0
+    assert "::warning::" not in capsys.readouterr().out
+
+
+def test_отказ_при_merge_подсказывает_вход(
+    repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _окно(repo)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "check_attribution.py",
+            "--repo",
+            str(repo),
+            "--range",
+            "HEAD~1..HEAD",
+            "--authors",
+            str(path),
+        ],
+    )
+    assert ca.main() == 1
+    err = capsys.readouterr().err
+    assert "объединяющем слиянии" in err and "--merge-method squash" in err
+    assert "squash перенесёт" not in err
+
+
+# ── разбор списка и чтение истории — по имени, а не через `main` ──────────
+
+
+def test_mail_of_reads_the_mail_in_any_case() -> None:
+    """Почта — личность человека для площадки: берётся из скобок и в нижнем регистре."""
+    assert ca.mail_of("Владелец <Owner@Example.com>") == "owner@example.com"
+    assert ca.mail_of("без почты") == ""
+
+
+def test_sections_keep_the_file_order(repo: Path) -> None:
+    """Разделы читаются в порядке файла: первая строка «[авторы]» — подпись проекта."""
+    path = authors_file(repo, f"{AGREED}\n\n[авторы]\n{OWNER}\nВторой <two@example.com>\n")
+    co, people = ca.sections(path)
+    assert co == [AGREED]
+    assert people == [OWNER, "Второй <two@example.com>"]
+
+
+def test_a_git_refusal_is_git_failed(repo: Path) -> None:
+    """Отказ git — `GitFailed` с командой в тексте, а не трасса (039)."""
+    make_repo(repo)
+    with pytest.raises(ca.GitFailed, match="rev-parse"):
+        ca.git(repo, "rev-parse", "--verify", "нет-такой-ветки")
+
+
+def test_the_last_merge_is_named_and_a_plain_commit_is_not(repo: Path) -> None:
+    """`последний_слиянием`: слияние — его хеш, обычный коммит — пусто, нет ветки — None."""
+    make_repo(repo)
+    commit(repo, "первый", f"Co-Authored-By: {AGREED}")
+    assert ca.последний_слиянием(repo, "main") == ""
+    assert ca.последний_слиянием(repo, "нет-такой-ветки") is None
+    run(repo, "checkout", "-q", "-b", "тема")
+    write(repo / "тема.txt", "своё")
+    run(repo, "add", "-A")
+    run(repo, "commit", "-q", "-m", "тема")
+    run(repo, "checkout", "-q", "main")
+    run(repo, "merge", "-q", "--no-ff", "-m", "слияние", "тема")
+    assert ca.последний_слиянием(repo, "main")

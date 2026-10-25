@@ -1518,9 +1518,17 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
         "rules-inbox.yml упомянут как канал каталога; держит .rules/proposals.json",
         "32785c99bb2c",
     ),
+    "090": (
+        "ci.yml — джоб attribution, гейт переехал к нам; держит scripts/check_attribution.py",
+        "69bc912cfb49",
+    ),
     "100": (
         "ci.yml — поле timeout-minutes у своих шагов; держит scripts/ci_complete.py",
         "d9d6c955ec29",
+    ),
+    "123": (
+        "ci.yml — джоб attribution, гейт переехал к нам; держит scripts/check_attribution.py",
+        "16f7930656e5",
     ),
     "133": (
         "ci.yml — свой джоб parts; держит scripts/change_parts.py",
@@ -1549,10 +1557,6 @@ CALLER_NAMED_NOT_CALLED: Final[dict[str, tuple[str, str]]] = {
     "190": (
         "rules-inbox.yml — канал подключения, вторая половина; держит scripts/family.py",
         "f40fad6e27a5",
-    ),
-    "221": (
-        "attribution-history.yml — сверка итоговой истории; держит scripts/agent_pr.py",
-        "7328be8f7cec",
     ),
     "223": (
         "ci.yml — место своих шагов; держит scripts/onboard.py",
@@ -1606,14 +1610,6 @@ def flow_places(where: str, flows: Iterable[str]) -> dict[str, int]:
 #: вызова (`check_attribution.py`) и счёт без замещённых (`sync_inbox.py`);
 #: голова каждого ответа держится тем же.
 CALLED_HEAD_READ: Final[dict[str, tuple[str, str]]] = {
-    "090": (
-        "ci.yml, джоб attribution — гейт атрибуции действием каталога",
-        "54d59592312f",
-    ),
-    "123": (
-        "ci.yml, джоб attribution — атрибуция на итоговой истории",
-        "c15991419685",
-    ),
     "129": (
         "ci.yml, джоб answer — форма ответа и пробы действием каталога",
         "d3e1ddb97e73",
@@ -1621,10 +1617,6 @@ CALLED_HEAD_READ: Final[dict[str, tuple[str, str]]] = {
     "130": (
         "rules-inbox.yml — новое правило приходит задачей действием каталога",
         "202d604975af",
-    ),
-    "135": (
-        "attribution-history.yml — личность записи действием каталога",
-        "fb08e2875ab2",
     ),
     "178": (
         "rules-inbox.yml — числа долга приходят с действием каталога",
