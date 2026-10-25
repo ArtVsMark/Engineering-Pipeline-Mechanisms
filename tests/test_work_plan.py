@@ -216,7 +216,7 @@ def test_a_read_plan_is_assembled_and_written(monkeypatch: pytest.MonkeyPatch) -
     """Все источники ответили — план собран и записан (исход 0)."""
     written = quiet_platform(monkeypatch)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
-    assert written and "## 0 · Краснота общей ветки" in written[0]
+    assert written and f"## {module.HEADS[0]}" in written[0]
 
 
 def test_a_silent_source_lowers_the_outcome(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1589,3 +1589,45 @@ def test_a_row_moved_between_sections_is_not_counted_as_done(
     # перенос #642 в раздел 4 счёт не меняет.
     assert "снято сделанных строк: 1" in said[0]
     assert said[1] == said[0]
+
+
+def test_zero_fixes_pair_a_fix_with_the_red_it_holds_from_either_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0б: «Чинит красное: #M» у починки и «Ждёт: #N» у красного — пары; 0а: «Чинит main:»."""
+    pulls = [
+        {"number": 30, "body": f"{module.changerefs.FIXES_RED_KEY} #31"},
+        {"number": 31, "body": f"{module.changerefs.WAITS_KEY} починки #30"},
+        {"number": 32, "body": f"{module.changerefs.WAITS_KEY} #40, слияния соседа"},
+        {"number": 33, "body": f"{module.changerefs.FIXES_MAIN_KEY} tests"},
+        {"number": 34, "body": f"{module.changerefs.WAITS_KEY} #41"},
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(pulls))
+    red = ["#31 — красное", "#32 — красное", "#35 — своё красное"]
+    main_rows, rows, held = module.zero_fixes("o/r", "t", red)
+    assert main_rows == ["**#33** — чинит «tests» на общей ветке"]
+    assert rows == ["**#30** — держит #31", "**#40** — держит #32"]
+    assert held == {31, 32}, "зелёное #34 с «Ждёт:» держимым не названо"
+
+
+def test_the_built_plan_splits_zero_and_moves_the_held_red_out_of_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Сборка: 0а и 0б подзаголовками, держимое красное — не в разделе 2."""
+    written = quiet_platform(monkeypatch)
+    monkeypatch.setattr(module.debt, "branch_debt", lambda *_: (["tests"], []))
+    monkeypatch.setattr(
+        module.debt, "stuck_changes", lambda *_: ([], [], ["#31 — красное", "#35 — своё красное"])
+    )
+    pulls = [{"number": 30, "body": f"{module.changerefs.FIXES_RED_KEY} #31"}]
+    monkeypatch.setattr(
+        module.ghrest,
+        "paginate",
+        lambda path, *_, **__: iter(pulls if path.endswith("pulls?state=open") else []),
+    )
+    assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
+    zero = written[0].split("## 0 ·", 1)[1].split("## 1 ·", 1)[0]
+    two = written[0].split("## 2 ·", 1)[1].split("## 3 ·", 1)[0]
+    assert f"*{module.ZERO_TITLES[0]}*\n- **tests** — держит слияние" in zero
+    assert f"*{module.ZERO_TITLES[1]}*\n- **#30** — держит #31" in zero
+    assert "#31" not in two and "#35 — своё красное" in two

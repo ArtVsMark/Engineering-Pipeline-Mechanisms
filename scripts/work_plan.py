@@ -99,7 +99,7 @@ MARKER: Final = findings.PLAN_MARKER
 #: (`docs/agent/behaviour.md`, контур 1), а не свои: два словаря на один предмет
 #: разъезжаются молча (022).
 HEADS: Final[dict[int, str]] = {
-    0: "0 · Краснота общей ветки",
+    0: "0 · Затор: краснота общей ветки и починка держимого",
     1: "1 · Конфликт слияния на своём открытом изменении",
     2: "2 · Красное и находки на своём открытом изменении",
     3: "3 · Долг по уже слитому",
@@ -167,6 +167,9 @@ class Source:
 #: Каналы источника 5 — подзаголовки раздела в порядке `parts` (решение
 #: владельца 09.10.2026, #1263): без них около тридцати строк четырёх каналов
 #: шли одним списком.
+#: Части раздела 0 (решение владельца 25.10.2026, #1659): ремонт общей ветки и
+#: починка, без которой стоит своё красное изменение.
+ZERO_TITLES: Final = ("0а · Ремонт общей ветки", "0б · Починка, без которой стоит изменение")
 FIVE_TITLES: Final = ("Правила каталога", "Дрейф", "Поводы для правила", "Копящиеся находки")
 #: Заголовок находки в строке реестра: «… — [вес] заголовок». Место в нём
 #: разбирает канон `findings.place_of`, а не своя регулярка: своя расходилась
@@ -262,7 +265,20 @@ def sources(
         )
         if unknown:
             broken.append("1")
-        built[2] = Source(rows=[f"{one} — красное на своей голове" for one in red])
+        fixing_main, fixing_red, held = zero_fixes(repo, token, red)
+        built[2] = Source(
+            rows=[
+                f"{one} — красное на своей голове"
+                for one in red
+                if int(one[1:].split(" ", 1)[0]) not in held
+            ]
+        )
+        main_rows = built[0].rows + fixing_main
+        built[0] = Source(
+            rows=main_rows + fixing_red,
+            unread=built[0].unread,
+            groups=list(zip(ZERO_TITLES, (main_rows, fixing_red), strict=True)),
+        )
     except ghrest.TransportError as exc:
         built[1] = built[2] = Source(unread=f"свои открытые изменения не спрошены: {exc}")
         broken += ["1", "2"]
@@ -348,6 +364,38 @@ def sources(
         broken.append("5")
 
     return built, broken, marks
+
+
+def zero_fixes(repo: str, token: str, red: list[str]) -> tuple[list[str], list[str], set[int]]:
+    """Починки раздела 0 по телам открытых изменений: общей ветки, чужого красного и держимое.
+
+    РАЗДЕЛ 0 НАДВОЕ (решение владельца 25.10.2026, #1659). Красное изменение,
+    которое правкой самого себя не чинится, держит отдельная починка, и
+    работа — она, а не оно. Объявить можно с любой стороны, ключами прежними:
+    починка несёт `Чинит красное: #M` (#1526), красное — `Ждёт: #N` с адресом
+    починки (задержка `agent_pr`); `Чинит main: <шаг>` (#585) — починка общей
+    ветки, она идёт в 0а. Держимое красное возвращается третьим: в разделе 2
+    ему не место — оно ждёт, а не чинится.
+
+    Возвращает строки 0а сверх красноты, строки 0б и номера держимого.
+    """
+    reds = {int(one[1:].split(" ", 1)[0]) for one in red if one.startswith("#")}
+    main_rows: list[str] = []
+    pairs: dict[tuple[int, int], None] = {}
+    for change in ghrest.paginate(f"repos/{repo}/pulls?state=open", token):
+        number = int(change.get("number") or 0)
+        body = str(change.get("body") or "")
+        step = changerefs.fixes_main_in(body)
+        if step:
+            main_rows.append(f"**#{number}** — чинит «{step}» на общей ветке")
+        for held in changerefs.fixes_red_in(body):
+            pairs[(number, held)] = None
+        waits = changerefs.held_in(body)
+        if number in reds and waits:
+            for fix in ISSUE_RE.findall(waits):
+                pairs[(int(fix), number)] = None
+    rows = [f"**#{fix}** — держит #{held}" for fix, held in pairs]
+    return main_rows, rows, {held for _, held in pairs}
 
 
 def rules_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None) -> Source:

@@ -319,3 +319,53 @@ def test_a_shallow_branch_without_a_visible_trailer_is_refused(repo: Path, tmp_p
     shallow = shallow_clone_of(repo, tmp_path / "shallow")
     with pytest.raises(module.NotRun, match="свои коммиты ветки"):
         module.session_of(shallow)
+
+
+def fix_commit(repo: Path, line: str) -> None:
+    """Коммит окна с объявлением починки раздела 0 в теле."""
+    git(
+        repo,
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "починка",
+        "-m",
+        f"{line}\n\nClaude-Session: {MINE}",
+    )
+
+
+def test_a_fix_of_a_neighbours_red_passes_at_the_limit(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """«Чинит красное: #N» — раздел 0: толкается и при трёх открытых (#1659)."""
+    platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
+    fix_commit(repo, f"{module.changerefs.FIXES_RED_KEY} #12")
+    code, said = module.look(repo, "agent/новая")
+    assert code == module.EXIT_OK and "раздел 0" in said and "#12" in said
+
+
+@pytest.mark.parametrize(("red", "code"), [(True, 0), (False, 1)], ids=["красен", "зелёный"])
+def test_a_fix_of_main_passes_only_while_the_step_is_red(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, red: bool, code: int
+) -> None:
+    """«Чинит main: шаг» проходит предел, пока шаг красен; при зелёном — отказ с причиной."""
+    platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", lambda *_: red)
+    fix_commit(repo, f"{module.changerefs.FIXES_MAIN_KEY} tests")
+    said_code, said = module.look(repo, "agent/новая")
+    assert said_code == code, said
+    assert ("раздел 0" in said) is red and ("не красен" in said) is not red
+
+
+def test_an_open_fix_does_not_spend_the_limit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Открытая починка раздела 0 в счёт трёх не входит: обычная работа рядом с ней не стоит."""
+    platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
+    fixes = {13: f"{module.changerefs.FIXES_RED_KEY} #5"}
+    opened = [{"number": one, "body": fixes.get(one, "")} for one in (11, 12, 13)]
+    monkeypatch.setattr(module, "own_open", lambda *_: opened)
+    code, said = module.look(repo, "agent/новая")
+    assert code == module.EXIT_OK and "2 изменений из 3" in said
+    assert module.is_fix(opened[2]) and not module.is_fix(opened[0])
+    assert module.fix_declared(repo) == (None, [])
+    assert module.zero_pass("o/r", "t", None, []) is None, "не починка — общий предел"
