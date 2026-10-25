@@ -71,16 +71,6 @@ SHA_RE: Final = re.compile(r"[0-9a-f]{40}")
 #: Тег выпуска — полная версия `vN.N.N`: мажорный алиас `@v1` подвижен, как ветка.
 #: Один признак на гейт и на `tests/test_family_pinning.py` (находка на #1634).
 RELEASE_RE: Final = re.compile(r"v\d+\.\d+\.\d+")
-#: `true` на СТРОКЕ КЛЮЧА — блочной, в кавычках, в строку `{…: true}` (взгляд на
-#: #1634, `016a18a`): начало строки — ключ, пункт шага или `with: {`, а не
-#: комментарий и не тело `run:`. Судится строка, только если разобранное
-#: значение у выгрузки и правда `true`: строка ищет причину, а не решает, есть
-#: ли запись. ГРАНИЦА НАЗВАНА: такая же строка в теле `run:` файла, где
-#: настоящий `true` тоже есть, причины потребует и от неё.
-TRUE_RE: Final = re.compile(
-    rf"^\s*(?:-\s*)?(?:with\s*:\s*\{{[^}}]*?)?[\"']?{PERSIST}[\"']?\s*:\s*[\"']?true\b",
-    re.IGNORECASE,
-)
 #: Выражение площадки вместо значения: `${{ inputs.x }}` даёт `true`, не неся
 #: причины, и форма 1 по ключу его не видела (взгляд на #1634, `c4b082e`).
 EXPRESSION: Final = "${{"
@@ -196,6 +186,96 @@ def pin_problem(uses: str) -> str:
     return "стороннее действие не на полном sha"
 
 
+#: Метка ключа слияния `<<` у разбора.
+MERGE_TAG: Final = "tag:yaml.org,2002:merge"
+
+
+def merged(node: yaml.MappingNode) -> dict[str, yaml.Node]:
+    """Пары отображения по ключу — со слиянием `<<`, как его разворачивает конструктор.
+
+    Явный ключ сильнее слитого, из нескольких слитых сильнее первый — тот же
+    порядок, что у `safe_load`; иначе узел и разбор назвали бы разное значение.
+    """
+    pairs: dict[str, yaml.Node] = {}
+    explicit: dict[str, yaml.Node] = {}
+    for key, value in node.value:
+        if not isinstance(key, yaml.ScalarNode):
+            continue
+        if key.tag == MERGE_TAG:
+            sources = value.value if isinstance(value, yaml.SequenceNode) else [value]
+            for source in reversed(sources):
+                if isinstance(source, yaml.MappingNode):
+                    pairs.update(merged(source))
+        else:
+            explicit[str(key.value)] = value
+    return pairs | explicit
+
+
+def is_true(node: yaml.Node | None) -> bool:
+    """Значение оставляет токен — по тому, как его читает САМО действие, а не резолвер.
+
+    `actions/checkout` сравнивает текст входа: `getInput(...).toUpperCase() ===
+    'TRUE'` (`src/input-helper.ts`). Поэтому `"true"` в кавычках токен
+    оставляет, а `yes` и `on` — нет: площадка разбирает прогон по YAML 1.2, где
+    это строки, и булевым «да» их называет только резолвер YAML 1.1 у
+    `safe_load` (взгляд на #1654).
+    """
+    return isinstance(node, yaml.ScalarNode) and str(node.value).strip().lower() == "true"
+
+
+def true_values(text: str) -> list[yaml.ScalarNode]:
+    """Узлы значения `persist-credentials: true` у каждой выгрузки — из разбора, а не строкой.
+
+    СТРОГАЯ ФОРМА, А НЕ ЕЩЁ ОДНА ФОРМА СТРОКИ (210, 228; решение владельца
+    25.10.2026). Строку ключа искали образцом по тексту три круга подряд
+    (#1634 → #1650 дважды): по всему тексту ловились комментарии и `run:`,
+    по началу строки терялись шаг в строку, значение ниже и якорь, а сверка
+    счётом уравнивалась строкой чужого действия. Теперь строку значения даёт
+    сам разбор: `yaml.compose` метит каждый узел местом в тексте, и судится
+    ровно значение ключа у шага `actions/checkout` — в блоке, в строку, ниже
+    ключа. ГРАНИЦА НАЗВАНА: у псевдонима (`*keep`) узел — тот, что объявлен
+    якорем, и причина ищется на строке якоря.
+    """
+    found: list[yaml.ScalarNode] = []
+    todo: list[yaml.Node] = [yaml.compose(text, Loader=yaml.SafeLoader)]
+    seen: set[int] = set()
+    while todo:
+        node = todo.pop()
+        if node is None or id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, yaml.SequenceNode):
+            todo.extend(node.value)
+        if not isinstance(node, yaml.MappingNode):
+            continue
+        todo.extend(value for _, value in node.value)
+        pairs = merged(node)
+        uses = pairs.get("uses")
+        given = pairs.get("with")
+        if not (isinstance(uses, yaml.ScalarNode) and str(uses.value).startswith(CHECKOUT)):
+            continue
+        if not isinstance(given, yaml.MappingNode):
+            continue
+        value = merged(given).get(PERSIST)
+        # Узел — на каждую выгрузку, даже общий у псевдонима; одинаковую
+        # строку находки по общему узлу снимает `unreasoned`.
+        if isinstance(value, yaml.ScalarNode) and is_true(value):
+            found.append(value)
+    return found
+
+
+def unreasoned(path: Path, text: str) -> list[str]:
+    """`true` без причины комментарием на строке своего значения — по меткам разбора."""
+    lines = text.splitlines()
+    told: list[str] = []
+    for value in {id(one): one for one in true_values(text)}.values():
+        line = lines[value.end_mark.line] if value.end_mark.line < len(lines) else ""
+        if not REASON_RE.search(line[value.end_mark.column :]):
+            number = value.start_mark.line + 1
+            told.append(f"{path}:{number}: {PERSIST}: true без причины комментарием на строке")
+    return told
+
+
 def judge(
     path: Path,
     text: str,
@@ -209,7 +289,6 @@ def judge(
     # `action.yml`, и исключение одного разрешило бы форму в каждом (взгляд на #1634).
     name = path.as_posix()
     target_allowed, branch_allowed = exceptions
-    trues = 0
     if "pull_request_target" in events(said) and name not in target_allowed:
         found.append(f"{path}: pull_request_target — исполняет голову изменения с правами базы")
     top = said.get("permissions")
@@ -227,8 +306,6 @@ def judge(
                 continue
             given = step.get("with")
             value = given.get(PERSIST) if isinstance(given, dict) else None
-            if str(value).strip().lower() == "true":
-                trues += 1
             if not writes(rights):
                 continue
             if not isinstance(given, dict) or PERSIST not in given:
@@ -246,25 +323,11 @@ def judge(
                 met.add((name, uses))
                 continue
             found.append(f"{where}: {uses} — {problem}")
-    lines = 0
-    for number, line in enumerate(text.splitlines() if trues else [], 1):
-        value = TRUE_RE.search(line)
-        if not value:
-            continue
-        lines += 1
-        if not REASON_RE.search(line[value.end() :]):
-            found.append(f"{path}:{number}: {PERSIST}: true без причины комментарием на строке")
-    # СВЕРКА СЧЁТОМ, А НЕ ЕЩЁ ОДНОЙ ФОРМОЙ СТРОКИ (210: второй круг по
-    # `TRUE_RE`, #1634 → #1650). Разбор знает, сколько выгрузок держат `true`;
-    # строк ключа найдено меньше — шаг записан в строку, значение стоит на
-    # другой строке или задано якорем YAML, и причину искать негде. Это отказ,
-    # а не молчание: запишите ключ блочно, с причиной на его строке.
-    if lines < trues:
-        found.append(
-            f"{path}: {PERSIST}: true у выгрузок {trues}, а строк ключа найдено {lines} — "
-            "запись, где причину не найти строкой (шаг в строку, значение на другой "
-            "строке, якорь); запишите ключ блочно с причиной комментарием"
-        )
+    # СУД `true` — ОДНА РЕАЛИЗАЦИЯ, ПО УЗЛУ (взгляд на #1654). Прежде его
+    # предварял счёт по `safe_load`, а резолвер YAML 1.1 зовёт `yes` булевым
+    # «да», которым действие его не читает: два суда одного предмета
+    # расходились, и разрыв держала сверка счётом. Теперь судит один.
+    found += unreasoned(path, text)
     return found, met
 
 
