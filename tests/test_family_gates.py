@@ -184,6 +184,31 @@ def test_the_live_issue_is_patched_in_place_and_not_opened_empty(
     sent.clear()
     module.save("o/r", "t", said, apply=False)
     assert sent == []
+    capsys.readouterr()
+    module.save("o/r", "t", empty, apply=False)
+    assert "не завожу" in capsys.readouterr().out, "сухой заход называет не то действие"
+
+
+def test_the_live_issue_is_left_alone_when_only_the_day_moved(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Те же очереди назавтра — не PATCH: день сборки в сверку не входит (взгляд на #1674)."""
+    sent: list[str] = []
+
+    def request(method: str, *_a: object, **_k: object) -> dict[str, object]:
+        sent.append(method)
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    said = module.document(summary(), OURS)
+    yesterday = "\n".join(
+        "Собрано: 01.01.2000." if line.startswith("Собрано:") else line
+        for line in module.render_issue(said).splitlines()
+    )
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_: (7, yesterday))
+    module.save("o/r", "t", said, apply=True)
+    assert sent == [] and "уже описывает" in capsys.readouterr().out
+    assert module.stable(yesterday) == module.stable(module.render_issue(said))
 
 
 def test_the_live_issue_mode_names_its_refusals(

@@ -175,6 +175,10 @@ MARKER: Final = findings.marker("family-gates")
 TITLE: Final = "Карта гейтов семьи: три очереди кандидатов"
 
 
+#: Начала строк с днём сборки: их сверка «то же состояние» не читает.
+DATED: Final = ("Собрано:", "Пусто на")
+
+
 def render_issue(said: dict[str, Any]) -> str:
     """Тело живой задачи: источник карты, счёт исходов и три очереди с адресами."""
     source = said.get("source") or {}
@@ -191,7 +195,7 @@ def render_issue(said: dict[str, Any]) -> str:
         "",
         f"Сводка каталога: форма {source.get('summary')}, снята {source.get('at')}.",
         "",
-        f"Собрано: {datetime.now(UTC).strftime('%d.%m.%Y')}.",
+        f"{DATED[0]} {datetime.now(UTC).strftime('%d.%m.%Y')}.",
         "",
         "**Исходы клеток:** "
         + " · ".join(f"{name} {count}" for name, count in (said.get("held") or {}).items()),
@@ -200,7 +204,7 @@ def render_issue(said: dict[str, Any]) -> str:
         rows = queued.get(key) or []
         lines += ["", f"## {meaning} — {len(rows)}", ""]
         if not rows:
-            lines.append(f"Пусто на {datetime.now(UTC).strftime('%d.%m.%Y')}.")
+            lines.append(f"{DATED[1]} {datetime.now(UTC).strftime('%d.%m.%Y')}.")
         for row in rows:
             if isinstance(row, dict):
                 origin = f" · от `{row['origin']}`" if row.get("origin") else ""
@@ -212,27 +216,35 @@ def render_issue(said: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def stable(body: str) -> str:
+    """Тело без строк дня сборки: с ними сверка «то же состояние» держалась бы сутки."""
+    return "\n".join(line for line in body.strip().splitlines() if not line.startswith(DATED))
+
+
 def save(repo: str, token: str, said: dict[str, Any], *, apply: bool) -> None:
     """Переписывает живую задачу по месту или заводит одну — как задача дрейфа.
 
-    `ghrest.TransportError` — наверх: зовущий объявляет его третьим исходом.
+    Сухой заход называет то же действие, что совершил бы настоящий (взгляд на
+    #1674), и в то же состояние «уже описывает» не правит: день сборки в
+    сверку не входит. `ghrest.TransportError` — наверх: зовущий объявляет
+    его третьим исходом.
     """
     body = render_issue(said)
     number, current = findings.live_issue(repo, token, MARKER)
+    if number is None and not any(said.get("queues", {}).values()):
+        print(f"{'' if apply else report.DRY + ' '}очереди пусты — задачу карты не завожу")
+        return
+    if number is not None and stable(current) == stable(body):
+        print(f"задача карты гейтов #{number} уже описывает это состояние")
+        return
     if not apply:
         print(f"{report.DRY} {'обновил бы' if number else 'завёл бы'} задачу карты гейтов")
         return
     if number is None:
-        if not any(said.get("queues", {}).values()):
-            print("очереди пусты — задачу карты не завожу")
-            return
         fresh = ghrest.request(
             "POST", f"repos/{repo}/issues", token, {"title": TITLE, "body": body}
         )
         print(f"заведена задача карты гейтов #{(fresh or {}).get('number')}")
-        return
-    if current.strip() == body.strip():
-        print(f"задача карты гейтов #{number} уже описывает это состояние")
         return
     ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": body})
     print(f"задача карты гейтов #{number} обновлена")
