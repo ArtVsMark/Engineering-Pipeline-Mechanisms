@@ -90,7 +90,9 @@ jobs:
       # выпуска каталога: номера не переиспользуются, отправленный тег не
       # переставляют (https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/docs/VERSIONING.md).
       # Это пояснение — одно на оба подключения гейта: `attribution-history.yml`
-      # ссылается сюда.
+      # ссылается сюда. ТЕГ ДЕЙСТВИЯ ПОДНИМАЕМ МЫ, и у каталога, подключившего
+      # этот шаг, это кольцо — договор называет его (docs/use/pipeline.md, шаги
+      # 6 и 6d; #1667), перенос действия к механизмам — #1670.
       - name: сверить атрибуцию
         if: steps.who.outputs.external != 'yes'
         uses: ArtVsMark/Engineering-Incidents-Playbook/.github/actions/attribution@v2.1.0
