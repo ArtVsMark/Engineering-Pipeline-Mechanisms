@@ -58,6 +58,7 @@ import ghrest
 import gitcall
 import paths
 import pipeline_checks as policy
+import portable_census
 import report
 import version as project_version
 
@@ -652,6 +653,14 @@ def page_body(version: str, repo: str) -> str:
         f"Версия контракта на момент выпуска — `{at_tag}`; "
         f"что означают её разряды, говорит [`{release_doc}`]({tree}/{release_doc}).",
     ]
+    # ПЕРЕПИСЬ ОТДАЧИ — СОВЕЩАТЕЛЬНЫЙ РАЗДЕЛ (#1658): не собралась — страница
+    # всё равно заводится, а причина стоит на ней строкой, а не теряется (045).
+    try:
+        census = portable_census.for_release(f"v{version}", Path())
+    except portable_census.NotRun as exc:
+        census = [f"Перепись отдачи не собрана: {exc}."]
+    if census:
+        lines += ["", *census]
     return "\n".join(lines)
 
 
