@@ -228,11 +228,19 @@ def check(facts: object, repo: str, schema: dict[str, Any]) -> list[str]:
     return found
 
 
-#: Подсказка к отставшему мажору 1: форма та же, сменились держатель и адрес (каталог #843).
-MOVED = (
-    "; договор 2.x держат механизмы ArtVsMark/Engineering-Pipeline-Mechanisms — "
-    "подъём: тег facts-v2.1.0 механизмов в шаге CI и schema «2.1», форма та же"
-)
+def moved(current: str) -> str:
+    """Подсказка к отставшему мажору 1: форма та же, сменились держатель и адрес (каталог #843).
+
+    Номер — договора, по которому судят (`current`, «X.Y»), а не вписанный
+    рукой: вписанный, он советовал бы прежний тег после каждого подъёма
+    (взгляд на #1679). Патч договора всегда ноль — тег `facts-vX.Y.0`.
+    """
+    return (
+        "; договор 2.x держат механизмы ArtVsMark/Engineering-Pipeline-Mechanisms — "
+        f"подъём: тег facts-v{current}.0 механизмов в шаге CI и schema «{current}», форма та же"
+    )
+
+
 #: Поля корня, которые договор знает, но не держит: подпись-комментарий ``_``.
 COMMENT_KEYS = {"_"}
 
@@ -273,7 +281,7 @@ def advise(facts: object, schema: dict[str, Any], current: str) -> list[str]:
             f"schema: формат {published} при договоре фактов {current} — файл отстал"
             # не проза: номер версии «мажор.минор[.патч]».
             + (
-                MOVED
+                moved(current)
                 if published.split(".")[0] < current.split(".")[0]
                 # не проза: номер версии «мажор.минор[.патч]».
                 and current.split(".")[0] == "2"
@@ -544,11 +552,14 @@ def selftest() -> int:
         print(f"  {'да ' if ok else 'НЕТ'} — совет: {name}")
     # Мажор 1 при договоре фактов 2.0 — та же форма у прежнего держателя: совет
     # называет, куда переехал договор, а не только что файл отстал (каталог #843).
-    said = advise(with_(schema="1.6"), schema, "2.1")
-    ok = any("facts-v2.1.0" in line for line in said)
+    number = ".".join(contract_version(VERSION_PATH.read_text(encoding="utf-8")).split(".")[:2])
+    said = advise(with_(schema="1.6"), schema, number)
+    ok = any(f"facts-v{number}.0" in line for line in said)
     if not ok:
         broken.append(f"совет о переезде: ждали тег механизмов, вышло {said}")
-    print(f"  {'да ' if ok else 'НЕТ'} — совет: мажор 1 при договоре фактов 2.1 называет переезд")
+    print(
+        f"  {'да ' if ok else 'НЕТ'} — совет: мажор 1 при договоре фактов {number} называет переезд"
+    )
 
     # Манифест семьи (1.6) — обе стороны: нет файла, не та форма — совет;
     # family 1.x любого минора — молчание. Форму целиком судят механизмы.
