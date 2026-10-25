@@ -264,3 +264,12 @@ def test_a_mark_resolved_twice_keeps_its_first_kind() -> None:
         ["Разобрано: abc1234\nРод: первый", "Разобрано: abc1234, def5678\nРод: второй"]
     )
     assert said == ["Разобрано: abc1234\nРод: первый", "Разобрано: def5678\nРод: второй"]
+
+
+def test_a_taken_candidate_reaches_the_trunk_once() -> None:
+    """Строка «Кандидат:» переносится в тело уплотнения один раз (шаг 3 #1425)."""
+    said = body.compose_from(
+        ["взял кандидата", "доделал"],
+        ["взял\n\nКандидат: rework · 001 · o/r", "ещё\n\nКандидат: rework · 001 · o/r"],
+    )
+    assert said.count("Кандидат: rework · 001 · o/r") == 1
