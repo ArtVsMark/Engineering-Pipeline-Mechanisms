@@ -7,4 +7,4 @@
 | проект | шаги | теги |
 |---|---|---|
 | ArtVsMark/ArtVsMark | `step-automerge`, `step-review` | `7cd39af2005ceb7564cba9324a42b375331fa4c8` |
-| ArtVsMark/Engineering-Incidents-Playbook | `step-journal`, `step-pipeline`, `step-pr-meta`, `step-rulebook-fresh`, `step-window-lifetime` | `v1.10.0` |
+| ArtVsMark/Engineering-Incidents-Playbook | `step-journal`, `step-pipeline`, `step-pr-meta`, `step-rulebook-fresh`, `step-window-lifetime` | `v1.11.0` |
