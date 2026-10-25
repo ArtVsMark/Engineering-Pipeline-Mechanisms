@@ -357,6 +357,23 @@ def test_a_pin_that_carries_the_step_prints_the_kit(tmp_path: Path) -> None:
     assert module.main(["--root", str(root)]) == module.EXIT_OK
 
 
+def test_an_opt_in_step_is_printed_commented_without_live_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Шаг по выбору назван закомментированным вызовом — на дереве с тегом, без живой истории.
+
+    Прежде эту печать держал только тест живого выпуска под `needs_history`,
+    и на чекауте без тегов её не проверяло ничего (взгляд на #1656).
+    """
+    root = tree(tmp_path, **{"step-пример": MARKED, "step-contract": MARKED})
+    assert module.main(["--root", str(root), "--repo", "O/R"]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "# Шаг `contract` — по выбору, не кладётся" in out
+    assert "#   contract:" in out, "вызов шага по выбору не напечатан закомментированным"
+    assert "\n  contract:\n" not in out, "шаг по выбору напечатан живым джобом"
+    assert "\n  пример:\n" in out
+
+
 @needs_history
 def test_the_kit_agrees_with_the_live_release(run_script: RunScript) -> None:
     """Живое дерево: исход захода СХОДИТСЯ с тем, что несёт живой выпуск (139).
