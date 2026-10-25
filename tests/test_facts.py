@@ -1442,7 +1442,13 @@ def test_the_badges_branch_keeps_only_what_is_published() -> None:
     module = load_script("build_facts.py")
     kept = set(module.branch_files())
     # Разбор семьи — литералом: его читает каталог по этому имени (#1532).
-    assert kept == {*module.published_names(), module.UNIFIED, "family-check.json", module.ARCHIVE}
+    assert kept == {
+        *module.published_names(),
+        module.UNIFIED,
+        "family-check.json",
+        module.ARCHIVE,
+        module.FAMILY_GATES,
+    }
     assert "scripts.json" not in kept, "снятый значок остался допустимым на ветке"
     flow = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
     assert 'build_facts.py --prune "$pub/.github/badges"' in flow, "публикация не чистит каталог"

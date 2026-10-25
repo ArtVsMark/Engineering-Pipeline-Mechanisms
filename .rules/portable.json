@@ -796,6 +796,10 @@
       "answer": "ours",
       "why": "@family"
     },
+    "scripts/family_gates.py": {
+      "answer": "ours",
+      "why": "@family"
+    },
     "scripts/family_uptake.py": {
       "answer": "ours",
       "why": "@family"
