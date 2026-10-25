@@ -46,8 +46,8 @@
 ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
 
 **Подъём у издателя — одна правка в двух местах:** тег проверки в шаге CI
-(`facts-v2.2.0` механизмов вместо `facts-v1.x` витрины или `facts-v2.0.0`
-каталога) и строка `schema: "2.2"` в файле.
+(`facts-v2.2.0` механизмов вместо `facts-v1.x` витрины, `facts-v2.0.0`
+каталога или `facts-v2.1.0` механизмов) и строка `schema: "2.2"` в файле.
 
 ---
 

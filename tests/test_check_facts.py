@@ -61,7 +61,10 @@ def test_major_1_passes_with_a_move_advice(tmp_path: Path) -> None:
     )
     done = run("--file", str(path), "--repo", "Owner/Project")
     assert done.returncode == 0
-    assert "facts-v2.1.0 механизмов" in done.stdout
+    # Номер — из `facts.version`: вписанный строкой, он не поймал бы совет на
+    # прежнем теге после подъёма договора (взгляд на #1679).
+    number = (EXAMPLE.parent / "facts.version").read_text(encoding="utf-8").strip()
+    assert f"facts-v{number} механизмов" in done.stdout
 
 
 def test_without_a_file_is_the_third_outcome() -> None:
@@ -176,3 +179,9 @@ def test_read_manifest_tells_absent_from_broken(tmp_path: Path) -> None:
     assert cf.read_manifest(tmp_path / "битый.json") == "не JSON"
     (tmp_path / "верный.json").write_text('{"family": "1.0"}', encoding="utf-8")
     assert cf.read_manifest(tmp_path / "верный.json") == {"family": "1.0"}
+
+
+def test_the_move_advice_names_the_contract_it_judges_by() -> None:
+    """Совет о переезде называет тег и формат того договора, которым судят, а не вписанный."""
+    said = cf.moved("2.7")
+    assert "facts-v2.7.0" in said and "schema «2.7»" in said
