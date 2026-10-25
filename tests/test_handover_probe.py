@@ -7,13 +7,14 @@
 каждого выпуска (#926).
 """
 
+import subprocess
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 import yaml
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, needs_history
 
 onboard = load_script("onboard.py")
 family_uptake = load_script("family_uptake.py")
@@ -239,17 +240,38 @@ def test_a_missing_probe_is_the_third_outcome(tmp_path: Path) -> None:
         module.version.release_tag = keep
 
 
+def pinned_step(uses: str) -> dict[Any, Any]:
+    """Шаг, как его видит площадка: файл на теге из `uses:`, а не в дереве ветки."""
+    address, _, ref = uses.partition("@")
+    said = subprocess.run(
+        ["git", "show", f"{ref}:.github/workflows/{address.rsplit('/', 1)[-1]}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=ROOT,
+        check=True,
+        timeout=60,
+    ).stdout
+    return yaml.safe_load(said) or {}
+
+
+@needs_history
 def test_a_step_with_strip_ours_is_called_with_it() -> None:
-    """Шаг, объявивший `strip-ours`, проба зовёт с `true` — иначе судит наше дерево (#990).
+    """Шаг со `strip-ours` на теге пробы проба зовёт с `true` — иначе судит наше дерево (#990).
 
     Состав выводится из самих шагов, а не списком: шаг, получивший вход
     позже, без него в пробе краснит этот тест (взгляд на #1160, 022).
+
+    ШАГ ЧИТАЕТСЯ НА ТЕГЕ, К КОТОРОМУ ПРИБИТА ПРОБА (#1670). Прежде — в дереве
+    ветки: шаг, получивший вход в этом изменении, требовал передать вход,
+    которого на прибитом выпуске ещё нет, и площадка отвергла бы весь файл
+    пробы — при выпуске, когда проба и идёт. Подъём прибивки после выпуска
+    краснит этот тест, пока вход не передан, — так вход и доходит до пробы.
     """
     jobs = yaml.safe_load(PROBE.read_text(encoding="utf-8"))["jobs"]
     missing = []
     for name, job in jobs.items():
-        step = str(job.get("uses") or "").rsplit("/", 1)[-1].split("@", 1)[0]
-        flow = yaml.safe_load((ROOT / ".github" / "workflows" / step).read_text(encoding="utf-8"))
+        flow = pinned_step(str(job.get("uses") or ""))
         called = (flow.get(True) or flow.get("on") or {}).get("workflow_call") or {}
         declared = "strip-ours" in (called.get("inputs") or {})
         if declared and (job.get("with") or {}).get("strip-ours") is not True:

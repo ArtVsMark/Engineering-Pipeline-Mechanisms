@@ -28,13 +28,13 @@
 ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
 
 А ВОТ ОКНО БЕЗ СЛЕДА — ТРЕТИЙ ИСХОД, И ИМЕННО ЭТИМ ТРЕЙЛЕР СТАНОВИТСЯ
-ОБЯЗАТЕЛЬНЫМ. Гейт `attribution` подключён действием каталога и требует
+ОБЯЗАТЕЛЬНЫМ. Гейт `attribution` (`check_attribution.py`) требует
 соавторства, а трейлер сессии не требует никто: он стоит потому, что его
 подставляет среда. Механизм на привычке среды — это механизм без договора, и
 здесь он объявляет нехватку входа вслух, вместо того чтобы зеленеть на ней
 ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
-Переписывать сюда чужой гейт атрибуции ради одной строки нельзя — копия
-разъехалась бы с оригиналом
+Переписывать сюда гейт атрибуции ради одной строки нельзя — копия
+разъехалась бы с ним
 ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
 
 ОБРЕЗАННАЯ ИСТОРИЯ НЕ СЧИТАЕТСЯ МОЛОДЫМ ОКНОМ. В мелком клоне начало окна не
