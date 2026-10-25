@@ -516,7 +516,9 @@ def looks_done(issues: list[dict[str, Any]]) -> list[tuple[int, str]]:
     return sorted(ready)
 
 
-def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
+def rules_left(
+    numbers: tuple[int, int, int] | None, note: str | None, *, inapplicable: bool = False
+) -> bool:
     """Есть ли незакрытая работа по правилам — по ТРЁМ видам 177, а не по счёту задач.
 
     Первое из трёх чисел — сколько задач по правилам заведено в трекере, и
@@ -534,7 +536,12 @@ def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
     Числа не прочитаны — долг НЕИЗВЕСТЕН, а не равен нулю (045): неизвестность
     считается долгом, потому что снимать приоритет с непроверенного источника
     хуже, чем напомнить лишний раз.
+
+    `inapplicable` — дерево самого каталога (#1666): чисел нет по построению, и
+    долгом остаётся только разошедшийся контракт (взгляд на #1669).
     """
+    if inapplicable:
+        return bool(note)
     if numbers is None:
         return True
     _, queue, unheld = numbers
@@ -908,7 +915,10 @@ def main(argv: list[str] | None = None) -> int:
     partial = False
     numbers = rules_debt(inbox)
     note = contract_note(inbox)
-    if numbers is None and catalogue_tree(args.repo):
+    # НЕПРИМЕНИМО ДОХОДИТ ДО РЕШЕНИЯ, А НЕ ТОЛЬКО ДО ПЕЧАТИ (взгляд на #1669):
+    # иначе «неизвестные числа» снова считались бы долгом «перед планом».
+    inapplicable = numbers is None and catalogue_tree(args.repo)
+    if inapplicable:
         print(f"правила: {CATALOGUE_TREE}")
     elif numbers is None:
         partial = True
@@ -946,7 +956,7 @@ def main(argv: list[str] | None = None) -> int:
             "left": left,
             "lagging": lagging,
             "kept": kept,
-            "rules_left": rules_left(numbers, note),
+            "rules_left": rules_left(numbers, note, inapplicable=inapplicable),
         }
     )
     unread = unread_in(read)

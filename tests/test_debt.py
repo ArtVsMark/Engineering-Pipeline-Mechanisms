@@ -95,8 +95,10 @@ def test_a_diverged_contract_is_a_debt_on_its_own() -> None:
 
 
 def test_unknown_counts_are_a_debt_not_an_absence() -> None:
-    """Числа не прочитаны — долг НЕИЗВЕСТЕН, а не равен нулю (045)."""
+    """Числа не прочитаны — долг НЕИЗВЕСТЕН, а не равен нулю (045); у каталога — только контракт."""
     assert debt.rules_left(None, None) is True
+    assert debt.rules_left(None, None, inapplicable=True) is False
+    assert debt.rules_left(None, "контракт разошёлся", inapplicable=True) is True
 
 
 def test_everything_closed_is_not_a_debt() -> None:
@@ -1423,3 +1425,42 @@ def test_open_changes_are_the_pull_requests_of_the_listing() -> None:
 def test_only_the_catalogue_itself_has_no_inbox(repo: str, said: bool) -> None:
     """«Входящих» нет у самого каталога, и только у него — форк спрашивает их громко (#1666)."""
     assert debt.catalogue_tree(repo) is said
+
+
+@pytest.mark.parametrize(
+    ("repo", "code", "owed"),
+    [(debt.catalogue.REPO, debt.EXIT_OK, False), ("o/r", debt.EXIT_PARTIAL, True)],
+    ids=["каталог", "потребитель"],
+)
+def test_the_catalogue_tree_reaches_the_verdict_as_inapplicable(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    repo: str,
+    code: int,
+    owed: bool,
+) -> None:
+    """Без «входящих» каталог — не долг «перед планом», а потребитель — долг неизвестный (#1669)."""
+    monkeypatch.setenv("GH_TOKEN", "токен")
+    monkeypatch.setattr(debt, "open_listed", lambda repo, token: [])
+    monkeypatch.setattr(debt, "findings_debt", lambda repo, token, listed: [])
+    monkeypatch.setattr(debt, "unlooked_debt", lambda repo, token, listed: ([], {}))
+    monkeypatch.setattr(debt, "branch_debt", lambda repo, token, listed: ([], []))
+    monkeypatch.setattr(debt, "closed_issues", lambda repo, token: [])
+    monkeypatch.setattr(debt, "inbox_body", lambda repo, token, closed, listed: ("", "", None))
+    monkeypatch.setattr(debt, "stuck_changes", lambda repo, token: ([], [], []))
+    monkeypatch.setattr(debt, "looks_done", lambda issues: [])
+    monkeypatch.setattr(debt.items_left, "look", lambda issues, opener: ([], []))
+    monkeypatch.setattr(debt.task_shape, "without_a_checklist", lambda issues: [])
+    monkeypatch.setattr(debt.task_shape, "closed_with_live_units", lambda closed: [])
+    monkeypatch.setattr(debt, "contract_note", lambda inbox: "")
+    monkeypatch.setattr(
+        debt.coverage_floor,
+        "look",
+        lambda repo, token: debt.coverage_floor.Floor(
+            day="2026-10-25", now=88.6, floor=88.6, days=4
+        ),
+    )
+    assert debt.main(["--repo", repo]) == code
+    out = capsys.readouterr().out
+    assert (debt.CATALOGUE_TREE in out) is not owed
+    assert ("ПЕРЕД планом" in out) is owed
