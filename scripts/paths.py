@@ -401,22 +401,27 @@ def main(argv: list[str] | None = None) -> int:
     причиной, а не путь умолчания молча (045).
     """
     # Разбор `.pipeline.yml` — у `pipeline_checks` (214); он сам импортирует
-    # этот модуль, поэтому импорт здесь, а не в шапке.
+    # этот модуль, поэтому импорт здесь, а не в шапке. ТАБЛИЦА И ОТКАЗ — ИЗ
+    # ТОГО ЖЕ ЭКЗЕМПЛЯРА, ЧТО У НЕГО (взгляд на #1653): под
+    # `python scripts/paths.py` этот файл — `__main__`, а `pipeline_checks`
+    # грузит `paths` вторым модулем; свой `BadPaths` его отказа не поймал бы,
+    # и битая таблица дала бы трассу.
+    import paths as table
     import pipeline_checks
 
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument("key", help="ключ таблицы путей, например bindings")
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     args = parser.parse_args(argv)
-    if args.key not in PROJECT:
+    if args.key not in table.PROJECT:
         print(
-            f"ключа «{args.key}» в таблице путей нет; ключи: {', '.join(sorted(PROJECT))}",
+            f"ключа «{args.key}» в таблице путей нет; ключи: {', '.join(sorted(table.PROJECT))}",
             file=sys.stderr,
         )
         return EXIT_BROKEN
     try:
         where = pipeline_checks.project_path(args.key, args.root)
-    except BadPaths as exc:
+    except table.BadPaths as exc:
         print(f"таблица путей не разобрана: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     print(where.as_posix())
