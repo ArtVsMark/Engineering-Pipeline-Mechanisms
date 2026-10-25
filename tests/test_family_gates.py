@@ -164,9 +164,12 @@ def test_the_live_issue_is_patched_in_place_and_not_opened_empty(
 ) -> None:
     """Задача есть — правится по месту; нет и очереди пусты — не заводится; иначе заводится."""
     sent: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        module.ghrest, "request", lambda method, path, *_a, **_k: sent.append((method, path)) or {}
-    )
+
+    def request(method: str, path: str, *_a: object, **_k: object) -> dict[str, object]:
+        sent.append((method, path))
+        return {}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
     said = module.document(summary(), OURS)
     monkeypatch.setattr(module.findings, "live_issue", lambda *_: (7, "прежнее"))
     module.save("o/r", "t", said, apply=True)
