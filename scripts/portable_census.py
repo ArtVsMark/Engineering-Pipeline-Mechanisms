@@ -144,9 +144,11 @@ def section(now: Census, before: Census | None, since: str | None) -> list[str]:
 def present(ref: str, root: Path) -> bool:
     """Лежит ли перепись на дереве `ref`: у проекта без неё предмета нет."""
     listed = gitcall.output(
-        ["ls-tree", "--name-only", ref, "--", paths.PORTABLE.as_posix()], NotRun, cwd=str(root)
+        ["ls-tree", "-z", "--name-only", ref, "--", paths.PORTABLE.as_posix()],
+        NotRun,
+        cwd=str(root),
     )
-    return bool(listed.strip())
+    return bool(listed.strip("\0"))
 
 
 def for_release(tag: str, root: Path) -> list[str]:
