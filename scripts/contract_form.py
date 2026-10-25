@@ -64,9 +64,15 @@ def form_of(section: Any) -> Form:
         where = Path(one.strip())
         if where.is_absolute() or ".." in where.parts:
             raise NotRun(f"раздел {SECTION}: путь «{one}» вне дерева — путь от корня без `..`")
+        if not where.parts:
+            # `.` — всё дерево: в голове в обход попал бы `.git` и мусор, которого
+            # нет в архиве базы (взгляд на #1672). Поверхность называется путями.
+            raise NotRun(
+                f"раздел {SECTION}: путь «{one}» — всё дерево, назовите файлы или каталоги"
+            )
         surface.append(where)
     kind = section.get("kind", DEFAULT_KIND)
-    if kind not in journal.KINDS:
+    if not isinstance(kind, str) or kind not in journal.KINDS:
         raise NotRun(
             f"раздел {SECTION}: род «{kind}» журналу неизвестен — один из "
             + ", ".join(journal.KINDS)

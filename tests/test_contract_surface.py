@@ -876,3 +876,15 @@ def test_the_declared_surface_walks_down_the_named_path_only(tmp_path: Path) -> 
     said = contract.declared_surface(tmp_path, (Path("export"), Path("CONNECT.md"), Path("нет")))
     assert sorted(said) == ["CONNECT.md", "export/a.json", "export/deep/b.json"]
     assert [one.name for one in contract.below(tmp_path / "export")] == ["a.json", "b.json"]
+
+
+def test_the_walk_does_not_follow_symlinks(tmp_path: Path) -> None:
+    """Ссылка на предка не зацикливает спуск, ссылка наружу не вносит чужого (взгляд на #1672)."""
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "foreign.json").write_text("x", encoding="utf-8")
+    (tmp_path / "export").mkdir()
+    (tmp_path / "export" / "a.json").write_text("a", encoding="utf-8")
+    (tmp_path / "export" / "loop").symlink_to(tmp_path / "export", target_is_directory=True)
+    (tmp_path / "export" / "out").symlink_to(tmp_path / "outside", target_is_directory=True)
+    (tmp_path / "export" / "file-link.json").symlink_to(tmp_path / "outside" / "foreign.json")
+    assert sorted(contract.declared_surface(tmp_path, (Path("export"),))) == ["export/a.json"]

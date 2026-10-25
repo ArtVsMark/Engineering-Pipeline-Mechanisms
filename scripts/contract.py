@@ -164,12 +164,18 @@ def below(start: Path) -> list[Path]:
 
     СПУСК, А НЕ ПОИСК: путь назван ответом проекта, и обходится только он. Не
     `git ls-files` — «до» снимается с распакованного архива базы, git там нет.
+
+    СИМВОЛИЧЕСКИЕ ССЫЛКИ НЕ ОБХОДЯТСЯ (взгляд на #1672): ссылка на предка
+    зациклила бы спуск, а ссылка за пределы дерева внесла бы в отпечаток чужие
+    файлы. Ссылка поверхностью не считается.
     """
+    if start.is_symlink():
+        return []
     if not start.is_dir():
         return [start] if start.is_file() else []
     found: list[Path] = []
     for one in sorted(start.iterdir()):
-        found += below(one) if one.is_dir() else [one]
+        found += below(one)
     return found
 
 

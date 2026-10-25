@@ -46,9 +46,6 @@ import paths
 import pipeline_checks
 import report
 
-#: Род фрагмента, которым объявляется правка поверхности.
-CONTRACT_KIND: Final = ".contract.md"
-
 EXIT_CLEAN: Final = 0
 EXIT_FINDINGS: Final = 1
 EXIT_BROKEN: Final = 2
