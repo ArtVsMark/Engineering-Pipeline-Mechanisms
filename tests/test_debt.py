@@ -136,7 +136,7 @@ def test_the_order_puts_debts_before_the_plan() -> None:
     text = (ROOT / "docs" / "agent" / "behaviour.md").read_text(encoding="utf-8")
     findings_at = text.index("неразобранные **дефекты** внешнего взгляда")
     rules_at = text.index("незакрытая работа по правилам каталога")
-    plan_at = text.index("задача из трекера и план автора")
+    plan_at = text.index("**ждём**: действия соседей и своя очередь")
     assert findings_at < rules_at < plan_at
 
 
