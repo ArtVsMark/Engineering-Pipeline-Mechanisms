@@ -188,6 +188,15 @@ def steps(root: Path) -> list[str]:
     return sorted(found)
 
 
+#: Шаги, которые выпуск отдаёт, а заготовка `ci.yml` НЕ кладёт: они нужны
+#: проекту, который сам отдаёт общие шаги, а прочим отвечают «поверхность
+#: пуста». Такой проект зовёт шаг одной строкой сам; `--update` поднимает его
+#: тег и советует снять вызов тому, кто своих общих шагов не отдаёт (решение
+#: владельца 25.10.2026, #1652).
+OPT_IN: Final = {
+    "contract": "поверхность контракта общих шагов — договор поставщика с семьёй; "
+    "у проекта без своих общих шагов она пуста",
+}
 #: Как общий шаг зовёт наш скрипт: из выкачки механизмов, а не из дерева потребителя.
 CALLED_SCRIPT: Final = re.compile(r"(?:\$MECHANISMS|\$\{\{ env\.MECHANISMS \}\})/scripts/(\w+)\.py")
 
@@ -1871,7 +1880,8 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
     def lift(said: re.Match[str]) -> str:
         """Тег поднимается только у шага, который выпуск отдаёт (взгляд на #1438)."""
         name = Path(said["address"]).name
-        gone = name.startswith(STEP_PREFIX) and Path(name).stem[len(STEP_PREFIX) :] not in pipeline
+        step = Path(name).stem[len(STEP_PREFIX) :]
+        gone = name.startswith(STEP_PREFIX) and step not in pipeline and step not in OPT_IN
         return said[0] if gone else f"{said['address']}@{pin}"
 
     lifted = our_uses(repo).sub(lift, text)
@@ -1881,10 +1891,15 @@ def plan_ci(update: Update, consumer: Path, pipeline: list[str], repo: str, pin:
         update.notes.append(
             f"новый шаг `{one}` — джоб для вашего `{where.name}`:\n" + caller(one, repo, pin)
         )
-    for one in sorted(called - set(pipeline)):
+    for one in sorted(called - set(pipeline) - set(OPT_IN)):
         update.notes.append(
             f"шаг `{one}` в выпуске {pin} не отдаётся — его вызов оставлен на прежнем теге; "
             "снимите его"
+        )
+    for one in sorted(called & set(OPT_IN)):
+        update.notes.append(
+            f"шаг `{one}` заготовка больше не кладёт: {OPT_IN[one]}. Тег поднят; "
+            "не отдаёте своих общих шагов — снимите вызов"
         )
 
 
@@ -2292,7 +2307,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return EXIT_UNREACHABLE
 
-    pipeline = [one for one in names if one not in own]
+    pipeline = [one for one in names if one not in own and one not in OPT_IN]
     beyond = [name for one in sorted(own) if not records[one][1] for name in records[one][0]]
     on_change = [name for one in sorted(own) if records[one][1] for name in records[one][0]]
     if args.update:
@@ -2444,6 +2459,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"# 1. В свой `{paths.WORKFLOWS}/{PIPELINE_FLOW}` — джобы вызова:\n")
     print("jobs:")
     print("\n".join(caller(one, args.repo, pin) for one in pipeline))
+    for one in sorted(set(OPT_IN) & set(names)):
+        # Шаг по выбору: заготовка его не кладёт, но назвать его обязана —
+        # иначе проект, который сам отдаёт общие шаги, о нём не узнает (#1652).
+        print(f"\n# Шаг `{one}` — по выбору, не кладётся: {OPT_IN[one]}.")
+        print("# Отдаёте свои общие шаги — добавьте вызов:\n#")
+        print("\n".join(f"# {line}" for line in caller(one, args.repo, pin).splitlines()))
     for _, flow in sorted(own.items()):
         print(f"# 1. Свой `{paths.WORKFLOWS}/{flow.name}` — управляющий механизм своим прогоном:\n")
         print(whole[paths.WORKFLOWS / flow.name])
