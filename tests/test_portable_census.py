@@ -142,3 +142,17 @@ def test_a_broken_census_on_the_previous_tag_is_a_refusal(tmp_path: Path) -> Non
     subprocess.run([*run, "tag", "v1.1.0"], check=True)
     with pytest.raises(census.NotRun, match=r"v1\.0\.0:"):
         census.for_release("v1.1.0", root)
+
+
+def test_without_a_previous_tag_there_is_no_delta_and_no_mark() -> None:
+    """Первый выпуск: разница «—», а не «+0», и без ★ — сравнения не было (взгляд на #1660)."""
+    now = census.parsed(json.dumps(answers(a="ours", b="as-is")), "сейчас")
+    said = "\n".join(census.section(now, None, None))
+    assert "| `ours` | 1 | — |" in said and "+0" not in said
+    assert "★" not in said and "`a`" in said
+
+
+def test_verified_by_of_the_wrong_form_is_a_refusal() -> None:
+    """`verified_by` не словарь — `NotRun` с местом, а не трасса, роняющая страницу (#1660)."""
+    with pytest.raises(census.NotRun, match="verified_by"):
+        census.parsed(json.dumps({"answers": {}, "verified_by": ["x"]}), "v1.0.0")

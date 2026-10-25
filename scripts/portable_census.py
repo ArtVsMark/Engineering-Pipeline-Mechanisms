@@ -65,6 +65,10 @@ def parsed(text: str, where: str) -> Census:
     if not isinstance(answers, dict):
         raise NotRun(f"{where}: в переписи нет словаря `answers`")
     verified = said.get("verified_by") or {}
+    # НЕ ТА ФОРМА — ОТКАЗ, А НЕ ТРАССА (взгляд на #1660): страница выпуска ловит
+    # `NotRun`, и `AttributeError` уронил бы её вместо строки с причиной.
+    if not isinstance(verified, dict):
+        raise NotRun(f"{where}: `verified_by` не словарь")
     return Census(
         {key: one for key, one in answers.items() if isinstance(one, dict)},
         {key: one for key, one in verified.items() if isinstance(one, dict)},
@@ -106,18 +110,21 @@ def section(now: Census, before: Census | None, since: str | None) -> list[str]:
     )
     lines += ["", "| ответ | сейчас | разница |", "|---|---|---|"]
     for answer in SCALE:
-        delta = counted[answer] - was[answer] if before is not None else 0
-        lines.append(f"| `{answer}` | {counted[answer]} | {delta:+d} |")
+        # БЕЗ ПРОШЛОГО ТЕГА СРАВНЕНИЯ НЕТ: «+0» читалось бы «не сдвинулось».
+        delta = f"{counted[answer] - was[answer]:+d}" if before is not None else "—"
+        lines.append(f"| `{answer}` | {counted[answer]} | {delta} |")
     ours = {key: one for key, one in now.answers.items() if one.get("answer") == "ours"}
-    fresh = {
-        key
-        for key in ours
-        if before is None or (before.answers.get(key) or {}).get("answer") != "ours"
-    }
+    # Отметка ★ — только при сравнении: у первого выпуска она легла бы на всё.
+    fresh = (
+        {key for key in ours if (before.answers.get(key) or {}).get("answer") != "ours"}
+        if before is not None
+        else set()
+    )
     by_reason: dict[str, list[str]] = {}
     for key, one in sorted(ours.items()):
         by_reason.setdefault(str(one.get("why") or "без причины"), []).append(key)
-    lines += ["", "**`ours` по причинам** — пришедшие с прошлого выпуска отмечены ★:", ""]
+    marked = " — пришедшие с прошлого выпуска отмечены ★" if before is not None else ""
+    lines += ["", f"**`ours` по причинам**{marked}:", ""]
     for reason, keys in sorted(by_reason.items(), key=lambda pair: (-len(pair[1]), pair[0])):
         named = ", ".join(f"`{key}`" + (" ★" if key in fresh else "") for key in keys)
         lines.append(f"- {report.cut(reason, REASON_LIMIT)} — {len(keys)}: {named}")
