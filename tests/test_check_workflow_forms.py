@@ -195,9 +195,24 @@ def test_our_tree_is_clean() -> None:
 
 
 def test_the_gate_refuses_a_red_tree_with_its_exit(tmp_path: Path) -> None:
-    """Прогон отказа: дерево с формой — исход «отвергнуто», а не «чисто» (140)."""
+    """Прогон отказа: дерево с формой при `--enforce` — «отвергнуто», а не «чисто» (140)."""
     root = tree(tmp_path, {"a.yml": CLEAN.replace("@v2.1.0", "@main")})
-    assert module.main(["--root", str(root)]) == module.EXIT_REJECTED
+    assert module.main(["--root", str(root), "--enforce"]) == module.EXIT_REJECTED
+
+
+def test_without_enforce_a_form_is_a_warning_with_its_place(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """У потребителя без `--enforce` форма — предупреждение, а не красный шаг (`c6f9696`).
+
+    Дерево, писанное без гейта, иначе краснело бы с первым подъёмом тега (051);
+    найденное при этом не молчит: аннотация на каждую форму и итог числом.
+    """
+    root = tree(tmp_path, {"a.yml": CLEAN.replace("@v2.1.0", "@main")})
+    assert module.main(["--root", str(root)]) == module.EXIT_OK
+    said = capsys.readouterr().out
+    assert said.count("::warning::") == len(found(root)) >= 1, said
+    assert "предупреждено: опасных форм прогонов" in said, said
 
 
 @pytest.mark.parametrize(
@@ -226,3 +241,57 @@ def test_writes_and_uses_of_read_the_job() -> None:
     job = {"uses": "o/r/.github/workflows/s.yml@v1", "steps": [{"uses": "a/b@c"}, {"run": "x"}]}
     assert module.uses_of(job) == ["o/r/.github/workflows/s.yml@v1", "a/b@c"]
     assert module.uses_of({"steps": "не список"}) == []
+
+
+def test_an_expression_instead_of_a_value_turns_red(tmp_path: Path) -> None:
+    """`persist-credentials: ${{ inputs.x }}` — выражение без причины, не значение (`c4b082e`)."""
+    text = CLEAN.replace("persist-credentials: false", "persist-credentials: ${{ inputs.keep }}")
+    assert any("выражение вместо значения" in one for one in found(tree(tmp_path, {"a.yml": text})))
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "      # persist-credentials: true здесь нужен бы для толчка\n",
+        "      - run: |\n          echo persist-credentials: true\n",
+    ],
+    ids=["комментарий", "тело-run"],
+)
+def test_true_outside_a_key_is_not_a_form(tmp_path: Path, extra: str) -> None:
+    """Слова `persist-credentials: true` в комментарии или в теле `run:` — не запись (`016a18a`).
+
+    Значение у выгрузки — `false`; прежний разбор по всему тексту краснел и тут.
+    """
+    text = CLEAN + extra
+    assert found(tree(tmp_path, {"a.yml": text})) == []
+
+
+def test_true_among_other_keys_of_a_flow_mapping_is_judged(tmp_path: Path) -> None:
+    """`with: {fetch-depth: 0, persist-credentials: true}` — ключ не первым, судится тоже."""
+    text = CLEAN.replace(
+        "        with:\n          persist-credentials: false\n",
+        "        with: {fetch-depth: 0, persist-credentials: true}\n",
+    )
+    assert any("без причины" in one for one in found(tree(tmp_path, {"a.yml": text})))
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        f"      - {{uses: {CHECKOUT}, with: {{persist-credentials: true}}}}\n",
+        f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials:\n"
+        "            true # причина на другой строке\n",
+        f"      - uses: {CHECKOUT}\n        with: &keep\n"
+        "          persist-credentials: true # толкает\n"
+        f"      - uses: {CHECKOUT}\n        with: *keep\n",
+    ],
+    ids=["шаг-в-строку", "значение-ниже", "якорь"],
+)
+def test_a_true_whose_key_line_is_not_found_turns_red(tmp_path: Path, step: str) -> None:
+    """`true`, чью строку ключа не найти, — находка счётом, а не молчание (взгляд на #1650)."""
+    text = CLEAN.replace(
+        f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials: false\n", step
+    )
+    assert text != CLEAN
+    told = found(tree(tmp_path, {"a.yml": text}))
+    assert any("строк ключа найдено" in one for one in told), told

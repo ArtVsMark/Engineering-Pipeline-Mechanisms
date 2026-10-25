@@ -473,3 +473,28 @@ def test_the_answer_path_comes_from_the_table(tmp_path: Path) -> None:
     with pytest.raises(module.NotRun, match="вне дерева"):
         module.answer_path(root)
     assert module.rules_said(root)["read"] is False
+
+
+def test_ours_reads_the_answer_where_the_table_puts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`build_facts.ours` берёт ответ каталогу по таблице путей; битая — отказ (`8ea4930`)."""
+
+    class Read(Exception):
+        """Ответ прочитан — дальше сборка не нужна."""
+
+    seen: list[Path] = []
+
+    def answer(path: Path, *_: object, **__: object) -> dict[str, Any]:
+        seen.append(path)
+        raise Read
+
+    monkeypatch.setattr(build, "rules_facts", answer)
+    (tmp_path / ".pipeline.yml").write_text("paths:\n  bindings: cfg/answer.json\n", "utf-8")
+    with pytest.raises(Read):
+        build.ours(tmp_path)
+    assert seen == [tmp_path / "cfg" / "answer.json"]
+    (tmp_path / ".pipeline.yml").write_text("paths:\n  bindings: /abs.json\n", "utf-8")
+    with pytest.raises(build.NotRun, match="вне дерева"):
+        build.ours(tmp_path)
+    assert len(seen) == 1, "битая таблица дошла до чтения ответа"

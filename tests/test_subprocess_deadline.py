@@ -627,6 +627,43 @@ def test_rebound_names_the_consumers_the_module_binds_itself() -> None:
     assert gate.rebound(tree) == frozenset({"list", "sorted", "any", "next"})
 
 
+@pytest.mark.parametrize(
+    ("source", "name"),
+    [
+        ("try:\n    pass\nexcept E as list:\n    pass\n", "list"),
+        ("match x:\n    case list:\n        pass\n", "list"),
+        ("match x:\n    case [1, *sorted]:\n        pass\n", "sorted"),
+        ("match x:\n    case {'k': 1, **any}:\n        pass\n", "any"),
+        ("match x:\n    case [1] as next:\n        pass\n", "next"),
+        ("def f[list]():\n    pass\n", "list"),
+        ("for sorted in x:\n    pass\n", "sorted"),
+        ("with x as any:\n    pass\n", "any"),
+        ("(next := 1)\n", "next"),
+        ("type list = int\n", "list"),
+    ],
+    ids=[
+        "except-as",
+        "захват",
+        "звезда",
+        "остаток",
+        "match-as",
+        "параметр-типа",
+        "for",
+        "with-as",
+        "морж",
+        "type",
+    ],
+)
+def test_rebound_sees_every_binding_form_of_the_reference(source: str, name: str) -> None:
+    """Каждая форма связывания из справки языка снимает засчёт с имени (210, `17009d0`)."""
+    assert name in gate.rebound(ast.parse(source))
+
+
+def test_a_star_import_shadows_every_consumer() -> None:
+    """`from m import *` связывает неизвестно что — засчёт снят со всех `CONSUMERS`."""
+    assert gate.rebound(ast.parse("from m import *\n")) == gate.CONSUMERS
+
+
 def test_consumes_here_takes_the_bare_unshadowed_builtin_only() -> None:
     """Голое имя встроенного — да; метод того же имени и переопределённое — нет."""
     bare, method = (ast.parse(one, mode="eval").body for one in ("list(g)", "obj.list(g)"))

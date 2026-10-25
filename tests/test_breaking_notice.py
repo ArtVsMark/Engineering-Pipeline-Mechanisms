@@ -585,7 +585,25 @@ def test_a_missing_or_broken_answer_is_the_neighbours_state(
         raise refusal()
 
     monkeypatch.setattr(module.consumers, "answer_of", answer_of)
+    monkeypatch.setattr(module.ghrest, "request", lambda *_, **__: {"full_name": "o/взял"})
     assert module.window_of(took("o/взял", None), "т") is None
+
+
+def test_a_404_on_an_unseen_repository_is_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """404 на файл при невидимом репозитории — сбой доступа, а не «файла нет» (`458809f`).
+
+    Подделка различает два запроса по пути, как площадка: файл и сам репозиторий.
+    """
+    asked: list[str] = []
+
+    def request(method: str, path: str, token: str, *_: object, **__: object) -> object:
+        asked.append(path)
+        raise module.ghrest.NotFound(f"{method} {path} → 404: Not Found")
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    with pytest.raises(module.NotRun, match="не виден токену"):
+        module.window_of(took("o/закрыт", None), "т")
+    assert asked == ["repos/o/закрыт/contents/.pipeline.yml", "repos/o/закрыт"], asked
 
 
 def test_an_unread_answer_stays_not_read(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1417,6 +1417,27 @@ def test_a_failed_refusal_write_is_named_not_raised(
     assert "в план не записан" in capsys.readouterr().err
 
 
+def test_a_missing_plan_issue_is_named_not_silent(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Живой задачи плана нет — блок не пишется, и журнал это говорит (`80c4703`)."""
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_, **__: (None, ""))
+    module.announce_refusal("o/r", "t", "причина")
+    assert "живой задачи плана нет" in capsys.readouterr().err
+
+
+def test_the_red_step_promises_the_block_only_on_a_refusal() -> None:
+    """Блок в шапке обещается только на отказе 2; на прочих кодах — журнал (`a13f591`)."""
+    text = (ROOT / ".github/workflows/step-work-plan.yml").read_text(encoding="utf-8")
+    step = text[text.index("- name: отказ сборки плана виден") :]
+    assert 'if [ "${RC:-}" = "2" ]' in step
+    assert "блока в шапке плана нет" in step
+    # И на коде 2 блок не обещается: задачи плана может не быть, запись —
+    # упасть; сообщение отсылает к строке журнала (взгляд на #1650).
+    assert "причина строкой в шапке плана" not in step
+    assert "отказ сборки назван в плане" in step
+
+
 def test_a_successful_build_drops_the_refusal_block(monkeypatch: pytest.MonkeyPatch) -> None:
     """Следующая успешная сборка снимает блок отказа из шапки (#1621)."""
     body = module.with_refusal(BODY, "прежний отказ", "прогон/1")

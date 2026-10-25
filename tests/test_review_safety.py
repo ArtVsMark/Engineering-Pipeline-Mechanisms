@@ -68,13 +68,21 @@ def test_the_agent_workflows_are_found() -> None:
 
 @pytest.mark.parametrize("path", walk(WORKFLOWS, "*.yml"), ids=lambda p: p.name)
 def test_no_workflow_uses_pull_request_target(path: Path) -> None:
-    """`pull_request_target` не используется НИГДЕ.
+    """`pull_request_target` не используется НИГДЕ в нашем дереве.
 
     Он исполняется в контексте общей ветки и отдаёт секреты прогону, запущенному
     по коду постороннего автора. На изменении из форка авто-ревью не идёт — это
     осознанное ограничение, а не поломка, которую чинят этим триггером.
+
+    СТЫК С ГЕЙТОМ ФОРМ НАЗВАН (взгляд на #1634, `6065cdc`): гейт
+    `scripts/check_workflow_forms.py` судит то же у ПОТРЕБИТЕЛЯ и разрешает
+    исключение с причиной из `.rules/workflow-forms.json` — его дерево его.
+    Наше строже: наши шаги исполняются у каждого потребителя, и исключения у
+    нас нет и быть не должно — список `target` нашей переписи пуст.
     """
     assert "pull_request_target" not in load(path)[True]
+    said = json.loads((ROOT / ".rules/workflow-forms.json").read_text(encoding="utf-8"))
+    assert said["target"] == [], "исключение pull_request_target в дереве поставщика"
 
 
 def test_auto_review_skips_forks_explicitly() -> None:
@@ -2513,8 +2521,15 @@ ACTION_DEP: Final = "anthropics/claude-code-action"
 
 
 def action_pins() -> set[str]:
-    """Закрепления действия агента в шаге взгляда (находка `2325e34`: разбор был дважды)."""
-    return set(ACTION_PIN.findall(LOOK_BODY.read_text("utf-8")))
+    """Закрепления действия агента во ВСЕХ прогонах, что его зовут (находка `2325e34`).
+
+    Не в одном шаге взгляда (взгляд на #1627, `ef72d18`): задание
+    `step-claude.yml` тоже называет пути, возвращённые к базе, и его закрепление
+    обязано совпадать со слежкой так же — иначе перечень молча станет неверным.
+    """
+    callers = [one for one in walk(WORKFLOWS, "*.yml") if ACTION_PIN.search(one.read_text("utf-8"))]
+    assert LOOK_BODY in callers, "шаг взгляда не зовёт действие агента — сверять нечего (075)"
+    return {pin for one in callers for pin in ACTION_PIN.findall(one.read_text("utf-8"))}
 
 
 def restored_from_pin() -> str:

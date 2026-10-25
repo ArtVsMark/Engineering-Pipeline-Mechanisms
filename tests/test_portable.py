@@ -1101,6 +1101,10 @@ def delivered_scripts() -> set[str]:
     тегу (#1552), и позванное ими тоже доходит (#1636). Текст меряется таким,
     каким его получит потребитель, — после `skill_kit`: в нашем дереве вызов
     записан `python scripts/…`, и запускателем он становится при кладке.
+
+    Хуки и настройки окна (`TREE_KITTED`) кладутся как есть — и их вызов
+    запускателем тоже доходит (взгляд на #1638, `ad3ec15`): сегодня ни один
+    его не зовёт, но позови — гейт «звать нечем» не соврёт.
     """
     onboard = load_script("onboard.py")
     preflight = load_script("preflight.py")
@@ -1121,6 +1125,11 @@ def delivered_scripts() -> set[str]:
         for match in LAUNCHED.finditer(
             onboard.skill_kit((ROOT / skill).read_text(encoding="utf-8"), "o/r")
         )
+    }
+    starts |= {
+        match.group(1)
+        for kitted in onboard.TREE_KITTED
+        for match in LAUNCHED.finditer((ROOT / kitted).read_text(encoding="utf-8"))
     }
     for start in sorted(starts):
         found |= {one.as_posix() for one in closure(start, ROOT)}

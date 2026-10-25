@@ -201,9 +201,16 @@ def compare(
     return Link(segment, publisher, what, mine, latest, where, "behind")
 
 
-def compare_facts(mine: str | None, latest: str | None) -> Link:
-    """Номер своих фактов против договора; переезд 1 → 2 — серый с причиной."""
-    link = compare("family", family_uptake.OURS, "facts", mine, latest, str(FACTS))
+def compare_facts(
+    mine: str | None, latest: str | None, publisher: str = family_uptake.OURS
+) -> Link:
+    """Номер своих фактов против договора; переезд 1 → 2 — серый с причиной.
+
+    `publisher` — тот, у кого прочитан номер: подпись связи и источник номера
+    один репозиторий, иначе после переименования связь назвала бы не того
+    (взгляд на #1628).
+    """
+    link = compare("family", publisher, "facts", mine, latest, str(FACTS))
     # не проза: номер версии «мажор.минор».
     majors = (str(mine).split(".")[0], str(latest).split(".")[0])
     if link.state == "behind" and majors == FACTS_MOVE:
@@ -399,7 +406,7 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
     )
     epm = (publishers.get(mechanisms.lower()) or {}).get("gives") or {}
     if isinstance(facts := _json(root / FACTS), dict):
-        links.append(compare_facts(facts.get("schema"), epm.get("facts")))
+        links.append(compare_facts(facts.get("schema"), epm.get("facts"), mechanisms))
     return links + steps_links(root, summary)
 
 
