@@ -19,11 +19,12 @@
 ЧТО СБОРЩИК ПИШЕТ, А ЧТО НЕТ. Разделы 0–3 и 5 он собирает целиком: их предмет
 знает механизм. Разделы 4 и 6 — указание владельца и его план — механизм не
 знает и не сочиняет; их текст переносится дословно. Со строками этих разделов
-сборщик делает три вещи, и все — чтение источника, а не сочинение: СНИМАЕТ
+сборщик делает четыре вещи, и все — чтение источника, а не сочинение: СНИМАЕТ
 строку, чей адрес закрыт, ДОБАВЛЯЕТ в раздел 4 открытую задачу, рождённую
-работой по строке раздела 4 или 6 (`born_rows`, #747), — в группу по её метке,
-без метки в «Сейчас в работе» (#1504), — и РАСКЛАДЫВАЕТ раздел 4 по группам по
-меткам задач (`grouped`, #1433).
+работой по строке раздела 4 или 6 (`born_rows`, #747), ДОПИСЫВАЕТ в раздел 6
+открытую задачу, которой в плане нет (`queued_rows`, #1655), и РАСКЛАДЫВАЕТ
+оба раздела по группам по меткам задач (`grouped`, #1433): метка соседа
+уводит строку в раздел 6, метка группы раздела 4 — в раздел 4 (`routed`).
 
 СДЕЛАННОЕ ИСЧЕЗАЕТ, А НЕ ЛЕЖИТ ЗАЧЁРКНУТЫМ — тем же приёмом, что у реестра
 находок. Галочка копит историю там, где нужен ОСТАТОК: план из двадцати строк,
@@ -104,8 +105,12 @@ HEADS: Final[dict[int, str]] = {
     3: "3 · Долг по уже слитому",
     4: "4 · Прямое указание владельца",
     5: "5 · Незакрытая работа по правилам каталога, дрейф и копящиеся находки",
-    6: "6 · План автора",
+    6: "6 · Ждём: действия соседей и своя очередь",
 }
+#: Прежние имена разделов (решение владельца 25.10.2026, #1655): тело плана,
+#: собранное до переименования, читается по ним, иначе ручной раздел пропал бы
+#: при первой же сборке молча (045).
+FORMER_HEADS: Final[dict[int, str]] = {6: "6 · План автора"}
 
 #: Разделы, которые собирает механизм, и разделы, которые он только читает.
 #: Список разрешительный (068): раздел, не названный здесь, сборщик не пишет.
@@ -533,10 +538,15 @@ def still_open(address: str, repo: str, token: str, marks: set[str]) -> bool:
     return str(found.get("state") or "open") != "closed"
 
 
+def section_rows(body: str, number: int) -> list[str]:
+    """Строки раздела по его имени, а у тела до переименования — по прежнему (#1655)."""
+    return rows_of(body, HEADS[number]) or rows_of(body, FORMER_HEADS.get(number, ""))
+
+
 def held_rows(body: str, number: int, repo: str, token: str, marks: set[str]) -> list[str]:
     """Строки ручного раздела: дословно, минус те, чей адрес закрыт."""
     kept: list[str] = []
-    for line in rows_of(body, HEADS[number]):
+    for line in section_rows(body, number):
         if not line.startswith("- "):
             kept.append(line)
             continue
@@ -659,21 +669,122 @@ def born_rows(
 #: 16.10.2026, #1433). Группу знала только рука, правившая тело: строка «ждёт
 #: выпуска» стояла в «Сейчас», и окно её не брало. Метка видна в списке задач
 #: и фильтре, переносит строку сборщик, а снимает `plan/waits-release` выпуск
-#: (`released`). Без метки — «Сейчас в работе».
+#: (`released`). Без метки — «Работаем сейчас».
+#:
+#: РАЗДЕЛ 4 — РАБОТАЕМ МЫ, РАЗДЕЛ 6 — ЖДЁМ (решение владельца 25.10.2026,
+#: #1655). Раздел 4 смешивал работу и ожидание: «Сейчас в работе» держал пилот
+#: до 29.10 и неделю локальной работы, а «План автора» — и новую работу, и
+#: ждущее соседей. Внутри 4 работой считаются «Работаем сейчас» и «Ждёт
+#: решения» (решение спрашивают у владельца); выпуска, срока и повтора ждут.
+#: Дату и событие повтора задача называет в своём теле — их держит навык
+#: `a-task-before-the-work`, а не разбор сборщиком.
 WAITS_OWNER: Final = "plan/waits-owner"
 WAITS_RELEASE: Final = "plan/waits-release"
-NOW_HEAD: Final = "*Сейчас в работе*"
-#: Порядок групп, которые сборщик ставит по метке: заголовок → метка.
+RECURRING: Final = "plan/recurring"
+WAITS_DATE: Final = "plan/waits-date"
+WAITS_NEIGHBOUR: Final = "plan/waits-neighbour"
+NOW_HEAD: Final = "*Работаем сейчас*"
+QUEUE_HEAD: Final = "*Ждёт своей очереди*"
+#: Порядок групп, которые сборщик ставит по метке: заголовок → метка; первая —
+#: группа строки без метки.
 GROUPS: Final[tuple[tuple[str, str], ...]] = (
     (NOW_HEAD, ""),
     ("*Ждёт решения*", WAITS_OWNER),
-    ("*Ждёт выпуска*", WAITS_RELEASE),
+    ("*Ожидаем выпуска*", WAITS_RELEASE),
+    ("*Повторяющиеся действия*", RECURRING),
+    ("*Ожидаем до даты*", WAITS_DATE),
 )
+#: Группы раздела 6. Строка без метки — своя очередь: её берут, когда закрыты
+#: раздел 4 и ждущее соседей.
+WAITING: Final[tuple[tuple[str, str], ...]] = (
+    ("*Ожидаем действия соседей*", WAITS_NEIGHBOUR),
+    (QUEUE_HEAD, ""),
+)
+#: Метки, которые уводят строку раздела 6 в раздел 4.
+FOUR_LABELS: Final = frozenset(label for _, label in GROUPS if label)
 #: Заголовки групп сборщика — и прежние ручные их имена: при раскладке они
-#: снимаются, а их строки без метки встают в «Сейчас в работе».
+#: снимаются, а их строки встают по метке. «Ждёт срока или чужого» прежде
+#: держала рука; с #1655 срок — метка `plan/waits-date`, чужое — раздел 6.
 GROUP_HEADS: Final = frozenset(
-    {*(head for head, _ in GROUPS), "*Сейчас*", "*Ждёт владельца*", "*Родилось в работе*"}
+    {
+        *(head for head, _ in GROUPS + WAITING),
+        "*Сейчас*",
+        "*Сейчас в работе*",
+        "*Ждёт владельца*",
+        "*Ждёт выпуска*",
+        "*Родилось в работе*",
+        "*Ждёт срока или чужого*",
+    }
 )
+
+
+def section_of(labels: set[str], here: int) -> int:
+    """Раздел строки по метке: соседи — 6, группа раздела 4 — 4, без метки — где стоит.
+
+    Соседи сильнее групп раздела 4: пока сосед не сдвинулся, решение, срок и
+    выпуск по задаче ждать нечего — её держит чужое действие (#1655).
+    """
+    if WAITS_NEIGHBOUR in labels:
+        return 6
+    if labels & FOUR_LABELS:
+        return 4
+    return here
+
+
+def label_of(line: str, labels: dict[int, set[str]]) -> set[str]:
+    """Метки задачи из адреса строки; у отпечатка находки меток нет."""
+    address = address_of(line)
+    return labels.get(int(address[1:]), set()) if address.startswith("#") else set()
+
+
+def routed(
+    held: dict[int, list[str]], labels: dict[int, set[str]]
+) -> tuple[dict[int, list[str]], dict[int, list[str]]]:
+    """Строки, которым метка велит другой раздел, — вон из своего; продолжение едет с ними.
+
+    Возвращает разделы без ушедших строк и ушедшие по разделу, куда они идут.
+    Продолжение строки — строка с отступом под ней; продолжение без отступа
+    сборщик от пояснения не отличит, и оно остаётся на месте (граница названа).
+    """
+    kept: dict[int, list[str]] = {}
+    moved: dict[int, list[str]] = {one: [] for one in HELD}
+    for here in HELD:
+        kept[here] = []
+        going: list[str] | None = None
+        for line in held.get(here, []):
+            if line.startswith("- "):
+                there = section_of(label_of(line, labels), here)
+                going = moved[there] if there != here else None
+                (going if going is not None else kept[here]).append(line)
+                continue
+            if going is not None and line[:1].isspace() and line.strip():
+                going.append(line)
+                continue
+            going = None
+            kept[here].append(line)
+    return kept, moved
+
+
+#: Хвост строки задачи, которой в плане не было: её дописал сборщик (#1655).
+QUEUED_TAIL: Final = "не было в плане — дописал сборщик"
+
+
+def queued_rows(
+    repo: str, listed: list[dict[str, Any]], taken: frozenset[int] | set[int]
+) -> list[str]:
+    """Открытые задачи, которых нет ни в одном разделе плана, — строками раздела 6.
+
+    РЕШЕНИЕ ВЛАДЕЛЬЦА 25.10.2026 (#1655): вся наша открытая работа стоит в
+    плане. Задача без строки не видна ни окну, ни владельцу — замер того дня:
+    шесть из 35 открытых (#782, #939–#943). Отсев — тот же, что у рождённой
+    строки (`may_be_born`): живые задачи механизма, изменения, чужое хранилище
+    и уже стоящее в плане строкой не становятся.
+    """
+    return [
+        f"- **#{int(issue['number'])}** — {issue.get('title') or ''} *({QUEUED_TAIL})*"
+        for issue in sorted(listed, key=lambda one: int(one.get("number") or 0))
+        if may_be_born(issue, repo, taken)
+    ]
 
 
 def hand_head(line: str) -> bool:
@@ -692,18 +803,24 @@ def labels_by_number(listed: list[dict[str, Any]]) -> dict[int, set[str]]:
 
 
 def grouped(
-    lines: list[str], labels: dict[int, set[str]], born: list[str] | None = None
+    lines: list[str],
+    labels: dict[int, set[str]],
+    born: list[str] | None = None,
+    groups: tuple[tuple[str, str], ...] = GROUPS,
 ) -> list[str]:
-    """Раздел 4 по группам: пояснения сверху как были, строки — по меткам задач.
+    """Ручной раздел по группам: пояснения сверху как были, строки — по меткам задач.
+
+    Группы раздела 4 — `GROUPS`, раздела 6 — `WAITING` (#1655); строка без
+    метки встаёт в группу с пустой меткой.
 
     Порядок строк внутри группы — как в теле: его ставит владелец. Пустая
     группа не пишется. Пояснение — всё до первого заголовка группы или
     строки работы.
 
     РУЧНЫЕ ГРУППЫ ОСТАЮТСЯ (взгляд на #1446). Курсивный заголовок после
-    пояснения, которого сборщик не знает («Ждёт срока или чужого»,
-    «Отложено»), — группа владельца: строка без метки под ним остаётся в
-    ней и не встаёт в «Сейчас», где окно взяло бы её работой. Ручные группы
+    пояснения, которого сборщик не знает («Отложено»), — группа владельца:
+    строка без метки под ним остаётся в ней и не встаёт в «Работаем сейчас»,
+    где окно взяло бы её работой. Ручные группы
     идут после групп по меткам, в порядке тела. Продолжение строки — отступ
     или вложенный пункт — едет со своей строкой, а не в пояснение.
 
@@ -718,8 +835,9 @@ def grouped(
     эту ручную группу по тому же предикату — так и задумано: место ручной строки
     задаёт рука владельца, а рождённой — метка.
     """
+    default = next(head for head, label in groups if not label)
     preamble: list[str] = []
-    by_label: dict[str, list[str]] = {head: [] for head, _ in GROUPS}
+    by_label: dict[str, list[str]] = {head: [] for head, _ in groups}
     by_hand: dict[str, list[str]] = {}
     under = ""
     started = False
@@ -731,10 +849,9 @@ def grouped(
             continue
         if line.startswith("- "):
             started = True
-            address = address_of(line)
-            marked = labels.get(int(address[1:]), set()) if address.startswith("#") else set()
-            head = next((h for h, label in GROUPS if label and label in marked), "")
-            last = by_label[head] if head else by_hand[under] if under else by_label[NOW_HEAD]
+            marked = label_of(line, labels)
+            head = next((h for h, label in groups if label and label in marked), "")
+            last = by_label[head] if head else by_hand[under] if under else by_label[default]
             last.append(line)
             continue
         if not started:
@@ -749,16 +866,14 @@ def grouped(
         # Продолжение строки — с отступом или без — едет со своей строкой.
         (last if last is not None else preamble).append(line)
     for line in born or []:
-        address = address_of(line)
-        marked = labels.get(int(address[1:]), set()) if address.startswith("#") else set()
-        by_label[next((h for h, label in GROUPS if label and label in marked), NOW_HEAD)].append(
+        marked = label_of(line, labels)
+        by_label[next((h for h, label in groups if label and label in marked), default)].append(
             line
         )
     while preamble and not preamble[-1].strip():
         preamble.pop()
     said_lines = list(preamble)
-    groups = [*((head, by_label[head]) for head, _ in GROUPS), *by_hand.items()]
-    for head, rows in groups:
+    for head, rows in [*((head, by_label[head]) for head, _ in groups), *by_hand.items()]:
         if rows:
             said_lines += ["", head, *rows] if said_lines else [head, *rows]
     return said_lines
@@ -890,8 +1005,41 @@ def hand_part(body: str) -> list[str]:
     """То, что в плане пишет рука: шапка и строки ручных разделов."""
     return [
         body.split("\n## ", 1)[0],
-        *(line for one in HELD for line in rows_of(body, HEADS[one])),
+        *(line for one in HELD for line in section_rows(body, one)),
     ]
+
+
+def laid_out(
+    repo: str,
+    token: str,
+    held: dict[int, list[str]],
+    taken: frozenset[int],
+    listed: list[dict[str, Any]],
+) -> dict[int, list[str]]:
+    """Ручные разделы по меткам: рождённые и не стоявшие в плане дописаны, строки — в свой раздел.
+
+    Рождённая задача встаёт в раздел 4, не стоявшая в плане — в раздел 6; обе,
+    как и строки руки, идут в раздел по метке (`section_of`, #1655).
+    """
+    labels = labels_by_number(listed)
+    born = born_rows(repo, token, held, taken, listed)
+    standing = {
+        int(address[1:])
+        for one in HELD
+        for line in held.get(one, [])
+        if line.startswith("- ") and (address := address_of(line)).startswith("#")
+    }
+    queued = queued_rows(
+        repo, listed, taken | standing | {int(address_of(one)[1:]) for one in born}
+    )
+    kept, moved = routed(held, labels)
+    extra: dict[int, list[str]] = {one: list(moved[one]) for one in HELD}
+    for line, here in [*((one, BORN_INTO) for one in born), *((one, 6) for one in queued)]:
+        extra[section_of(label_of(line, labels), here)].append(line)
+    return {
+        4: grouped(kept[4], labels, extra[4], GROUPS),
+        6: grouped(kept[6], labels, extra[6], WAITING),
+    }
 
 
 def fresh_build(
@@ -952,8 +1100,7 @@ def fresh_build(
                 "рождённые задачи встанут следующим заходом"
             )
         else:
-            born = born_rows(repo, token, held, taken, listed)
-            held[BORN_INTO] = grouped(held[BORN_INTO], labels_by_number(listed), born)
+            held = laid_out(repo, token, held, taken, listed)
         said = assemble(body, built, held, when)
         if not apply:
             return number, body, held, said
@@ -1132,18 +1279,26 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
 
     said = without_refusal(said)
+    # СНЯТА — ЗНАЧИТ НЕТ НИ В ОДНОМ РУЧНОМ РАЗДЕЛЕ (взгляд на #1657): строку,
+    # которую метка перенесла между 4 и 6 (`routed`), счёт по своему разделу
+    # называл снятой сделанной при открытой задаче.
+    standing = {line for one in HELD for line in held[one]}
     gone = sum(
         1
         for one in HELD
-        for line in rows_of(body, HEADS[one])
-        if line.startswith("- ") and line not in held[one]
+        for line in section_rows(body, one)
+        if line.startswith("- ") and line not in standing
     )
-    born = [line for line in held[BORN_INTO] if BORN_TAIL in line and line not in body]
+    written = [line for one in HELD for line in held[one] if line not in body]
+    born = [line for line in written if BORN_TAIL in line]
+    queued = [line for line in written if QUEUED_TAIL in line]
     if args.apply:
         ghrest.request("PATCH", f"repos/{args.repo}/issues/{number}", token, {"body": said})
         print(f"план #{number} собран" + (f"; снято сделанных строк: {gone}" if gone else ""))
         if born:
-            print(f"в раздел {BORN_INTO} встало рождённых работой задач: {len(born)}")
+            print(f"встало рождённых работой задач: {len(born)}")
+        if queued:
+            print(f"в раздел 6 дописано задач, которых в плане не было: {len(queued)}")
     else:
         # НОМЕР ПЛАНА ПЕЧАТАЕТСЯ И СУХИМ ЗАХОДОМ: навык `work-the-plan` не
         # прибивает номер живой задачи и отсылает за ним сюда, а в самом теле
