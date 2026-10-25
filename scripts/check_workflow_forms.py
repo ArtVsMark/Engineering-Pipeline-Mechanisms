@@ -186,6 +186,43 @@ def pin_problem(uses: str) -> str:
     return "стороннее действие не на полном sha"
 
 
+#: Метка ключа слияния `<<` у разбора.
+MERGE_TAG: Final = "tag:yaml.org,2002:merge"
+
+
+def merged(node: yaml.MappingNode) -> dict[str, yaml.Node]:
+    """Пары отображения по ключу — со слиянием `<<`, как его разворачивает конструктор.
+
+    Явный ключ сильнее слитого, из нескольких слитых сильнее первый — тот же
+    порядок, что у `safe_load`; иначе узел и разбор назвали бы разное значение.
+    """
+    pairs: dict[str, yaml.Node] = {}
+    explicit: dict[str, yaml.Node] = {}
+    for key, value in node.value:
+        if not isinstance(key, yaml.ScalarNode):
+            continue
+        if key.tag == MERGE_TAG:
+            sources = value.value if isinstance(value, yaml.SequenceNode) else [value]
+            for source in reversed(sources):
+                if isinstance(source, yaml.MappingNode):
+                    pairs.update(merged(source))
+        else:
+            explicit[str(key.value)] = value
+    return pairs | explicit
+
+
+def is_true(node: yaml.Node | None) -> bool:
+    """Значение оставляет токен — по тому, как его читает САМО действие, а не резолвер.
+
+    `actions/checkout` сравнивает текст входа: `getInput(...).toUpperCase() ===
+    'TRUE'` (`src/input-helper.ts`). Поэтому `"true"` в кавычках токен
+    оставляет, а `yes` и `on` — нет: площадка разбирает прогон по YAML 1.2, где
+    это строки, и булевым «да» их называет только резолвер YAML 1.1 у
+    `safe_load` (взгляд на #1654).
+    """
+    return isinstance(node, yaml.ScalarNode) and str(node.value).strip().lower() == "true"
+
+
 def true_values(text: str) -> list[yaml.ScalarNode]:
     """Узлы значения `persist-credentials: true` у каждой выгрузки — из разбора, а не строкой.
 
@@ -211,24 +248,19 @@ def true_values(text: str) -> list[yaml.ScalarNode]:
             todo.extend(node.value)
         if not isinstance(node, yaml.MappingNode):
             continue
-        pairs = {
-            str(key.value): value for key, value in node.value if isinstance(key, yaml.ScalarNode)
-        }
         todo.extend(value for _, value in node.value)
+        pairs = merged(node)
         uses = pairs.get("uses")
         given = pairs.get("with")
         if not (isinstance(uses, yaml.ScalarNode) and str(uses.value).startswith(CHECKOUT)):
             continue
         if not isinstance(given, yaml.MappingNode):
             continue
-        for key, value in given.value:
-            if (
-                isinstance(key, yaml.ScalarNode)
-                and key.value == PERSIST
-                and isinstance(value, yaml.ScalarNode)
-                and str(value.value).strip().lower() == "true"
-            ):
-                found.append(value)
+        value = merged(given).get(PERSIST)
+        # Узел — на каждую выгрузку, даже общий у псевдонима: счёт сверяется с
+        # разбором по выгрузкам; одинаковую строку снимает `unreasoned`.
+        if isinstance(value, yaml.ScalarNode) and is_true(value):
+            found.append(value)
     return found
 
 
@@ -236,7 +268,7 @@ def unreasoned(path: Path, text: str) -> list[str]:
     """`true` без причины комментарием на строке своего значения — по меткам разбора."""
     lines = text.splitlines()
     told: list[str] = []
-    for value in true_values(text):
+    for value in {id(one): one for one in true_values(text)}.values():
         line = lines[value.end_mark.line] if value.end_mark.line < len(lines) else ""
         if not REASON_RE.search(line[value.end_mark.column :]):
             number = value.start_mark.line + 1
@@ -257,7 +289,6 @@ def judge(
     # `action.yml`, и исключение одного разрешило бы форму в каждом (взгляд на #1634).
     name = path.as_posix()
     target_allowed, branch_allowed = exceptions
-    trues = 0
     if "pull_request_target" in events(said) and name not in target_allowed:
         found.append(f"{path}: pull_request_target — исполняет голову изменения с правами базы")
     top = said.get("permissions")
@@ -275,8 +306,6 @@ def judge(
                 continue
             given = step.get("with")
             value = given.get(PERSIST) if isinstance(given, dict) else None
-            if str(value).strip().lower() == "true":
-                trues += 1
             if not writes(rights):
                 continue
             if not isinstance(given, dict) or PERSIST not in given:
@@ -294,8 +323,11 @@ def judge(
                 met.add((name, uses))
                 continue
             found.append(f"{where}: {uses} — {problem}")
-    if trues:
-        found += unreasoned(path, text)
+    # СУД `true` — ОДНА РЕАЛИЗАЦИЯ, ПО УЗЛУ (взгляд на #1654). Прежде его
+    # предварял счёт по `safe_load`, а резолвер YAML 1.1 зовёт `yes` булевым
+    # «да», которым действие его не читает: два суда одного предмета
+    # расходились, и разрыв держала сверка счётом. Теперь судит один.
+    found += unreasoned(path, text)
     return found, met
 
 

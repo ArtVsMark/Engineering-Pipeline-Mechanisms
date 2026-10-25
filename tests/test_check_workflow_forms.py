@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Final
 
 import pytest
+import yaml
 
 from tests.conftest import load_script
 
@@ -306,6 +307,20 @@ STEP: Final = f"      - uses: {CHECKOUT}\n        with:\n          persist-crede
             f"      - uses: {CHECKOUT}\n        with: *keep\n",
             True,
         ),
+        (f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials: yes\n", False),
+        (f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials: TRUE\n", True),
+        (
+            "      - uses: some/other@" + SHA + "\n        with: &b\n"
+            "          persist-credentials: true\n"
+            f"      - uses: {CHECKOUT}\n        with:\n          <<: *b\n",
+            True,
+        ),
+        (
+            "      - uses: some/other@" + SHA + "\n        with: &b\n"
+            "          persist-credentials: true # толкает\n"
+            f"      - uses: {CHECKOUT}\n        with:\n          <<: *b\n",
+            False,
+        ),
     ],
     ids=[
         "в-строку-без-причины",
@@ -314,6 +329,10 @@ STEP: Final = f"      - uses: {CHECKOUT}\n        with:\n          persist-crede
         "ниже-с-причиной",
         "якорь-с-причиной",
         "якорь-без-причины",
+        "yes-строка-для-действия",
+        "TRUE-без-причины",
+        "слияние-без-причины",
+        "слияние-с-причиной",
     ],
 )
 def test_a_true_is_judged_on_the_line_of_its_value(tmp_path: Path, step: str, red: bool) -> None:
@@ -326,6 +345,26 @@ def test_a_true_is_judged_on_the_line_of_its_value(tmp_path: Path, step: str, re
     assert text != CLEAN
     told = found(tree(tmp_path, {"a.yml": text}))
     assert any("без причины" in one for one in told) is red, told
+
+
+def test_an_alias_shared_by_two_checkouts_is_told_once(tmp_path: Path) -> None:
+    """Общий узел псевдонима — одна строка находки, а не по строке на выгрузку (взгляд на #1654)."""
+    step = (
+        f"      - uses: {CHECKOUT}\n        with: &keep\n"
+        "          persist-credentials: true\n"
+        f"      - uses: {CHECKOUT}\n        with: *keep\n"
+    )
+    told = found(tree(tmp_path, {"a.yml": CLEAN.replace(STEP, step)}))
+    assert len([one for one in told if "без причины" in one]) == 1, told
+
+
+def test_merged_and_is_true_read_like_the_action() -> None:
+    """Слияние: явный ключ сильнее слитого; «да» — текст `true`, как у действия, а не резолвер."""
+    node = yaml.compose("b: &b {x: 1, y: 2}\nm: {<<: *b, y: 3}\n", Loader=yaml.SafeLoader)
+    pairs = module.merged(node.value[1][1])
+    assert {key: one.value for key, one in pairs.items()} == {"x": "1", "y": "3"}
+    flags = yaml.compose("[yes, 'true', on, True, no]", Loader=yaml.SafeLoader)
+    assert [module.is_true(one) for one in flags.value] == [False, True, False, True, False]
 
 
 def test_a_reason_on_another_actions_key_does_not_cover_a_checkout(tmp_path: Path) -> None:
