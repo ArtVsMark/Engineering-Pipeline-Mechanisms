@@ -8,7 +8,7 @@
       "links": []
     },
     "family": {
-      "state": "behind",
+      "state": "ok",
       "why": "",
       "links": [
         {
@@ -65,10 +65,10 @@
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "export",
-          "mine": "1.8",
+          "mine": "1.9",
           "latest": "1.9",
           "where": ".rules/bindings.json",
-          "state": "behind",
+          "state": "ok",
           "why": ""
         },
         {
@@ -98,8 +98,8 @@
     {
       "code": "EIP",
       "repo": "ArtVsMark/Engineering-Incidents-Playbook",
-      "state": "behind",
-      "why": "export: 1.8 → 1.9 (.rules/bindings.json)"
+      "state": "ok",
+      "why": ""
     },
     {
       "code": "EPM",
