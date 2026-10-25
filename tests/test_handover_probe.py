@@ -255,3 +255,8 @@ def test_a_step_with_strip_ours_is_called_with_it() -> None:
         if declared and (job.get("with") or {}).get("strip-ours") is not True:
             missing.append(name)
     assert not missing, f"шаги со входом strip-ours зовутся без него: {missing}"
+
+
+def test_steps_the_probe_skips_for_want_of_a_change_are_about_a_change() -> None:
+    """Сосед таблицы: пропуск пробы «нет изменения» — подмножество `onboard.ABOUT_A_CHANGE`."""
+    assert set(NEEDS_A_CHANGE) <= onboard.ABOUT_A_CHANGE

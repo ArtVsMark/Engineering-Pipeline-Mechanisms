@@ -221,8 +221,11 @@ CLOSED_ITEM_RE: Final = re.compile(
 #: голове общей ветки. Не красен — метки нет, и отказ называет, чего не хватило
 #: ([154](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/154-none-must-name-its-reason.md),
 #: [051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
+#: Ключ строкой: его называют отказы и план, а образец строится из него.
+FIXES_MAIN_KEY: Final = "Чинит main:"
 FIXES_MAIN_RE: Final = re.compile(
-    r"^\s*(?P<mark>Чинит main:)\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
+    rf"^\s*(?P<mark>{re.escape(FIXES_MAIN_KEY)})\s*(?P<text>\S.*?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 #: Ключ строкой: её пишет шаг открытия в тело изменения, а образец строится из неё.

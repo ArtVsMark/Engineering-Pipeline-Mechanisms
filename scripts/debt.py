@@ -50,6 +50,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
+import catalogue
 import ci_complete
 import coverage_floor
 import findings
@@ -515,7 +516,9 @@ def looks_done(issues: list[dict[str, Any]]) -> list[tuple[int, str]]:
     return sorted(ready)
 
 
-def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
+def rules_left(
+    numbers: tuple[int, int, int] | None, note: str | None, *, inapplicable: bool = False
+) -> bool:
     """Есть ли незакрытая работа по правилам — по ТРЁМ видам 177, а не по счёту задач.
 
     Первое из трёх чисел — сколько задач по правилам заведено в трекере, и
@@ -533,7 +536,12 @@ def rules_left(numbers: tuple[int, int, int] | None, note: str | None) -> bool:
     Числа не прочитаны — долг НЕИЗВЕСТЕН, а не равен нулю (045): неизвестность
     считается долгом, потому что снимать приоритет с непроверенного источника
     хуже, чем напомнить лишний раз.
+
+    `inapplicable` — дерево самого каталога (#1666): чисел нет по построению, и
+    долгом остаётся только разошедшийся контракт (взгляд на #1669).
     """
+    if inapplicable:
+        return bool(note)
     if numbers is None:
         return True
     _, queue, unheld = numbers
@@ -758,6 +766,24 @@ def remind(has_debt: bool, unread: dict[int, list[str]] | None = None) -> None:
         print(f"Источник {source} прочитан не весь: {'; '.join(whys)} — это НЕ «пусто» (045).")
 
 
+#: Ответ о долге по правилам на дереве самого каталога (#1666).
+CATALOGUE_TREE: Final = (
+    "неприменимо: дерево — сам каталог, «входящие» — понятие потребителя; "
+    "долг по правилам у каталога считает его `check_bindings.py` (ступень 0)"
+)
+
+
+def catalogue_tree(repo: str) -> bool:
+    """Дерево — сам каталог: «входящих» у него нет по построению (#1666).
+
+    ГРАНИЦА — ТОЧНОЕ ИМЯ, как у `check_foreign_why` (#1624, взгляд на #1646):
+    форк или переименованный каталог снова спрашивает «входящие» и громко
+    называет их отсутствие. Опознание по содержимому отдало бы «неприменимо»
+    любому дереву, сложенному похоже, — ошибка в сторону тишины (051).
+    """
+    return repo.casefold() == catalogue.REPO.casefold()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: печатает остаток долга и возвращает исход."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -889,7 +915,12 @@ def main(argv: list[str] | None = None) -> int:
     partial = False
     numbers = rules_debt(inbox)
     note = contract_note(inbox)
-    if numbers is None:
+    # НЕПРИМЕНИМО ДОХОДИТ ДО РЕШЕНИЯ, А НЕ ТОЛЬКО ДО ПЕЧАТИ (взгляд на #1669):
+    # иначе «неизвестные числа» снова считались бы долгом «перед планом».
+    inapplicable = numbers is None and catalogue_tree(args.repo)
+    if inapplicable:
+        print(f"правила: {CATALOGUE_TREE}")
+    elif numbers is None:
         partial = True
         print(
             "правила: «входящие» не найдены или без строки счёта — ночной прогон каталога\n"
@@ -925,7 +956,7 @@ def main(argv: list[str] | None = None) -> int:
             "left": left,
             "lagging": lagging,
             "kept": kept,
-            "rules_left": rules_left(numbers, note),
+            "rules_left": rules_left(numbers, note, inapplicable=inapplicable),
         }
     )
     unread = unread_in(read)
