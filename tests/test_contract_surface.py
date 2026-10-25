@@ -864,3 +864,15 @@ def test_a_declared_surface_is_judged_with_its_declared_kind(
     git(root, "commit", "-qm", "фрагмент")
     with contextlib.chdir(root):
         assert gate.main(["--base", "main"]) == gate.EXIT_CLEAN
+
+
+def test_the_declared_surface_walks_down_the_named_path_only(tmp_path: Path) -> None:
+    """`declared_surface` и `below`: файл — сам, каталог — спуском, чужое и нет — мимо (#1664)."""
+    (tmp_path / "export" / "deep").mkdir(parents=True)
+    (tmp_path / "export" / "deep" / "b.json").write_text("b", encoding="utf-8")
+    (tmp_path / "export" / "a.json").write_text("a", encoding="utf-8")
+    (tmp_path / "CONNECT.md").write_text("c", encoding="utf-8")
+    (tmp_path / "other.txt").write_text("x", encoding="utf-8")
+    said = contract.declared_surface(tmp_path, (Path("export"), Path("CONNECT.md"), Path("нет")))
+    assert sorted(said) == ["CONNECT.md", "export/a.json", "export/deep/b.json"]
+    assert [one.name for one in contract.below(tmp_path / "export")] == ["a.json", "b.json"]

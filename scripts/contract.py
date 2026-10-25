@@ -147,9 +147,7 @@ def declared_surface(root: Path, where: tuple[Path, ...]) -> dict[str, str]:
     """
     found: dict[str, str] = {}
     for one in where:
-        start = root / one
-        files = sorted(start.rglob("*")) if start.is_dir() else [start]
-        for path in files:
+        for path in below(root / one):
             if not path.is_file():
                 continue
             try:
@@ -158,6 +156,20 @@ def declared_surface(root: Path, where: tuple[Path, ...]) -> dict[str, str]:
                 ).hexdigest()
             except OSError as exc:
                 raise policy.BadPolicy(f"{path} не прочитан: {exc}") from exc
+    return found
+
+
+def below(start: Path) -> list[Path]:
+    """Файлы объявленного пути: сам файл или каталог спуском вниз, в порядке путей.
+
+    СПУСК, А НЕ ПОИСК: путь назван ответом проекта, и обходится только он. Не
+    `git ls-files` — «до» снимается с распакованного архива базы, git там нет.
+    """
+    if not start.is_dir():
+        return [start] if start.is_file() else []
+    found: list[Path] = []
+    for one in sorted(start.iterdir()):
+        found += below(one) if one.is_dir() else [one]
     return found
 
 
