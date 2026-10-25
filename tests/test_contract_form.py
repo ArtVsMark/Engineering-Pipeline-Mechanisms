@@ -37,6 +37,8 @@ def test_the_consumer_names_its_surface_and_kind(tmp_path: Path) -> None:
         ({"surface": ["/export"]}, "вне дерева"),
         ({"surface": ["../export"]}, "вне дерева"),
         ({"surface": ["export"], "kind": "breaking"}, "род «breaking» журналу неизвестен"),
+        ({"surface": ["./"]}, "всё дерево"),
+        ({"surface": ["export"], "kind": ["a"]}, "журналу неизвестен"),
     ],
     ids=[
         "не-отображение",
@@ -47,6 +49,8 @@ def test_the_consumer_names_its_surface_and_kind(tmp_path: Path) -> None:
         "абс",
         "вверх",
         "род",
+        "корень",
+        "род-не-строкой",
     ],
 )
 def test_a_broken_section_is_refused_with_its_reason(section: object, why: str) -> None:
@@ -60,3 +64,13 @@ def test_a_declared_path_missing_from_the_tree_is_named(tmp_path: Path) -> None:
     (tmp_path / "export").mkdir()
     form = module.Form((Path("export"), Path("CONNECT.md")), "changed")
     assert module.missing(form, tmp_path) == ["CONNECT.md"]
+
+
+def test_a_declared_path_that_is_a_link_is_named(tmp_path: Path) -> None:
+    """Объявленный путь — ссылка: она называется, а не даёт пустую поверхность (взгляд на #1672)."""
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "export").symlink_to(tmp_path / "real")
+    form = module.Form((Path("export"), Path("real")), "changed")
+    assert module.missing(form, tmp_path) == []
+    assert module.linked(form, tmp_path) == ["export"]

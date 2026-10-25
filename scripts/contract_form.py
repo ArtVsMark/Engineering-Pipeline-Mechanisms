@@ -83,3 +83,13 @@ def form_of(section: Any) -> Form:
 def missing(form: Form, root: Path) -> list[str]:
     """Объявленные пути, которых в дереве нет: поверхность из несуществующего — молчание."""
     return [where.as_posix() for where in form.surface if not (root / where).exists()]
+
+
+def linked(form: Form, root: Path) -> list[str]:
+    """Объявленные пути — символические ссылки: обход по ним не идёт, и поверхность пуста молча.
+
+    `missing` их не ловит — `exists()` идёт по ссылке, — а `contract.below`
+    ссылку не обходит. Без отказа объявление из одной ссылки давало пустую
+    поверхность без единого слова (взгляд на #1672).
+    """
+    return [where.as_posix() for where in form.surface if (root / where).is_symlink()]

@@ -605,6 +605,11 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
                 f"раздел {contract_form.SECTION}: путей поверхности нет в дереве — "
                 + ", ".join(gone)
             )
+        if linked := contract_form.linked(surface, path.parent):
+            problems.append(
+                f"раздел {contract_form.SECTION}: путь поверхности — символическая ссылка, "
+                "а по ссылкам обход не идёт — " + ", ".join(linked)
+            )
     except contract_form.NotRun as exc:
         problems.append(str(exc))
     # Раздел путей — тем же приёмом (#1630): битый ключ отвергается сверкой
