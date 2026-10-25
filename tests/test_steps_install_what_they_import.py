@@ -22,7 +22,8 @@ from tests.conftest import ROOT, walk
 
 #: Скрипт, который зовёт шаг: из выкачки механизмов или из своего дерева.
 CALLED_RE = re.compile(r"(?:\$MECHANISMS|\$\{\{ env\.MECHANISMS \}\})?/?scripts/(\w+)\.py")
-#: Импорт скрипта при закрытом `yaml`: код 3 — упал именно на нём.
+#: Импорт скрипта при закрытом `yaml`: код 3 — упал именно на нём, код 4 —
+#: упал на другом, и судить о `yaml` проба не смогла (039).
 PROBE = """
 import builtins, sys
 sys.path[:0] = [{scripts!r}, {transport!r}]
@@ -35,8 +36,16 @@ builtins.__import__ = closed
 try:
     __import__({module!r})
 except ModuleNotFoundError as exc:
-    sys.exit(3 if "yaml" in str(exc) else 0)
+    if "yaml" in str(exc):
+        sys.exit(3)
+    print(f"{{type(exc).__name__}}: {{exc}}", file=sys.stderr)
+    sys.exit(4)
+except Exception as exc:
+    print(f"{{type(exc).__name__}}: {{exc}}", file=sys.stderr)
+    sys.exit(4)
 """
+#: Коды пробы: импорт прошёл без `yaml` · упал на `yaml`.
+WITHOUT_YAML, NEEDS_YAML = 0, 3
 
 
 def jobs_without_yaml() -> list[tuple[str, str, str]]:
@@ -55,7 +64,11 @@ def jobs_without_yaml() -> list[tuple[str, str, str]]:
 
 
 def imports_yaml(module: str) -> bool:
-    """Падает ли импорт скрипта без `yaml` — исполнением в отдельном процессе."""
+    """Падает ли импорт скрипта без `yaml` — исполнением в отдельном процессе.
+
+    Импорт, упавший не на `yaml`, — третий исход, а не «`yaml` не нужен»:
+    скрипт, упавший раньше, гейт иначе пропустил бы молча (взгляд на #1671).
+    """
     probe = PROBE.format(
         scripts=str(ROOT / "scripts"),
         transport=str(ROOT / "packages" / "transport"),
@@ -69,13 +82,23 @@ def imports_yaml(module: str) -> bool:
         check=False,
         timeout=60,
     )
-    return done.returncode == 3
+    assert done.returncode in (WITHOUT_YAML, NEEDS_YAML), (
+        f"проба не смогла судить scripts/{module}.py: импорт упал не на `yaml` — "
+        f"{done.stderr.strip()[-300:]}"
+    )
+    return done.returncode == NEEDS_YAML
 
 
 def test_the_probe_sees_a_script_that_needs_yaml() -> None:
     """Проба не слепа: `pipeline_checks` без `yaml` падает, транспорт — нет."""
     assert imports_yaml("pipeline_checks")
     assert not imports_yaml("ghrest")
+
+
+def test_a_probe_that_cannot_judge_says_so() -> None:
+    """Импорт, упавший не на `yaml`, — отказ пробы, а не зелёное (039)."""
+    with pytest.raises(AssertionError, match="не смогла судить"):
+        imports_yaml("нет_такого_скрипта")
 
 
 @pytest.mark.parametrize(("flow", "job", "script"), jobs_without_yaml())
