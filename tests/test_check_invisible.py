@@ -510,9 +510,13 @@ def test_selector_kinds_cover_the_data_and_flags_come_from_it() -> None:
         if code not in tables.selectors
     }
     assert inside == {0x180E}
-    england = "\U0001f3f4" + "".join(chr(0xE0000 + ord(one)) for one in "gbeng") + "\U000e007f"
-    assert england in tables.tag_flags and len(tables.tag_flags) == 3
-    assert module.sequences("tag-sequences.txt", "RGI_Emoji_Tag_Sequence") == tables.tag_flags
+    # ОЖИДАНИЕ СОБРАНО НЕЗАВИСИМО ОТ РАЗБОРА (взгляд на #1662): прежнее равенство
+    # с `sequences(...)` выполнялось всегда — `tables()` строит флаги тем же вызовом.
+    flags = {
+        "\U0001f3f4" + "".join(chr(0xE0000 + ord(one)) for one in region) + "\U000e007f"
+        for region in ("gbeng", "gbsct", "gbwls")
+    }
+    assert tables.tag_flags == flags
 
 
 def test_within_holds_both_ends() -> None:

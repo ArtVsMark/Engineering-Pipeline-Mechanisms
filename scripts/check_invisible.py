@@ -186,7 +186,8 @@ CANCEL_TAG: Final = "\U000e007f"
 MONGOLIAN_SELECTORS: Final = (0x180B, 0x180F)
 IDEOGRAPHIC_SELECTORS: Final = (0xE0100, 0xE01EF)
 STANDARD_SELECTORS: Final = (0xFE00, 0xFE0F)
-#: Роды селекторов — в порядке, в каком их сверяет `fits`.
+#: Роды селекторов списком — для сверки с данными Unicode в тесте; `fits` зовёт
+#: их поимённо (взгляд на #1662).
 SELECTOR_KINDS: Final = (MONGOLIAN_SELECTORS, IDEOGRAPHIC_SELECTORS, STANDARD_SELECTORS)
 
 
