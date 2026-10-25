@@ -1106,3 +1106,20 @@ def test_a_key_line_never_takes_the_next_line(key: str, read: Any, below: str) -
     """
     assert read(f"{key} {below}"), "сама форма читается"
     assert not read(f"{key}\n{below}")
+
+
+def test_a_taken_candidate_is_read_only_in_its_own_form() -> None:
+    """«Кандидат:» с очередью карты, номером правила и проектом; чужая очередь — не кандидат."""
+    said = changerefs.candidates_in_all(
+        [
+            "Кандидат: rework · 001 · o/r\nКандидат: rework · 001 · o/r",
+            "Кандидат: someday · 002 · o/r\n`Кандидат: spread · 003 · o/r`\n"
+            "Кандидат: spread · 004 · o/r",
+        ]
+    )
+    assert said == ["Кандидат: rework · 001 · o/r", "Кандидат: spread · 004 · o/r"]
+
+
+def test_the_candidate_queues_are_the_queues_of_the_map() -> None:
+    """Очереди ключа — ровно очереди карты гейтов: одна таблица, сверяет тест (214)."""
+    assert set(changerefs.CANDIDATE_QUEUES) == set(load_script("family_gates.py").QUEUES)

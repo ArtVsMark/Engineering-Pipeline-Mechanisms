@@ -78,6 +78,7 @@
 | 13a | Дрейф: внешний вход сдвинулся | `drift.yml` → `step-drift.yml` (по расписанию) | `drift / drift` | нет, совещательный |
 | 14 | Значки, метрики, публикация | `badges.yml` | `badges` | нет |
 | 14b | Входы общего шага фактов: свои разделы и покрытие — файлом | `badges.yml` | `inputs` | нет |
+| 14d | Живая задача трёх очередей карты гейтов семьи — переписывается из `family-gates.json` того же прогона | `badges.yml` | `gates-task` | нет |
 | 14c | Факты: общий издатель семьи, сверка с договором фактов семьи, публикация `facts.json`, значка `project.svg` и разбора семьи `family-check.json` поверх `badges` — свой файл потребителя по этим путям перезаписывается; со входом `archive` тем же коммитом — архив находок `findings.json` | `badges.yml` → `step-facts.yml` | `facts / facts` | нет |
 | 14a | Ряд прогонов: как конвейер работает на самом деле | `runs-series.yml` → `step-runs-series.yml` (по расписанию и кнопкой) | `runs-series / runs-series` | нет |
 | 15 | Состав меток: дерево — источник | `labels-sync.yml` → `step-labels-sync.yml` | `apply / apply` | нет |

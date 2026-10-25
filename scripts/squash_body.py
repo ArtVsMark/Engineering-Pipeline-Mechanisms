@@ -161,6 +161,9 @@ def compose_from(subjects: list[str], bodies: list[str]) -> str:
     # стирает. Абзацем после снятий: строка этой формы к снятию не пристаёт,
     # но читателю общей ветки соседство подсказывало бы связь, которой нет.
     windows = changerefs.window_meetings_in_all(bodies)
+    # Взятый кандидат карты гейтов (шаг 3 #1425) доезжает до общей ветки: по
+    # нему страница выпуска называет, что выпуск взял из очередей.
+    candidates = changerefs.candidates_in_all(bodies)
     # Трейлеры берутся из хвостового блока КАЖДОГО коммита и склеиваются без
     # повторов: подпись у ветки одна, повторять её по числу коммитов — шум.
     trailers = trailers_of(bodies)
@@ -176,6 +179,8 @@ def compose_from(subjects: list[str], bodies: list[str]) -> str:
         lines += ["", *resolved]
     if windows:
         lines += ["", *[str(meeting) for meeting in windows]]
+    if candidates:
+        lines += ["", *candidates]
     if trailers:
         lines += ["", *trailers]
     return "\n".join(lines)

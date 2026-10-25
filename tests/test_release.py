@@ -1529,3 +1529,31 @@ def test_main_prints_the_refusals_gathered_before_a_break(
     assert module.main(["--version", "9.10.0"]) == module.EXIT_BROKEN
     said = capsys.readouterr().out
     assert "дерево грязно: собрано до обрыва" in said, said
+
+
+def test_the_release_page_names_the_candidates_it_took(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Выпуск называет кандидатов карты из строк «Кандидат:» с прошлого тега (шаг 3 #1425)."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path)]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+
+    def commit(message: str) -> None:
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", message], check=True)
+
+    commit("старое\n\nКандидат: spread · 007 · o/старый")
+    subprocess.run([*git, "tag", "v1.0.0"], check=True)
+    commit("пусто")
+    subprocess.run([*git, "tag", "v1.1.0"], check=True)
+    commit("взял\n\nКандидат: rework · 001 · o/сосед\nКандидат: propose · 038 · o/сосед")
+    subprocess.run([*git, "tag", "v1.2.0"], check=True)
+    monkeypatch.chdir(tmp_path)
+    said = module.taken_candidates("v1.2.0")
+    assert said[0].endswith("взято 2.") and said[2:] == [
+        "- rework · 001 · o/сосед",
+        "- propose · 038 · o/сосед",
+    ]
+    assert module.taken_candidates("v1.1.0")[0].endswith("кандидатов не взято.")
+    assert module.taken_candidates("v1.1.0", ours=False) == [], "у потребителя пустой — без строки"
+    assert module.taken_candidates("v1.2.0", ours=False)[0].endswith("взято 2.")
+    assert "не прочитано" in module.taken_candidates("v9.9.9")[0]

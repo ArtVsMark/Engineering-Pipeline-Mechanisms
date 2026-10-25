@@ -53,7 +53,9 @@ from pathlib import Path
 from typing import Final
 
 import build_changelog
+import changerefs
 import check_version
+import family_uptake
 import ghrest
 import gitcall
 import paths
@@ -661,7 +663,35 @@ def page_body(version: str, repo: str) -> str:
         census = [f"Перепись отдачи не собрана: {exc}."]
     if census:
         lines += ["", *census]
+    taken = taken_candidates(f"v{version}", ours=repo.casefold() == family_uptake.OURS.casefold())
+    if taken:
+        lines += ["", *taken]
     return "\n".join(lines)
+
+
+def taken_candidates(tag: str, *, ours: bool = True) -> list[str]:
+    """Раздел «взято из очередей карты гейтов»: строки «Кандидат:» с прошлого выпуска.
+
+    ПУСТО НАЗЫВАЕТСЯ СЛОВАМИ (027) — у поставщика: иначе «не взяли» и «не
+    смотрели» на его странице одинаковы. Карта — мерило поставщика, и у
+    потребителя пустой раздел был бы шумом на каждом выпуске (`ours=False` —
+    пусто без строки). Не прочитано — строка с причиной (045).
+    """
+    head = "**Из очередей карты гейтов семьи** (#1425): "
+    try:
+        before = portable_census.previous_tag(tag, Path())
+        span = f"{before}..{tag}" if before else tag
+        bodies = git("log", "--format=%B%x00", span).split("\x00")
+    except (portable_census.NotRun, NotRun) as exc:
+        return [f"{head}не прочитано — {exc}."]
+    taken = changerefs.candidates_in_all(bodies)
+    if not taken:
+        return [f"{head}кандидатов не взято."] if ours else []
+    return [
+        f"{head}взято {len(taken)}.",
+        "",
+        *(f"- {one.split(':', 1)[1].strip()}" for one in taken),
+    ]
 
 
 def page_exists(repo: str, version: str, token: str) -> bool:
