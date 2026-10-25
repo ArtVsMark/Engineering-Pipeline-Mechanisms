@@ -281,7 +281,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -uo pipefail
-          python -m pip install --quiet $MECHANISMS/packages/transport
+          python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport
           python $MECHANISMS/scripts/look_mode.py --pr "${{ github.event.pull_request.number }}" \
             --head "$HEAD_SHA" --base "$BASE_REF" \
             || echo "::warning::Режим захода не выбран — взгляд пойдёт полным."
@@ -803,7 +803,7 @@ jobs:
           python-version: "3.14"
 
       # Общий низ конвейера ставится пакетом (024).
-      - run: python -m pip install --quiet $MECHANISMS/packages/transport
+      - run: python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport
       # У НАХОДКИ ЕСТЬ АДРЕСАТ, ПЕРЕЖИВАЮЩИЙ СЛИЯНИЕ (142). Пока изменение
       # открыто, адресат — комментарий ревьюера: он на глазах у автора. После
       # слияния изменение уходит из списка открытых, и туда больше никто не
@@ -927,7 +927,7 @@ jobs:
         with:
           python-version: "3.14"
       # Общий низ конвейера ставится пакетом (024).
-      - run: python -m pip install --quiet $MECHANISMS/packages/transport
+      - run: python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport
       - name: снять разобранное с реестра
         continue-on-error: true
         env:
@@ -1349,7 +1349,7 @@ jobs:
         with:
           python-version: "3.14"
       # Общий низ конвейера ставится пакетом (024).
-      - run: python -m pip install --quiet $MECHANISMS/packages/transport
+      - run: python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport
       - name: выбрать, на что смотреть
         id: pick
         env:
