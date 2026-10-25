@@ -18,7 +18,7 @@ import sys
 import pytest
 import yaml
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, walk
 
 #: Скрипт, который зовёт шаг: из выкачки механизмов или из своего дерева.
 CALLED_RE = re.compile(r"(?:\$MECHANISMS|\$\{\{ env\.MECHANISMS \}\})?/?scripts/(\w+)\.py")
@@ -42,7 +42,7 @@ except ModuleNotFoundError as exc:
 def jobs_without_yaml() -> list[tuple[str, str, str]]:
     """Пары «прогон · джоб · скрипт»: джоб ставит pip, но не `pyyaml`, и зовёт скрипт."""
     found: list[tuple[str, str, str]] = []
-    for flow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+    for flow in walk(ROOT / ".github" / "workflows", "*.yml"):
         document = yaml.safe_load(flow.read_text(encoding="utf-8")) or {}
         for name, job in (document.get("jobs") or {}).items():
             text = yaml.safe_dump(job, allow_unicode=True)
