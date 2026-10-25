@@ -270,7 +270,7 @@ def sources(
             rows=[
                 f"{one} — красное на своей голове"
                 for one in red
-                if int(one[1:].split(" ", 1)[0]) not in held
+                if not (one.startswith("#") and int(one[1:].split(" ", 1)[0]) in held)
             ]
         )
         main_rows = built[0].rows + fixing_main
@@ -388,8 +388,11 @@ def zero_fixes(repo: str, token: str, red: list[str]) -> tuple[list[str], list[s
         step = changerefs.fixes_main_in(body)
         if step:
             main_rows.append(f"**#{number}** — чинит «{step}» на общей ветке")
+        # Пара — только при красном держимом (взгляд на #1661): позеленевшее
+        # или слитое #M строкой 0б больше не держится, как и пара из «Ждёт:».
         for held in changerefs.fixes_red_in(body):
-            pairs[(number, held)] = None
+            if held in reds:
+                pairs[(number, held)] = None
         waits = changerefs.held_in(body)
         if number in reds and waits:
             for fix in ISSUE_RE.findall(waits):

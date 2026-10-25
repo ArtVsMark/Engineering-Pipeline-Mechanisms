@@ -41,8 +41,9 @@
 (#1526) в теле коммита, — толкается при любом числе открытых, а открытые с
 таким объявлением в счёт трёх не входят. Ключи прежние: ими же очередь ставит
 починку на ступень 0, и второго имени у одной вещи нет (022). Проверяемая
-половина держится: `Чинит main:` при зелёном шаге — отказ; что `Чинит
-красное:` стоит на настоящей починке, машина не отличит (057).
+половина держится и на толчке, и в счёте: `Чинит main:` — пока шаг красен,
+`Чинит красное: #N` — пока #N открыто и красно (взгляд на #1661). Что ветка
+правда чинит названное, машина не отличит (057).
 
 Исходы (правило 039): ``0`` чисто · ``1`` предел достигнут · ``2`` не
 отработал · ``3`` не спросить: токена нет.
@@ -54,6 +55,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import agent_pr
+import automerge
 import changerefs
 import check_branch_revival
 import ghrest
@@ -219,23 +221,68 @@ def fix_declared(root: Path, base: str = trunk_log.TRUNK_REF) -> tuple[str | Non
     return changerefs.fixes_main_in_all(bodies), changerefs.fixes_red_in_all(bodies)
 
 
-def is_fix(change: dict[str, Any]) -> bool:
-    """Открытое изменение — починка раздела 0: его тело несёт `Чинит main:` или `Чинит красное:`."""
+def live_red(repo: str, token: str, number: int) -> bool:
+    """Открыто ли изменение `number` и красна ли его голова — вопрос площадке, а не объявлению."""
+    change = ghrest.request("GET", f"repos/{repo}/pulls/{number}", token) or {}
+    if change.get("state") != "open":
+        return False
+    sha = str((change.get("head") or {}).get("sha") or "")
+    if not sha:
+        return False
+    runs = list(
+        ghrest.paginate(
+            f"repos/{repo}/commits/{sha}/check-runs?filter=latest", token, key="check_runs"
+        )
+    )
+    return bool(automerge.red_names(runs))
+
+
+def main_red(repo: str, token: str, step: str) -> bool:
+    """Красен ли шаг `step` на общей ветке — тем же вопросом, что метка `fix-main`."""
+    try:
+        return agent_pr.red_on_trunk(repo, token, step, paths.TRUNK)
+    except agent_pr.NotRun as exc:
+        raise NotRun(str(exc)) from exc
+
+
+def is_fix(repo: str, token: str, change: dict[str, Any]) -> bool:
+    """Открытое изменение — ЖИВАЯ починка раздела 0: объявление сверено с площадкой.
+
+    ОБЪЯВЛЕНИЕ СВЕРЯЕТСЯ И В СЧЁТЕ, А НЕ ТОЛЬКО НА ТОЛЧКЕ (взгляд на #1661):
+    починка, чей предмет уже зелен или закрыт, — обычное изменение, и в счёт
+    трёх она входит.
+    """
     body = str(change.get("body") or "")
-    return bool(changerefs.fixes_main_in(body) or changerefs.fixes_red_in(body))
+    step = changerefs.fixes_main_in(body)
+    if step and main_red(repo, token, step):
+        return True
+    return any(live_red(repo, token, one) for one in changerefs.fixes_red_in(body))
 
 
 def zero_pass(repo: str, token: str, step: str | None, reds: list[int]) -> tuple[int, str] | None:
-    """Вердикт для ветки раздела 0 при занятых местах; не починка — `None`."""
+    """Вердикт для ветки раздела 0 при занятых местах; не починка — `None`.
+
+    Обе стороны проверяются у площадки (взгляд на #1661): `Чинит красное: #N`
+    — открыто ли #N и красна ли его голова, `Чинит main:` — красен ли шаг.
+    Непроверяемая половина остаётся одна: что ветка правда чинит названное (057).
+    """
     if reds:
-        which = ", ".join(f"#{one}" for one in reds)
-        return EXIT_OK, f"ветка чинит красное {which} — раздел 0 предела трёх открытых не держит"
+        live = [one for one in reds if live_red(repo, token, one)]
+        if live:
+            which = ", ".join(f"#{one}" for one in live)
+            return (
+                EXIT_OK,
+                f"ветка чинит красное {which} — раздел 0 предела трёх открытых не держит",
+            )
+        if not step:
+            which = ", ".join(f"#{one}" for one in reds)
+            return EXIT_OVER, (
+                f"толчок отвергнут: ветка объявляет «{changerefs.FIXES_RED_KEY} {which}», "
+                f"но красного открытого среди них нет — предел {LIMIT} открытых для неё держит"
+            )
     if not step:
         return None
-    try:
-        red = agent_pr.red_on_trunk(repo, token, step, paths.TRUNK)
-    except agent_pr.NotRun as exc:
-        raise NotRun(str(exc)) from exc
+    red = main_red(repo, token, step)
     if not red:
         return EXIT_OVER, (
             f"толчок отвергнут: ветка объявляет «{changerefs.FIXES_MAIN_KEY} {step}», "
@@ -280,7 +327,7 @@ def look(root: Path, branch: str) -> tuple[int, str]:
             f"по ветке «{branch}» изменение уже открыто (#{here[0]['number']}) — "
             "толчок чинит своё и предела не прибавляет"
         )
-    mine = [one for one in own_open(repo, token, session) if not is_fix(one)]
+    mine = [one for one in own_open(repo, token, session) if not is_fix(repo, token, one)]
     if len(mine) >= LIMIT:
         step, reds = fix_declared(root)
         verdict = zero_pass(repo, token, step, reds)

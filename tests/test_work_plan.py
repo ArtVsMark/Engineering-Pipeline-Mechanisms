@@ -1601,13 +1601,14 @@ def test_zero_fixes_pair_a_fix_with_the_red_it_holds_from_either_side(
         {"number": 32, "body": f"{module.changerefs.WAITS_KEY} #40, слияния соседа"},
         {"number": 33, "body": f"{module.changerefs.FIXES_MAIN_KEY} tests"},
         {"number": 34, "body": f"{module.changerefs.WAITS_KEY} #41"},
+        {"number": 37, "body": f"{module.changerefs.FIXES_RED_KEY} #36"},
     ]
     monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(pulls))
     red = ["#31 — красное", "#32 — красное", "#35 — своё красное"]
     main_rows, rows, held = module.zero_fixes("o/r", "t", red)
     assert main_rows == ["**#33** — чинит «tests» на общей ветке"]
     assert rows == ["**#30** — держит #31", "**#40** — держит #32"]
-    assert held == {31, 32}, "зелёное #34 с «Ждёт:» держимым не названо"
+    assert held == {31, 32}, "зелёное #34 с «Ждёт:» и не красное #36 держимыми не названы"
 
 
 def test_the_built_plan_splits_zero_and_moves_the_held_red_out_of_two(

@@ -335,14 +335,17 @@ def fix_commit(repo: Path, line: str) -> None:
     )
 
 
-def test_a_fix_of_a_neighbours_red_passes_at_the_limit(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(("live", "code"), [(True, 0), (False, 1)], ids=["красно", "не-красно"])
+def test_a_fix_of_a_neighbours_red_passes_only_while_it_is_red(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, live: bool, code: int
 ) -> None:
-    """«Чинит красное: #N» — раздел 0: толкается и при трёх открытых (#1659)."""
+    """«Чинит красное: #N» проходит предел, пока #N открыто и красно (#1659, взгляд на #1661)."""
     platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
+    monkeypatch.setattr(module, "live_red", lambda *_: live)
     fix_commit(repo, f"{module.changerefs.FIXES_RED_KEY} #12")
-    code, said = module.look(repo, "agent/новая")
-    assert code == module.EXIT_OK and "раздел 0" in said and "#12" in said
+    said_code, said = module.look(repo, "agent/новая")
+    assert said_code == code, said
+    assert ("раздел 0" in said) is live and ("красного открытого" in said) is not live
 
 
 @pytest.mark.parametrize(("red", "code"), [(True, 0), (False, 1)], ids=["красен", "зелёный"])
@@ -358,14 +361,38 @@ def test_a_fix_of_main_passes_only_while_the_step_is_red(
     assert ("раздел 0" in said) is red and ("не красен" in said) is not red
 
 
-def test_an_open_fix_does_not_spend_the_limit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Открытая починка раздела 0 в счёт трёх не входит: обычная работа рядом с ней не стоит."""
+@pytest.mark.parametrize(("live", "count"), [(True, 2), (False, 3)], ids=["живая", "отжившая"])
+def test_an_open_fix_spends_the_limit_only_when_its_subject_is_gone(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, live: bool, count: int
+) -> None:
+    """Живая починка в счёт трёх не входит; позеленевший предмет — обычное изменение (#1661)."""
     platform(monkeypatch, {11: MINE, 12: MINE, 13: MINE})
     fixes = {13: f"{module.changerefs.FIXES_RED_KEY} #5"}
     opened = [{"number": one, "body": fixes.get(one, "")} for one in (11, 12, 13)]
     monkeypatch.setattr(module, "own_open", lambda *_: opened)
+    monkeypatch.setattr(module, "live_red", lambda *_: live)
     code, said = module.look(repo, "agent/новая")
-    assert code == module.EXIT_OK and "2 изменений из 3" in said
-    assert module.is_fix(opened[2]) and not module.is_fix(opened[0])
+    assert code == (module.EXIT_OK if live else module.EXIT_OVER), said
+    assert f"открыто {count} изменений" in said
+    assert module.is_fix("o/r", "t", opened[2]) is live and not module.is_fix("o/r", "t", opened[0])
     assert module.fix_declared(repo) == (None, [])
     assert module.zero_pass("o/r", "t", None, []) is None, "не починка — общий предел"
+
+
+def test_live_red_asks_the_platform_about_the_neighbour(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Открыто и красно — да; закрыто или зелено — нет: вопрос площадке, а не объявлению."""
+    heads = {5: ("open", "aaa"), 6: ("closed", "bbb"), 7: ("open", "ccc")}
+    runs = {
+        "aaa": [{"name": "tests", "conclusion": "failure"}],
+        "ccc": [{"name": "tests", "conclusion": "success"}],
+    }
+
+    def request(_method: str, path: str, _token: str) -> Any:
+        state, sha = heads[int(path.rsplit("/", 1)[1])]
+        return {"state": state, "head": {"sha": sha}}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(
+        module.ghrest, "paginate", lambda path, *_, **__: iter(runs[path.split("/")[-2]])
+    )
+    assert [module.live_red("o/r", "t", one) for one in (5, 6, 7)] == [True, False, False]

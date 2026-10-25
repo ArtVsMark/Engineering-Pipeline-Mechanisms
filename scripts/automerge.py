@@ -477,7 +477,15 @@ def fallen(repo: str, target: Change, owner_token: str) -> str:
     не считаются: сосед, у которого прогон только начался, давал бы починке
     ступень 0 по гонке. Исходы — те же, что у шага 9 (`runs_series.REAL_RED`).
     """
-    runs = head_runs(repo, target, owner_token)
+    return red_names(head_runs(repo, target, owner_token))
+
+
+def red_names(runs: list[dict[str, Any]]) -> str:
+    """Имена записей с настоящим красным исходом через запятую; пусто — не красна.
+
+    Один разбор на очередь и предел окна (#1659): «что считать красным
+    соседа» решается здесь, и второго понимания нет (090).
+    """
     names = sorted(
         str(run.get("name", ""))
         for run in ci_complete.worst_per_name(runs)
