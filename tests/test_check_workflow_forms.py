@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -275,23 +276,69 @@ def test_true_among_other_keys_of_a_flow_mapping_is_judged(tmp_path: Path) -> No
     assert any("без причины" in one for one in found(tree(tmp_path, {"a.yml": text})))
 
 
+STEP: Final = f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials: false\n"
+
+
 @pytest.mark.parametrize(
-    "step",
+    ("step", "red"),
     [
-        f"      - {{uses: {CHECKOUT}, with: {{persist-credentials: true}}}}\n",
-        f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials:\n"
-        "            true # причина на другой строке\n",
-        f"      - uses: {CHECKOUT}\n        with: &keep\n"
-        "          persist-credentials: true # толкает\n"
-        f"      - uses: {CHECKOUT}\n        with: *keep\n",
+        (f"      - {{uses: {CHECKOUT}, with: {{persist-credentials: true}}}}\n", True),
+        (f"      - {{uses: {CHECKOUT}, with: {{persist-credentials: true}}}} # толкает\n", False),
+        (
+            f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials:\n"
+            "            true\n",
+            True,
+        ),
+        (
+            f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials:\n"
+            "            true # причина на строке значения\n",
+            False,
+        ),
+        (
+            f"      - uses: {CHECKOUT}\n        with: &keep\n"
+            "          persist-credentials: true # толкает\n"
+            f"      - uses: {CHECKOUT}\n        with: *keep\n",
+            False,
+        ),
+        (
+            f"      - uses: {CHECKOUT}\n        with: &keep\n"
+            "          persist-credentials: true\n"
+            f"      - uses: {CHECKOUT}\n        with: *keep\n",
+            True,
+        ),
     ],
-    ids=["шаг-в-строку", "значение-ниже", "якорь"],
+    ids=[
+        "в-строку-без-причины",
+        "в-строку-с-причиной",
+        "ниже-без-причины",
+        "ниже-с-причиной",
+        "якорь-с-причиной",
+        "якорь-без-причины",
+    ],
 )
-def test_a_true_whose_key_line_is_not_found_turns_red(tmp_path: Path, step: str) -> None:
-    """`true`, чью строку ключа не найти, — находка счётом, а не молчание (взгляд на #1650)."""
-    text = CLEAN.replace(
-        f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials: false\n", step
-    )
+def test_a_true_is_judged_on_the_line_of_its_value(tmp_path: Path, step: str, red: bool) -> None:
+    """Строку значения даёт разбор: шаг в строку, значение ниже, якорь (взгляды на #1650).
+
+    Прежде строку ключа искали образцом по тексту, и каждая из этих форм
+    уходила без суда либо краснела законная; теперь их судит метка узла.
+    """
+    text = CLEAN.replace(STEP, step)
     assert text != CLEAN
     told = found(tree(tmp_path, {"a.yml": text}))
-    assert any("строк ключа найдено" in one for one in told), told
+    assert any("без причины" in one for one in told) is red, told
+
+
+def test_a_reason_on_another_actions_key_does_not_cover_a_checkout(tmp_path: Path) -> None:
+    """`persist-credentials: true # …` у чужого действия не прикрывает выгрузку (взгляд на #1650).
+
+    Сверка счётом строк уравнивалась такой строкой, и выгрузка в строку
+    уходила без суда; метка узла видит только значение у `actions/checkout`.
+    """
+    other = (
+        "      - uses: some/other@" + SHA + "\n        with:\n"
+        "          persist-credentials: true # не выгрузка\n"
+    )
+    step = f"      - {{uses: {CHECKOUT}, with: {{persist-credentials: true}}}}\n"
+    text = CLEAN.replace(STEP, other + step)
+    told = found(tree(tmp_path, {"a.yml": text}))
+    assert any("без причины" in one for one in told), told

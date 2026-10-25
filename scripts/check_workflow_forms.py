@@ -71,16 +71,6 @@ SHA_RE: Final = re.compile(r"[0-9a-f]{40}")
 #: Тег выпуска — полная версия `vN.N.N`: мажорный алиас `@v1` подвижен, как ветка.
 #: Один признак на гейт и на `tests/test_family_pinning.py` (находка на #1634).
 RELEASE_RE: Final = re.compile(r"v\d+\.\d+\.\d+")
-#: `true` на СТРОКЕ КЛЮЧА — блочной, в кавычках, в строку `{…: true}` (взгляд на
-#: #1634, `016a18a`): начало строки — ключ, пункт шага или `with: {`, а не
-#: комментарий и не тело `run:`. Судится строка, только если разобранное
-#: значение у выгрузки и правда `true`: строка ищет причину, а не решает, есть
-#: ли запись. ГРАНИЦА НАЗВАНА: такая же строка в теле `run:` файла, где
-#: настоящий `true` тоже есть, причины потребует и от неё.
-TRUE_RE: Final = re.compile(
-    rf"^\s*(?:-\s*)?(?:with\s*:\s*\{{[^}}]*?)?[\"']?{PERSIST}[\"']?\s*:\s*[\"']?true\b",
-    re.IGNORECASE,
-)
 #: Выражение площадки вместо значения: `${{ inputs.x }}` даёт `true`, не неся
 #: причины, и форма 1 по ключу его не видела (взгляд на #1634, `c4b082e`).
 EXPRESSION: Final = "${{"
@@ -196,6 +186,64 @@ def pin_problem(uses: str) -> str:
     return "стороннее действие не на полном sha"
 
 
+def true_values(text: str) -> list[yaml.ScalarNode]:
+    """Узлы значения `persist-credentials: true` у каждой выгрузки — из разбора, а не строкой.
+
+    СТРОГАЯ ФОРМА, А НЕ ЕЩЁ ОДНА ФОРМА СТРОКИ (210, 228; решение владельца
+    25.10.2026). Строку ключа искали образцом по тексту три круга подряд
+    (#1634 → #1650 дважды): по всему тексту ловились комментарии и `run:`,
+    по началу строки терялись шаг в строку, значение ниже и якорь, а сверка
+    счётом уравнивалась строкой чужого действия. Теперь строку значения даёт
+    сам разбор: `yaml.compose` метит каждый узел местом в тексте, и судится
+    ровно значение ключа у шага `actions/checkout` — в блоке, в строку, ниже
+    ключа. ГРАНИЦА НАЗВАНА: у псевдонима (`*keep`) узел — тот, что объявлен
+    якорем, и причина ищется на строке якоря.
+    """
+    found: list[yaml.ScalarNode] = []
+    todo: list[yaml.Node] = [yaml.compose(text, Loader=yaml.SafeLoader)]
+    seen: set[int] = set()
+    while todo:
+        node = todo.pop()
+        if node is None or id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, yaml.SequenceNode):
+            todo.extend(node.value)
+        if not isinstance(node, yaml.MappingNode):
+            continue
+        pairs = {
+            str(key.value): value for key, value in node.value if isinstance(key, yaml.ScalarNode)
+        }
+        todo.extend(value for _, value in node.value)
+        uses = pairs.get("uses")
+        given = pairs.get("with")
+        if not (isinstance(uses, yaml.ScalarNode) and str(uses.value).startswith(CHECKOUT)):
+            continue
+        if not isinstance(given, yaml.MappingNode):
+            continue
+        for key, value in given.value:
+            if (
+                isinstance(key, yaml.ScalarNode)
+                and key.value == PERSIST
+                and isinstance(value, yaml.ScalarNode)
+                and str(value.value).strip().lower() == "true"
+            ):
+                found.append(value)
+    return found
+
+
+def unreasoned(path: Path, text: str) -> list[str]:
+    """`true` без причины комментарием на строке своего значения — по меткам разбора."""
+    lines = text.splitlines()
+    told: list[str] = []
+    for value in true_values(text):
+        line = lines[value.end_mark.line] if value.end_mark.line < len(lines) else ""
+        if not REASON_RE.search(line[value.end_mark.column :]):
+            number = value.start_mark.line + 1
+            told.append(f"{path}:{number}: {PERSIST}: true без причины комментарием на строке")
+    return told
+
+
 def judge(
     path: Path,
     text: str,
@@ -246,25 +294,8 @@ def judge(
                 met.add((name, uses))
                 continue
             found.append(f"{where}: {uses} — {problem}")
-    lines = 0
-    for number, line in enumerate(text.splitlines() if trues else [], 1):
-        value = TRUE_RE.search(line)
-        if not value:
-            continue
-        lines += 1
-        if not REASON_RE.search(line[value.end() :]):
-            found.append(f"{path}:{number}: {PERSIST}: true без причины комментарием на строке")
-    # СВЕРКА СЧЁТОМ, А НЕ ЕЩЁ ОДНОЙ ФОРМОЙ СТРОКИ (210: второй круг по
-    # `TRUE_RE`, #1634 → #1650). Разбор знает, сколько выгрузок держат `true`;
-    # строк ключа найдено меньше — шаг записан в строку, значение стоит на
-    # другой строке или задано якорем YAML, и причину искать негде. Это отказ,
-    # а не молчание: запишите ключ блочно, с причиной на его строке.
-    if lines < trues:
-        found.append(
-            f"{path}: {PERSIST}: true у выгрузок {trues}, а строк ключа найдено {lines} — "
-            "запись, где причину не найти строкой (шаг в строку, значение на другой "
-            "строке, якорь); запишите ключ блочно с причиной комментарием"
-        )
+    if trues:
+        found += unreasoned(path, text)
     return found, met
 
 
