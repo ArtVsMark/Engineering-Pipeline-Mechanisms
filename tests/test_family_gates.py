@@ -156,7 +156,7 @@ def test_the_live_issue_names_each_queue_with_its_addresses() -> None:
     assert "доработать у нас" in body and "o/сосед · `scripts/b.py` · от `" in body
     assert "- 002 · o/сосед · `scripts/c.py`" in body and "- 003" in body
     empty = {**said, "queues": {"rework": [], "spread": [], "propose": []}}
-    assert module.render_issue(empty).count("Пусто.") == 3
+    assert module.render_issue(empty).count("Пусто на ") == 3
 
 
 def test_the_live_issue_is_patched_in_place_and_not_opened_empty(
@@ -205,3 +205,18 @@ def test_the_live_issue_mode_names_its_refusals(
     assert module.main(["--map", str(out), "--apply"]) == module.EXIT_BROKEN
     with pytest.raises(SystemExit):
         module.main(["--out", str(out)])
+
+
+def test_write_issue_reads_the_built_map_and_saves_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`write_issue` читает файл карты и отдаёт его `save`; без токена — исход 2."""
+    out = tmp_path / "map.json"
+    out.write_text(json.dumps(module.document(summary(), OURS)), encoding="utf-8")
+    seen: list[bool] = []
+    monkeypatch.setattr(module, "save", lambda repo, token, said, *, apply: seen.append(apply))
+    monkeypatch.setenv("GH_TOKEN", "t")
+    assert module.write_issue(out, OURS, apply=True) == module.EXIT_OK and seen == [True]
+    monkeypatch.delenv("GH_TOKEN")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert module.write_issue(out, OURS, apply=False) == module.EXIT_BROKEN

@@ -41,6 +41,7 @@
 import argparse
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -190,6 +191,8 @@ def render_issue(said: dict[str, Any]) -> str:
         "",
         f"Сводка каталога: форма {source.get('summary')}, снята {source.get('at')}.",
         "",
+        f"Собрано: {datetime.now(UTC).strftime('%d.%m.%Y')}.",
+        "",
         "**Исходы клеток:** "
         + " · ".join(f"{name} {count}" for name, count in (said.get("held") or {}).items()),
     ]
@@ -197,7 +200,7 @@ def render_issue(said: dict[str, Any]) -> str:
         rows = queued.get(key) or []
         lines += ["", f"## {meaning} — {len(rows)}", ""]
         if not rows:
-            lines.append("Пусто.")
+            lines.append(f"Пусто на {datetime.now(UTC).strftime('%d.%m.%Y')}.")
         for row in rows:
             if isinstance(row, dict):
                 origin = f" · от `{row['origin']}`" if row.get("origin") else ""
