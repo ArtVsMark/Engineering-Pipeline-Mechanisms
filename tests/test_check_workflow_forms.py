@@ -342,3 +342,19 @@ def test_a_reason_on_another_actions_key_does_not_cover_a_checkout(tmp_path: Pat
     text = CLEAN.replace(STEP, other + step)
     told = found(tree(tmp_path, {"a.yml": text}))
     assert any("без причины" in one for one in told), told
+
+
+def test_true_values_and_unreasoned_read_the_node_marks() -> None:
+    """`true_values` отдаёт узлы значения у выгрузок; `unreasoned` судит строку значения."""
+    text = (
+        "jobs:\n  a:\n    steps:\n"
+        f"      - uses: {CHECKOUT}\n        with:\n          persist-credentials: true # толкает\n"
+        f"      - {{uses: {CHECKOUT}, with: {{persist-credentials: true}}}}\n"
+        "      - uses: some/other@" + SHA + "\n        with:\n          persist-credentials: true\n"
+    )
+    values = module.true_values(text)
+    assert sorted(one.start_mark.line + 1 for one in values) == [6, 7], (
+        "чужое действие — не выгрузка"
+    )
+    told = module.unreasoned(Path("a.yml"), text)
+    assert told == ["a.yml:7: persist-credentials: true без причины комментарием на строке"]
