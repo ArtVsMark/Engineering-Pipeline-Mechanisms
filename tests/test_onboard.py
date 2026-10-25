@@ -384,6 +384,9 @@ def test_the_kit_agrees_with_the_live_release(run_script: RunScript) -> None:
     assert "uses:" in done.out and "checks:" in done.out
     for name in module.steps(ROOT):
         assert f"step-{name}.yml@" in done.out, f"шаг «{name}» в заготовку не попал"
+    for name in module.OPT_IN:
+        # Шаг по выбору назван, но вызов закомментирован: не кладётся (#1652).
+        assert f"# Шаг `{name}` — по выбору" in done.out, f"шаг «{name}» не назван"
 
 
 # --- заход кладёт заготовку сам (#992, вариант 3) ----------------------------
@@ -1848,6 +1851,34 @@ def test_the_update_plan_is_decided_before_any_write(tmp_path: Path) -> None:
     assert any("лишний / лишний" in one for one in plan.notes)
     said = module.policy.run_text("on: push\njobs: {}\n", "x.yml")
     assert module.policy.events_raw(said) == "push"
+
+
+def test_an_opt_in_step_keeps_its_call_and_gets_the_tag(tmp_path: Path) -> None:
+    """Шаг по выбору (`OPT_IN`) у подключённого: тег поднят, совет снять — только если не нужен.
+
+    Заготовка `contract` больше не кладёт (#1652), но проект, сам отдающий
+    общие шаги, зовёт его законно: `--update` не оставляет его на старом теге
+    и не называет «не отдаётся», а говорит, что заготовка его не кладёт.
+    """
+    repo = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+    flows = tmp_path / module.paths.WORKFLOWS
+    flows.mkdir(parents=True)
+    (flows / module.PIPELINE_FLOW).write_text(
+        "jobs:\n"
+        f"  contract:\n    uses: {repo}/.github/workflows/step-contract.yml@v1.10.0\n"
+        f"  lint:\n    uses: {repo}/.github/workflows/step-lint.yml@v1.10.0\n"
+        f"  gone:\n    uses: {repo}/.github/workflows/step-gone.yml@v1.10.0\n",
+        encoding="utf-8",
+    )
+    plan = module.Update()
+    module.plan_ci(plan, tmp_path, ["lint"], repo, "v1.11.0")
+    lifted = plan.write[module.paths.WORKFLOWS / module.PIPELINE_FLOW]
+    assert "step-contract.yml@v1.11.0" in lifted and "step-lint.yml@v1.11.0" in lifted
+    assert "step-gone.yml@v1.10.0" in lifted, "неотдаваемый остаётся на прежнем теге"
+    notes = " ".join(plan.notes)
+    assert "шаг `contract` заготовка больше не кладёт" in notes
+    assert "шаг `gone` в выпуске v1.11.0 не отдаётся" in notes
+    assert "шаг `contract` в выпуске" not in notes
 
 
 def test_a_yaml_twin_of_an_owned_run_is_updated_in_place(tmp_path: Path) -> None:
