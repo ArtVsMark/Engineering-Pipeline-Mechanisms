@@ -62,6 +62,7 @@ import labels
 import main_red
 import pipeline_checks as policy
 import report
+import runs_series
 import task_shape
 import unlooked
 
@@ -415,8 +416,12 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
         )
         if not runs:
             continue
+        # КРАСНОЕ — ТО ЖЕ, ЧТО У ОЧЕРЕДИ И ПРЕДЕЛА ТРЁХ (`runs_series.REAL_RED`,
+        # находка `77192d6`): прежде долг считал красным одно `failure`, и
+        # изменение с `timed_out` выпадало из раздела 2 и из пар раздела 0б,
+        # хотя предел трёх его красным считал (090, 195).
         worst = ci_complete.worst_per_name(runs)
-        if any(str(one.get("conclusion") or "") == "failure" for one in worst):
+        if any(one.get("conclusion") in runs_series.REAL_RED for one in worst):
             red.append(said)
     return conflicting, unknown, red
 

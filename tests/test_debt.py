@@ -941,6 +941,26 @@ def test_an_unknown_merge_state_is_still_asked_for_red(monkeypatch: pytest.Monke
     assert red == ["#6 — работа"]
 
 
+@pytest.mark.parametrize("conclusion", ["failure", "timed_out", "action_required"])
+def test_red_is_the_queue_red(monkeypatch: pytest.MonkeyPatch, conclusion: str) -> None:
+    """Красное долга — то же, что у очереди и предела трёх: `runs_series.REAL_RED` (#1661)."""
+    listing = [{"number": 6, "title": "работа", "draft": False, "head": {"sha": "abc"}}]
+    runs = [{"name": "test", "status": "completed", "conclusion": conclusion}]
+    monkeypatch.setattr(debt.ghrest, "request", lambda *_, **__: {"mergeable_state": "clean"})
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing, runs))
+    assert debt.stuck_changes("o/r", "token")[2] == ["#6 — работа"]
+
+
+@pytest.mark.parametrize("conclusion", ["cancelled", "neutral", "skipped", "success"])
+def test_not_red_stays_out(monkeypatch: pytest.MonkeyPatch, conclusion: str) -> None:
+    """Отменённое, нейтральное и пропущенное красным не считаются — как у очереди."""
+    listing = [{"number": 6, "title": "работа", "draft": False, "head": {"sha": "abc"}}]
+    runs = [{"name": "test", "status": "completed", "conclusion": conclusion}]
+    monkeypatch.setattr(debt.ghrest, "request", lambda *_, **__: {"mergeable_state": "clean"})
+    monkeypatch.setattr(debt.ghrest, "paginate", walks(listing, runs))
+    assert debt.stuck_changes("o/r", "token")[2] == []
+
+
 def test_the_wait_budget_covers_the_whole_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Бюджет ожидания — на весь обход: израсходован — изменение спрашивается раз (#1306)."""
     listing = [
