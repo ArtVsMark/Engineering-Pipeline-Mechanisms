@@ -1011,12 +1011,12 @@ def test_section_five_prints_its_groups_and_skips_the_empty() -> None:
     """Подзаголовок у каждого непустого канала, пустой канал не печатается."""
     source = module.Source(
         rows=["a", "b"],
-        groups=[("Правила каталога", ["a"]), ("Дрейф", []), ("Копящиеся находки · `x.py`", ["b"])],
+        groups=[("Правила каталога", ["a"]), ("Дрейф", []), ("Копящиеся находки", ["b"])],
     )
     lines = module.render(5, source)
-    assert "*Правила каталога*" in lines and "*Копящиеся находки · `x.py`*" in lines
+    assert "*Правила каталога*" in lines and "*Копящиеся находки*" in lines
     assert "*Дрейф*" not in lines, "пустая группа напечатана"
-    assert lines.index("- a") < lines.index("*Копящиеся находки · `x.py`*") < lines.index("- b")
+    assert lines.index("- a") < lines.index("*Копящиеся находки*") < lines.index("- b")
 
 
 def test_a_finding_zone_is_the_top_folder_of_its_place() -> None:
@@ -1592,6 +1592,13 @@ def test_the_built_plan_routes_rows_and_queues_the_missing(
     listed = [
         {"number": 640, "labels": [{"name": module.WAITS_NEIGHBOUR}]},
         {"number": 711, "title": "Без строки", "state": "open", "body": "", "labels": []},
+        {
+            "number": 712,
+            "title": "Ждёт соседа",
+            "state": "open",
+            "body": "",
+            "labels": [{"name": module.WAITS_NEIGHBOUR}],
+        },
     ]
     monkeypatch.setattr(module.debt, "open_listed", lambda *_: listed)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
@@ -1603,7 +1610,12 @@ def test_the_built_plan_routes_rows_and_queues_the_missing(
     assert f"- **#711** — Без строки *({module.QUEUED_TAIL})*" in four
     assert "#711" not in six, "не стоявшая в плане ушла в 6, а не в 4"
     assert "#642" not in four
-    assert "в раздел 4 дописано задач, которых в плане не было: 1" in capsys.readouterr().out
+    said = capsys.readouterr().out
+    assert "в раздел 4 дописано задач, которых в плане не было: 1" in said
+    # ВЕТВЬ РАЗДЕЛА 6: метка соседа уводит не стоявшую в плане туда, и печать
+    # называет раздел, куда строка легла (находка `290ebd9`, взгляд на #1699).
+    assert "#712" in six and "#712" not in four
+    assert "в раздел 6 дописано задач, которых в плане не было: 1" in said
 
 
 def test_laid_out_writes_born_and_queued_rows_into_the_section_of_their_label(
