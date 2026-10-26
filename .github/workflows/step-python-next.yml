@@ -65,10 +65,12 @@ jobs:
   #
   # Имя джоба прежнее — `test-next`: запись `test-next (<версия>) / test-next`
   # сводит с ответом по классам `job_of` дежурного по ячейке вызывающего.
+  # Предел — как у `test-matrix` в `ci.yml`: тот же полный набор, и тот же
+  # медленный раннер отменил бы его на 10:00 (взгляд на #1698).
   test-next:
     name: test-next
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
