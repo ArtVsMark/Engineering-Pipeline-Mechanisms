@@ -63,6 +63,9 @@ def call(skill: str, session: str = SESSION, outcome: str = "ok") -> dict[str, s
         ("git fetch origin main && git checkout -b agent/x origin/main", ["agent/x"]),
         ("git -C /tmp/w checkout -b agent/x", ["agent/x"]),
         ("bash -c 'git switch -c agent/x'", ["agent/x"]),
+        ("git checkout --orphan agent/x", ["agent/x"]),
+        ("git worktree add -b agent/x /tmp/w origin/main", ["agent/x"]),
+        ("git worktree add /tmp/w agent/x", []),
         ("git checkout agent/x", []),
         ("git checkout -b fix/x", []),
         ("git branch agent/x", []),
@@ -142,3 +145,20 @@ def test_the_hook_is_wired_to_bash_and_given_to_the_consumer() -> None:
     onboard_text = (ROOT / "scripts" / "onboard.py").read_text(encoding="utf-8")
     assert 'paths.HOOKS / "bundle_hint.py"' in onboard_text
     assert 'paths.HOOKS / "bundle_hint.sh"' in onboard_text
+
+
+def test_the_journal_is_read_from_its_tail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Вызов этой сессии в хвосте журнала длиннее предела — найден: журнал только растёт (#1711)."""
+    monkeypatch.setattr(module, "LIMIT", 200)
+    path = journal(tmp_path, *[call("work-the-plan", session="давняя")] * 20)
+    with path.open("a", encoding="utf-8") as tail:
+        tail.write(json.dumps(call("bundle-the-work")) + "\n")
+    assert path.stat().st_size > module.LIMIT
+    assert module.advice(event("git checkout -b agent/x"), tmp_path) == ""
+
+
+def test_a_session_number_the_journal_cannot_hold_is_named(tmp_path: Path) -> None:
+    """Номер не той формы журнал пишет пустым — причина «проверить нечем», а не ложный совет."""
+    journal(tmp_path, call("bundle-the-work"))
+    said = module.advice(event("git checkout -b agent/x", session="с пробелом"), tmp_path)
+    assert "не той формы" in said

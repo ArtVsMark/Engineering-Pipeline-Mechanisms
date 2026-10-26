@@ -32,9 +32,10 @@
 второй рядом (214): кавычки, цепочки `&&`, обёртки `env` и `bash -c` он уже
 знает, и тело встроенного документа для него — данные, а не команда.
 
-ГРАНИЦЫ НАЗВАНЫ. Ловится нарезка `git checkout -b|-B` и `git switch -c|-C`
-(и длинные `--create`, `--force-create`) с именем `agent/…`; ветка, созданная
-`git branch` и потом взятая, — нет: она ещё не работа. Навык, прочитанный
+ГРАНИЦЫ НАЗВАНЫ. Ловится нарезка `git checkout -b|-B|--orphan`, `git switch
+-c|-C` (и длинные `--create`, `--force-create`) и `git worktree add -b|-B` с
+именем `agent/…`; ветка, созданная `git branch` и потом взятая, — нет: она ещё
+не работа. Навык, прочитанный
 файлом, а не позванный инструментом, журнал не видит, и совет тогда придёт —
 это и есть цена самоотчёта.
 
@@ -48,6 +49,7 @@ from pathlib import Path
 from typing import Final
 
 import push_guard
+import skill_log
 
 #: Навык, вызов которого ищется.
 SKILL: Final = "bundle-the-work"
@@ -57,8 +59,10 @@ JOURNAL: Final = Path(".claude") / "state" / "skill-runs.jsonl"
 HERE: Final = "."
 #: Ключи, создающие ветку: у `checkout` и у `switch`. Имя — следующее слово.
 CREATE: Final[dict[str, frozenset[str]]] = {
-    "checkout": frozenset({"-b", "-B"}),
+    "checkout": frozenset({"-b", "-B", "--orphan"}),
     "switch": frozenset({"-c", "-C", "--create", "--force-create"}),
+    # `git worktree add -b <ветка> <путь>` — подкоманда в два слова (взгляд на #1711).
+    "worktree add": frozenset({"-b", "-B"}),
 }
 #: Больше этого журнал не читается: он копится за сессию, а нужен один признак.
 LIMIT: Final = 4 * 1024 * 1024
@@ -87,6 +91,8 @@ def created(command: str) -> list[str]:
             rest = segment[1:]
             while rest and rest[0].startswith("-"):
                 rest = rest[2:] if rest[0] in push_guard.GLOBAL_WITH_VALUE else rest[1:]
+            if rest[:2] == ["worktree", "add"]:
+                rest = ["worktree add", *rest[2:]]
             if not rest or rest[0] not in CREATE:
                 continue
             flags = CREATE[rest[0]]
@@ -103,10 +109,22 @@ def created(command: str) -> list[str]:
 
 
 def invoked(journal: Path, session: str) -> bool:
-    """Позван ли навык в этой сессии; журнал не читается — `OSError`/`ValueError`."""
-    with journal.open(encoding="utf-8") as lines:
-        text = lines.read(LIMIT)
-    for line in text.splitlines():
+    """Позван ли навык в этой сессии; журнал не читается — `OSError`/`ValueError`.
+
+    ЧИТАЕТСЯ ХВОСТ, А НЕ НАЧАЛО (взгляд на #1711). `skill_log.py` только
+    дописывает в конец и журнал не чистит, и строки нынешней сессии лежат
+    последними: чтение первых `LIMIT` байт за предел журнала давало бы ложный
+    совет без причины. Первая строка хвоста, обрезанная посередине, отброшена.
+    """
+    with journal.open("rb") as raw:
+        size = raw.seek(0, os.SEEK_END)
+        start = max(0, size - LIMIT)
+        raw.seek(start)
+        text = raw.read().decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    if start:
+        lines = lines[1:]
+    for line in lines:
         try:
             row = json.loads(line)
         except ValueError:
@@ -134,6 +152,14 @@ def advice(event: object, root: Path) -> str:
         return (
             f"bundle_hint: режется ветка {named}, но номера сессии в событии нет — "
             f"позван ли `{SKILL}`, проверить нечем (045)."
+        )
+    # НОМЕР СЕССИИ — ТОЙ ФОРМЫ, ЧТО ПИШЕТ ЖУРНАЛ (взгляд на #1711, 214): номер
+    # вне `skill_log.NAME_RE` журнал пишет пустым, и вызов навыка под ним не
+    # нашёлся бы никогда — совет был бы ложным, а не честным «проверить нечем».
+    if not skill_log.NAME_RE.fullmatch(session):
+        return (
+            f"bundle_hint: режется ветка {named}, а номер сессии не той формы, что пишет "
+            f"журнал навыков, — позван ли `{SKILL}`, проверить нечем (045)."
         )
     journal = root / JOURNAL
     try:
