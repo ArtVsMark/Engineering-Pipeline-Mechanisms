@@ -31,6 +31,7 @@ import ghrest
 import gitcall
 import items
 import labels
+import paths
 import scope
 import squash_body
 
@@ -96,13 +97,9 @@ def kind_problems(landing: str, kinds: dict[str, Any]) -> list[str]:
     return told
 
 
-#: Где лежат навыки дерева: имя навыка — имя его папки с `SKILL.md`.
-SKILLS: Final = Path(".claude") / "skills"
-
-
 def known_skills(root: Path = Path()) -> frozenset[str]:
     """Навыки дерева — папки с `SKILL.md`; навыков нет — пусто."""
-    where = root / SKILLS
+    where = root / paths.SKILLS
     if not where.is_dir():
         return frozenset()
     return frozenset(one.name for one in where.iterdir() if (one / "SKILL.md").is_file())
@@ -115,7 +112,7 @@ def skill_problems(landing: str, known: frozenset[str]) -> list[str]:
     остался бы невызванным — счёт врал бы в обе стороны (045).
     """
     return [
-        f"«{changerefs.SKILL_KEY} {name}» — навыка «{name}» нет в `{SKILLS.as_posix()}`"
+        f"«{changerefs.SKILL_KEY} {name}» — навыка «{name}» нет в `{paths.SKILLS.as_posix()}`"
         for name in changerefs.skills_in_all([landing])
         if name not in known
     ]
