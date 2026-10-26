@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script
 
 module = load_script("feedback_registry.py")
 form = module.feedback_form
@@ -179,3 +179,24 @@ def test_without_a_token_the_registry_is_not_run(run_script: RunScript, tmp_path
         "feedback_registry.py", "--uptake", str(data), env={"GH_TOKEN": "", "GITHUB_TOKEN": ""}
     )
     assert run.code == module.EXIT_BROKEN and "нет токена" in run.text
+
+
+def test_the_verdicts_file_is_read_or_refused_with_its_place(tmp_path: Path) -> None:
+    """Вердикты дерева читаются; битый файл — отказ с адресом, а не пустой список (045)."""
+    assert module.verdicts_at(ROOT / module.paths.FEEDBACK_VERDICTS) == {}
+    broken = tmp_path / "v.json"
+    broken.write_text(
+        '{"version": 1, "verdicts": {"o/r:false-pass/x": {"verdict": "rejected"}}}', "utf-8"
+    )
+    with pytest.raises(module.NotRun, match=r"v\.json"):
+        module.verdicts_at(broken)
+    with pytest.raises(module.NotRun, match="не прочитан"):
+        module.verdicts_at(tmp_path / "нет.json")
+
+
+def test_a_row_keys_by_its_neighbour_and_collected_hides_the_unseen() -> None:
+    """Ключ строки — `key_of` соседа и записи; невидимые — битые и непрочитанные (214)."""
+    row = module.Row("O/A", form.Record(**record()))
+    assert row.key == form.key_of("O/A", row.record) == "o/a:false-refusal/x"
+    said = module.Collected((row,), {"O/B": "битый"}, ("o/c",))
+    assert said.unseen() == {"o/b", "o/c"}
