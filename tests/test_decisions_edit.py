@@ -196,6 +196,12 @@ def test_a_platform_target_is_still_content(now: str) -> None:
     assert was != edit.frozen(f"## Решение\n\nСм. [#12]({now}).\n")
 
 
+def test_without_rise_keeps_the_section_and_the_number() -> None:
+    """Подъём снят, раздел и номер на месте; чужой адрес не тронут."""
+    said = edit.without_rise("[#7](../../../issues/7) [x](../../../../ArtVsMark/x/issues/7)")
+    assert said == f"[#7]({edit.PLATFORM_MARK}/issues/7) [x](../../../../ArtVsMark/x/issues/7)"
+
+
 def test_the_platform_sections_are_one_list() -> None:
     """Перечень разделов площадки у гейта записей и у гейта ссылок — один и тот же."""
     assert tuple(edit.PLATFORM) == tuple(PLATFORM)
