@@ -44,23 +44,9 @@ from tests.conftest import ROOT, load_script
 LINK_RE = re.compile(r"\[[^\]]*\]\((?P<target><[^>]+>|[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 #: Разделы площадки, к которым ведёт относительный адрес из документа. Они
 #: разрешаются вне дерева, и файла для них не существует ни в одной ветке.
-PLATFORM = (
-    "issues",
-    "pull",
-    "pulls",
-    "discussions",
-    "wiki",
-    "commit",
-    "commits",
-    "compare",
-    "tree",
-    "blob",
-    "releases",
-    "actions",
-    "labels",
-    "milestone",
-    "projects",
-)
+#: Перечень один на оба гейта — у гейта записей решений, который судит ту же форму
+#: адреса (взгляд на #1692).
+PLATFORM: Final = load_script("check_decisions_edit.py").PLATFORM
 #: Производные документы, которые здесь не проверяются ФАЙЛОМ, — с причиной (154).
 #: Собранный журнал пересобирает только ВЫПУСК (030), и на изменении его трогать
 #: нельзя: переезд документа (#840) оставляет в нём ссылку на старое место до
@@ -116,8 +102,6 @@ def goes_to_the_platform(target: str) -> bool:
 FRAGMENTS: Final = "changelog.d/"
 #: Живой документ под приставкой фрагментов — судится на своём месте.
 FRAGMENTS_README: Final = "changelog.d/README.md"
-#: Звено подъёма в начале адреса.
-RISE: Final = "../"
 
 
 def platform_rise(here: str) -> int:
@@ -132,9 +116,13 @@ def platform_rise(here: str) -> int:
 
 
 def rise_of(target: str) -> int:
-    """Сколько звеньев `../` стоит в начале адреса."""
+    """Сколько звеньев `..` стоит в начале адреса; `.` — шаг на месте (`goes_to_the_platform`)."""
     count = 0
-    while target.startswith(RISE, count * len(RISE)):
+    for part in target.split("/"):
+        if part in (".", ""):
+            continue
+        if part != "..":
+            break
         count += 1
     return count
 
@@ -286,9 +274,12 @@ def test_the_platform_rise_follows_the_page(here: str, need: int) -> None:
 
 
 def test_a_short_or_long_platform_rise_is_named(tmp_path: Path) -> None:
-    """Обе половины: неверный подъём назван с числами, верный — нет."""
+    """Обе половины: неверный подъём назван с числами, верный — нет, и через `./` тоже."""
     doc = ROOT / "docs" / "decisions" / "x.md"
-    text = "[#1](../../../issues/1) [#2](../../../../pull/2) [#3](../../../../../issues/3)\n"
+    text = (
+        "[#1](../../../issues/1) [#2](../../../../pull/2) [#3](../../../../../issues/3)"
+        " [#4](./../../../../issues/4)\n"
+    )
     problems = unresolved(doc, text)
     assert len(problems) == 2, problems
     assert "поднимается на 3, до площадки нужно 4" in problems[0]
