@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import Run, RunScript, load_script
+from tests.test_doc_links import PLATFORM
 
 edit = load_script("check_decisions_edit.py")
 
@@ -173,6 +174,31 @@ def test_a_platform_link_keeps_its_kind() -> None:
     was = edit.frozen("## Решение\n\nСм. [#12](../../issues/12).\n")
     now = edit.frozen("## Решение\n\nСм. [#12](../../pull/12).\n")
     assert was != now
+
+
+def test_a_platform_rise_is_not_content() -> None:
+    """Подъём к площадке чинится без переписывания: число `../` не содержание (#1683)."""
+    was = edit.frozen("## Решение\n\nСм. [#12](../../../issues/12) и [#3](../../pull/3).\n")
+    now = edit.frozen(
+        "## Решение\n\nСм. [#12](../../../../issues/12) и [#3](../../../../pull/3).\n"
+    )
+    assert was == now
+
+
+@pytest.mark.parametrize(
+    "now",
+    ["../../../../pull/12", "../../../../issues/13", "../../../../ArtVsMark/x/issues/12"],
+    ids=["другой раздел", "другой номер", "не раздел площадки"],
+)
+def test_a_platform_target_is_still_content(now: str) -> None:
+    """Раздел, номер и чужой адрес остаются содержанием: нормализован только подъём."""
+    was = edit.frozen("## Решение\n\nСм. [#12](../../../issues/12).\n")
+    assert was != edit.frozen(f"## Решение\n\nСм. [#12]({now}).\n")
+
+
+def test_the_platform_sections_are_one_list() -> None:
+    """Перечень разделов площадки у гейта записей и у гейта ссылок — один и тот же."""
+    assert tuple(edit.PLATFORM) == tuple(PLATFORM)
 
 
 def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> None:
