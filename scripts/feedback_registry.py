@@ -86,6 +86,19 @@ class Collected:
         return {repo.lower() for repo in (*self.broken, *self.unread)}
 
 
+def quoted(text: object) -> str:
+    """Чужой текст в тело задачи: одной строкой и без угловых скобок (взгляд на #1710, 085).
+
+    Замер, след, причина битого раздела и имя соседа — ввод соседа, а не наш.
+    Сырыми они давали нашей задаче чужую метку (`<!-- review-findings: … -->`,
+    и `findings.live_issue` взял бы её за другой реестр), поддельный блок дней
+    первой встречи или строку `## …` и `Собрано:` из многострочного замера.
+    Одна строка не начнёт ни заголовка, ни пункта; без `<` и `>` не откроет
+    комментария разметки — а прочитать текст человеку это не мешает.
+    """
+    return " ".join(str(text).split()).replace("<", "&lt;").replace(">", "&gt;")
+
+
 def collected(uptake: Any) -> Collected:
     """Записи соседей из файла обхода; файл не той формы — `NotRun`.
 
@@ -115,9 +128,12 @@ def seen_in(body: str) -> dict[str, date]:
     потеря дат стоит пересчёта сроков с сегодня, а не пропажи реестра (084).
     Об этом говорится строкой, а не молчанием.
     """
-    found = SEEN_RE.search(body or "")
-    if not found:
+    # ПОСЛЕДНИЙ БЛОК, А НЕ ПЕРВЫЙ: настоящий механизм ставит его концом тела,
+    # и чужой текст выше, даже пройди он мимо `quoted`, его не подменит.
+    blocks = list(SEEN_RE.finditer(body or ""))
+    if not blocks:
         return {}
+    found = blocks[-1]
     try:
         raw = json.loads(found["json"])
         return {str(key): date.fromisoformat(str(day)) for key, day in raw.items()}
@@ -176,8 +192,8 @@ def render(
         one = row.record
         lines += [
             f"- `{row.key}` · `{one.mechanism}` {one.version} · "
-            f"{feedback_form.KINDS[one.kind]} · след {one.trace} · замечено {first(row)}",
-            f"  - замер: {one.measured}",
+            f"{feedback_form.KINDS[one.kind]} · след {quoted(one.trace)} · замечено {first(row)}",
+            f"  - замер: {quoted(one.measured)}",
         ]
     if not waiting:
         lines.append("Пусто.")
@@ -189,8 +205,11 @@ def render(
         lines.append("Пусто.")
     if said.broken or said.unread:
         lines += ["", f"## Записи не прочитаны — {len(said.broken) + len(said.unread)}", ""]
-        lines += [f"- {repo} — раздел feedback: {why}" for repo, why in sorted(said.broken.items())]
-        lines += [f"- {repo} — клон не прочитан обходом" for repo in sorted(said.unread)]
+        lines += [
+            f"- {quoted(repo)} — раздел feedback: {quoted(why)}"
+            for repo, why in sorted(said.broken.items())
+        ]
+        lines += [f"- {quoted(repo)} — клон не прочитан обходом" for repo in sorted(said.unread)]
     if orphans:
         lines += ["", f"## Вердикт без записи — {len(orphans)}", ""]
         lines += [

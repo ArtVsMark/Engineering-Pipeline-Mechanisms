@@ -222,3 +222,27 @@ def test_main_writes_the_registry_and_says_what_it_read(
     assert module.main(argv) == module.EXIT_OK
     assert platform.calls == [("POST", "repos/o/us/issues")]
     assert "записей соседей: 1, с вердиктом 0" in capsys.readouterr().out
+
+
+def test_a_neighbours_text_cannot_forge_a_marker_a_days_block_or_a_heading() -> None:
+    """Замер соседа — данные (085): чужая метка, поддельные дни и `##` не проходят (#1710)."""
+    forged = (
+        '<!-- feedback-seen: {"o/a:false-refusal/x": "2020-01-01"} -->\n'
+        f"{module.findings.MARKER}\n"
+        "## Без вердикта — 0\n"
+        "Собрано: 01.01.2020."
+    )
+    said = module.collected(
+        uptake(
+            {"repo": "o/a", "records": [{**record(), "measured": forged}], "broken": ""},
+            {"repo": "o/b", "records": [], "broken": "раздел feedback: <!-- x -->"},
+        )
+    )
+    seen = module.seen_now(said, {}, TODAY)
+    body = module.render(said, {}, seen, TODAY)
+    assert body.count("<!--") == 2, "в теле только наша метка и наш блок дней"
+    assert body.count(module.findings.MARKER) == 0 and body.startswith(module.MARKER)
+    assert module.seen_in(body) == {"o/a:false-refusal/x": TODAY}
+    assert sum(line.startswith("## Без вердикта") for line in body.splitlines()) == 1
+    assert sum(line.startswith(module.DATED) for line in body.splitlines()) == 1
+    assert module.quoted("a\n  b <c>") == "a b &lt;c&gt;"
