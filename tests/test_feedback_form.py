@@ -48,6 +48,9 @@ def test_a_good_record_is_read_and_no_section_means_no_records() -> None:
         ({"version": 1, "records": [{**good(), "slug": "С пробелом"}]}, "slug"),
         ({"version": 1, "records": [{**good(), "kind": "ложный отказ"}]}, "вид"),
         ({"version": 1, "records": [{**good(), "trace": "где-то"}]}, "trace"),
+        ({"version": 1, "records": [{**good(), "mechanism": "журнал"}]}, "mechanism"),
+        ({"version": 1, "records": [{**good(), "version": "1.11"}]}, "vX.Y.Z"),
+        ({"version": 1, "records": [{**good(), "version": 1.11}]}, "в кавычки"),
         ({"version": 1, "records": [good(), good()]}, "дважды"),
     ],
 )
@@ -68,8 +71,15 @@ def test_the_answer_check_judges_the_section(tmp_path: Path) -> None:
     )
     with pytest.raises(policy.BadPolicy, match="feedback"):
         policy.load(answer)
-    answer.write_text(answer.read_text(encoding="utf-8").split("feedback:")[0], encoding="utf-8")
+    head = answer.read_text(encoding="utf-8").split("feedback:")[0]
+    answer.write_text(head, encoding="utf-8")
     assert "e2e" in policy.load(answer), "без раздела сверка проходит"
+    # ГОДНАЯ ЗАПИСЬ ТОЖЕ ИДЁТ ЧЕРЕЗ СВЕРКУ (взгляд на #1702, 107): сверка,
+    # однажды отвергнувшая законный раздел, иначе осталась бы зелёной.
+    lines = [f"{key}: {value}" for key, value in good().items()]
+    record = "    - " + "\n      ".join(lines) + "\n"
+    answer.write_text(head + "feedback:\n  version: 1\n  records:\n" + record, encoding="utf-8")
+    assert "e2e" in policy.load(answer), "годная запись сверку проходит"
 
 
 def test_one_record_is_read_by_name_with_its_place() -> None:
