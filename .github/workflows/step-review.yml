@@ -244,7 +244,7 @@ jobs:
           # исполнения. Не подтянулась — карты нет, а не карта без сверки.
           git fetch --no-tags --depth=1 origin "$HEAD_SHA" || rc=$?
           if [ "$rc" -eq 0 ]; then
-            python -m pip install --quiet $MECHANISMS/packages/transport || rc=$?
+            python -m pip install --quiet "pyyaml>=6,<7" $MECHANISMS/packages/transport || rc=$?
           fi
           if [ "$rc" -eq 0 ]; then
             python $MECHANISMS/scripts/review_map.py --base HEAD --head FETCH_HEAD --out "$RUNNER_TEMP/map.md" \
