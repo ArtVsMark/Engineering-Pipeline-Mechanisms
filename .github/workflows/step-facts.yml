@@ -253,19 +253,19 @@ jobs:
       # печатает на расхождениях; код 1 без неё — сбой проверки, предупреждение.
       - name: сверить факты с договором семьи
         env:
-          FACTS_CONTRACT: facts-v2.1.0
+          FACTS_CONTRACT: facts-v2.2.0
           # Договор фактов держат механизмы с 2.1 (#1563, шаг 5б; до того —
           # каталог, #1396): выпуски — адресом репозитория, чей шаг зовут
           # (`job.workflow_repository`), а не нашим именем буквами: у потребителя
           # это те механизмы, которые он зовёт (194). Файлы страницы выпуска заменяемы, а тег нет: поэтому
-          # рядом прибиты хеши, снятые с дерева тега `facts-v2.1.0`
-          # (`git show facts-v2.1.0:<путь> | sha256sum`), и они совпали с файлами
-          # страницы байт в байт 23.10.2026.
+          # рядом прибиты хеши, снятые с дерева тега `facts-v2.2.0`
+          # (`git show facts-v2.2.0:<путь> | sha256sum`), и они совпали с файлами
+          # страницы байт в байт 25.10.2026.
           RELEASES: https://github.com/${{ job.workflow_repository }}/releases/download
           FACTS_SHA256: |
-            7859ffc9a4632da0f745291e9f38c674ac452f7c48c0bc36ab5ee5dbaf4a51a1  check_facts.py
-            7a3643b69de39ec24ffb11502aef27911227f06013f796c0d32ab58a0da2fa05  facts.schema.json
-            c89b87c262e9d5ffd20e73aac74a1772adcc9f5a21682cc33adcf5086e5fef5c  facts.version
+            098bed2885496f5a996c424d6b230260459aad26ffae1b9862ae58d62332006f  check_facts.py
+            bd9cb9862b1ad99df867966824f4f8f57b15fd3bf1a855ffecbffdf7e6502898  facts.schema.json
+            c4a2383a03bdb6739d16a0e24058e4b9c7da4e63d203e0be2f448868cc03c530  facts.version
         run: |
           set -uo pipefail
           dir="$RUNNER_TEMP/facts-contract"
