@@ -54,6 +54,8 @@
 """
 
 import argparse
+import base64
+import binascii
 import json
 import os
 import re
@@ -270,11 +272,66 @@ def touched(dep: str, since: str, sha: str, token: str) -> set[str]:
     }
 
 
+def vendor_text(dep: str, path: str, ref: str, token: str) -> str:
+    """Файл поставщика на коммите `ref` — по `contents` площадки, только чтением.
+
+    Ответ без текста — файл больше предела площадки, каталог, не той формы —
+    это «не прочитано», а не пустой файл: пустота совпала бы с чем угодно (039).
+    """
+    try:
+        said = ghrest.request("GET", f"repos/{dep}/contents/{path}?ref={ref}", token)
+    except ghrest.NotFound as exc:
+        raise Refused(f"{dep}: файла {path} на {ref[:7]} у поставщика нет") from exc
+    except ghrest.TransportError as exc:
+        raise NotRun(f"{dep}: {path} на {ref[:7]} не прочитан — {exc}") from exc
+    if not isinstance(said, dict) or said.get("encoding") != "base64":
+        raise NotRun(f"{dep}: {path} на {ref[:7]} — ответ без текста файла")
+    try:
+        return base64.b64decode(str(said.get("content") or ""), validate=False).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise NotRun(f"{dep}: {path} на {ref[:7]} не разобран — {exc}") from exc
+
+
+def ignored_pattern(one: dict[str, Any], watch: Path) -> re.Pattern[str] | None:
+    """Образец строк-шума слежки (#1689); поля нет — `None`, негодное — заход не отработал."""
+    said = one.get("ignore")
+    if said is None:
+        return None
+    if not isinstance(said, str) or not said:
+        raise NotRun(f"{watch}: у слежки {one.get('path')} `ignore` — не строка образца")
+    try:
+        return re.compile(said)
+    except re.error as exc:
+        raise NotRun(f"{watch}: у слежки {one.get('path')} `ignore` не разобран — {exc}") from exc
+
+
+def only_noise(
+    dep: str, path: str, since: str, sha: str, noise: re.Pattern[str], token: str
+) -> bool:
+    """Разошлись ли версии файла ТОЛЬКО строками-шумом (#1689).
+
+    Сравнивается файл целиком без строк, совпавших с образцом, — а не одни
+    строки предмета: условие вызова может не нести его имени, и слежка за
+    именем пропустила бы смену условия. Образец, не нашедший ни одной строки
+    ни в одной версии, — отказ: поле мертво, и «совпало» ничего не доказывает (075).
+    """
+    before = vendor_text(dep, path, since, token).splitlines()
+    after = vendor_text(dep, path, sha, token).splitlines()
+    if not any(noise.search(line) for line in (*before, *after)):
+        raise Refused(
+            f"{dep}: образец `ignore` слежки {path} не нашёл ни одной строки на "
+            f"{since[:7]} и {sha[:7]} — перечитать слежку"
+        )
+    kept = [[line for line in lines if not noise.search(line)] for lines in (before, after)]
+    return kept[0] == kept[1]
+
+
 def follow(root: Path, dep: str, sha: str, token: str) -> dict[Path, str]:
     """Слежки этого действия: файл не тронут — `read_at` сдвигается до `sha`, тронут — отказ.
 
     Отдаёт правку файла объявлений для плана подъёма; слежки нет или она уже
-    на `sha` — пусто.
+    на `sha` — пусто. У слежки с `ignore` тронутый файл сверяется без
+    строк-шума (`only_noise`, #1689): разошлись только они — файл не тронут.
 
     СНАЧАЛА СУДЯТСЯ ВСЕ СЛЕЖКИ, ПОТОМ СДВИГАЕТСЯ (взгляд на #1524). Слежки
     одного действия с одним `read_at` естественны — знания сняты с одного
@@ -295,7 +352,10 @@ def follow(root: Path, dep: str, sha: str, token: str) -> dict[Path, str]:
             continue
         if since not in seen:
             seen[since] = touched(dep, since, sha, token)
-        if path in seen[since]:
+        noise = ignored_pattern(one, watch)
+        if path in seen[since] and not (
+            noise is not None and only_noise(dep, path, since, sha, noise, token)
+        ):
             raise Refused(
                 f"{dep}: между {since[:7]} и {sha[:7]} у поставщика тронут {path} — "
                 f"перечитать {one.get('by')} по https://github.com/{dep}/blob/{sha}/{path} "
