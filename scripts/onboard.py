@@ -1005,6 +1005,9 @@ TREE_KITTED: Final = (
     paths.HOOKS / "push_guard.sh",
     paths.HOOKS / "skill_log.py",
     paths.HOOKS / "skill_log.sh",
+    # #1708: совет о пачке при нарезке `agent/…` — зовёт разбор стража толчка.
+    paths.HOOKS / "bundle_hint.py",
+    paths.HOOKS / "bundle_hint.sh",
     paths.HOOKS / "install_floor.sh",
 )
 #: Навыки окна, которые кладутся копией (#1552, решение владельца 24.10.2026;
