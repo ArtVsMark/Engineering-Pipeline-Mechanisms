@@ -1,0 +1,5 @@
+{
+  "_": "Наши вердикты по записям соседей о наших механизмах (раздел feedback: их .pipeline.yml, #1665). Ключ — владелец/репозиторий:вид/слаг; исход accepted и fixed несут release (тег выпуска), rejected — why (причина), duplicate — of (ключ другой записи). Форму судит scripts/feedback_form.py::verdicts_of, читает scripts/feedback_registry.py, держит tests/test_feedback_registry.py.",
+  "version": 1,
+  "verdicts": {}
+}

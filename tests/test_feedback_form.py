@@ -4,12 +4,13 @@
 местом записи и поля; раздел сверяется тем же заходом, что ответ по шагам.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import ROOT, load_script
 
 module = load_script("feedback_form.py")
 policy = load_script("pipeline_checks.py")
@@ -87,3 +88,56 @@ def test_one_record_is_read_by_name_with_its_place() -> None:
     assert module.record_of(good(), 1) == module.Record(**good())
     with pytest.raises(module.NotRun, match="запись 7"):
         module.record_of({**good(), "kind": "x"}, 7)
+
+
+def verdicts(**one: Any) -> dict[str, Any]:
+    """Файл вердиктов с одной записью по ключу `o/r:false-refusal/x`."""
+    return {"version": 1, "verdicts": {"o/r:false-refusal/x": one}}
+
+
+def test_the_live_verdicts_file_is_of_the_form() -> None:
+    """Файл вердиктов дерева читается: форму держит один разбор, а не внимание (#1665)."""
+    data = json.loads((ROOT / ".rules" / "feedback-verdicts.json").read_text(encoding="utf-8"))
+    module.verdicts_of(data)
+
+
+def test_every_verdict_names_what_its_outcome_requires() -> None:
+    """Каждый исход читается со своим полем; ключ — тот же, что строит `key_of` (214)."""
+    record = module.record_of(good(), 1)
+    key = module.key_of("O/R", record)
+    assert key == "o/r:false-refusal/journal-tail-rejects-quote"
+    said = module.verdicts_of(
+        {
+            "version": 1,
+            "verdicts": {
+                key: {"verdict": "accepted", "release": "v1.12.0"},
+                "o/r:false-pass/b": {"verdict": "rejected", "why": "зелёное законно: …"},
+                "o/r:partial/c": {"verdict": "duplicate", "of": key},
+                "o/r:not-run/d": {"verdict": "fixed", "release": "v1.12.1"},
+            },
+        }
+    )
+    assert said[key] == module.Verdict("accepted", "v1.12.0")
+    assert said["o/r:false-pass/b"].said == "зелёное законно: …"
+
+
+@pytest.mark.parametrize(
+    ("data", "said"),
+    [
+        (verdicts(verdict="rejected"), "поле why"),
+        (verdicts(verdict="rejected", why="  "), "поле why"),
+        (verdicts(verdict="accepted", release="main"), "тег нашего выпуска"),
+        (verdicts(verdict="duplicate", of="o/r:false-refusal/x"), "ключ другой записи"),
+        (verdicts(verdict="maybe"), "исход «maybe»"),
+        (verdicts(verdict="fixed", release="v1.0.0", why="x"), "незнакомые поля why"),
+        ({"version": 1, "verdicts": {"o/r:unknown/x": {}}}, "ключ"),
+        ({"version": 1, "verdicts": {"o/r/x": {}}}, "ключ"),
+        ({"version": True, "verdicts": {}}, "version"),
+        ({"version": 2, "verdicts": {}}, "version"),
+        ({"version": 1, "verdicts": []}, "отображение"),
+    ],
+)
+def test_every_broken_verdict_is_refused_with_its_key(data: Any, said: str) -> None:
+    """Отклонение без причины, чужой исход, не тег, дубль самого себя — отказ с ключом (154)."""
+    with pytest.raises(module.NotRun, match=said):
+        module.verdicts_of(data)

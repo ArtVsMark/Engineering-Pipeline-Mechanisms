@@ -228,6 +228,17 @@ jobs:
             0|3) ;;
             *) echo "::warning::обход клонов семьи не отработал (код $rc) — «взяли вызовом» не прочитано" ;;
           esac
+      # ФАЙЛ ОБХОДА — ЕЩЁ И ВХОД РЕЕСТРА ЗАПИСЕЙ СОСЕДЕЙ (#1665): записи
+      # `feedback:` обход читает тем же клоном, а живую задачу пишет джоб
+      # `gates-task` — у него одного право писать задачи (125). Нет файла —
+      # предупреждение, и реестр там скажет «не собран» (084).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
+        with:
+          name: family-uptake
+          path: ${{ runner.temp }}/uptake.json
+          if-no-files-found: warn
+          retention-days: 1
       - name: свои разделы — файлом для общего шага
         run: |
           python scripts/build_facts.py \
@@ -379,6 +390,8 @@ jobs:
   # собранного джобом `inputs`. Право писать задачи — у этого джоба одного, а не
   # у всего прогона: остальным оно не нужно (125). Совещательный: задача не
   # записалась — предупреждение, а карта на ветке и без неё на месте (084).
+  # Тот же джоб пишет и реестр записей соседей (#1665): право то же, вход —
+  # файл обхода из `inputs`, и второго джоба с тем же правом не нужно.
   gates-task:
     name: gates-task
     needs: inputs
@@ -416,4 +429,26 @@ jobs:
           python scripts/family_gates.py --map "${RUNNER_TEMP}/gates/family-gates.json" --apply || rc=$?
           if [ "$rc" != 0 ]; then
             echo "::warning::живая задача карты гейтов не записана (код $rc) — карта на ветке badges на месте"
+          fi
+      # РЕЕСТР ЗАПИСЕЙ СОСЕДЕЙ (#1665): записи `feedback:` из файла обхода и наши
+      # вердикты — в живую задачу с очередью на вердикт. Совещательный, как
+      # карта: не записался — предупреждение, записи остаются у соседей (084).
+      - name: взять файл обхода семьи
+        id: uptake
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: family-uptake
+          path: ${{ runner.temp }}/uptake
+      - name: переписать живую задачу записей соседей
+        if: steps.uptake.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          rc=0
+          python scripts/feedback_registry.py --uptake "${RUNNER_TEMP}/uptake/uptake.json" --apply || rc=$?
+          if [ "$rc" != 0 ]; then
+            echo "::warning::реестр записей соседей не записан (код $rc) — записи остаются в их .pipeline.yml"
           fi

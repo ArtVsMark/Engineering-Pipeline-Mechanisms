@@ -681,3 +681,50 @@ def test_a_local_summary_is_read_without_the_network(
     path.write_text("{не json", encoding="utf-8")
     with pytest.raises(module.NotRun):
         module.family(local=path)
+
+
+FEEDBACK = """\
+feedback:
+  version: 1
+  records:
+    - slug: journal-tail
+      mechanism: step-journal
+      version: v1.11.0
+      kind: false-refusal
+      measured: 3 из 10
+      trace: o/a#4
+"""
+
+
+def test_the_neighbours_feedback_comes_with_the_same_clone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Записи `feedback:` читает тот же клон, что вызовы, — без второго обхода (#1665)."""
+    (tmp_path / ".pipeline.yml").write_text(FEEDBACK, encoding="utf-8")
+    monkeypatch.setattr(module, "shallow_clone", lambda _repo, _where, **_: tmp_path)
+    got = module.took("o/a", tmp_path)
+    assert [one.slug for one in got.feedback] == ["journal-tail"] and got.feedback_broken == ""
+
+
+def test_a_broken_feedback_section_is_named_and_not_an_empty_one() -> None:
+    """Битый раздел соседа — причина, а не «записей нет»; раздела нет — пусто без причины (045)."""
+    assert module.policy.feedback_said("checks: {}\n") == ([], "")
+    assert module.policy.feedback_said("- список\n") == ([], "")
+    records, why = module.policy.feedback_said("feedback: {version: 2}\n")
+    assert records == [] and "version" in why
+    records, why = module.policy.feedback_said("feedback: [\n")
+    assert records == [] and "YAML" in why
+
+
+def test_the_feedback_of_every_read_neighbour_goes_to_the_file() -> None:
+    """Записи — у всех прочитанных, а не только у взявших вызовом: переписавший шагов не зовёт."""
+    record = module.policy.feedback_said(FEEDBACK)[0][0]
+    rewrote = module.Took(repo="o/a", feedback=(record,))
+    broken = module.Took(repo="o/b", feedback_broken="раздел feedback: …")
+    quiet = module.Took(repo="o/c")
+    said = module.uptake([rewrote, broken, quiet], [], ["lint"])
+    assert said["projects"]["took"] == 0
+    assert said["feedback"] == [
+        {"repo": "o/a", "records": [vars(record)], "broken": ""},
+        {"repo": "o/b", "records": [], "broken": "раздел feedback: …"},
+    ]
