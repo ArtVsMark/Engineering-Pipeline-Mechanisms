@@ -10,6 +10,7 @@ import ast
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Final
 
 import pytest
@@ -1484,3 +1485,15 @@ def test_the_catalogue_tree_reaches_the_verdict_as_inapplicable(
     out = capsys.readouterr().out
     assert (debt.CATALOGUE_TREE in out) is not owed
     assert ("ПЕРЕД планом" in out) is owed
+
+
+def test_the_registry_read_names_its_number_and_the_debt_keeps_its_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Номер реестра — из того же чтения, а `findings_debt` отдаёт прежнее (#1695)."""
+    entry = SimpleNamespace(pr=5, weight="риск", title="scripts/x.py:1 — раз")
+    monkeypatch.setattr(debt.findings, "live_issue", lambda *_, **__: (23, "тело"))
+    monkeypatch.setattr(debt.findings, "parse_entries", lambda _: {"abc1234": entry})
+    said = [("abc1234", 5, "риск", "scripts/x.py:1 — раз")]
+    assert debt.findings_registry("o/r", "t") == (23, said)
+    assert debt.findings_debt("o/r", "t") == said
