@@ -111,8 +111,15 @@ def findings_debt(
     repo: str, token: str, listed: list[dict[str, Any]] | None = None
 ) -> list[tuple[str, int, str, str]]:
     """Неразобранные находки из живой задачи-адресата: отпечаток, изменение, вес, суть."""
-    _, body = findings.live_issue(repo, token, listed=listed)
-    return [
+    return findings_registry(repo, token, listed)[1]
+
+
+def findings_registry(
+    repo: str, token: str, listed: list[dict[str, Any]] | None = None
+) -> tuple[int | None, list[tuple[str, int, str, str]]]:
+    """То же, что `findings_debt`, и номер реестра: план ссылается на него вместо списка (#1695)."""
+    number, body = findings.live_issue(repo, token, listed=listed)
+    return number, [
         (mark, entry.pr, entry.weight, entry.title)
         for mark, entry in findings.parse_entries(body).items()
     ]
