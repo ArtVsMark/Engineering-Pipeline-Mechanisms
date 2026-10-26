@@ -9,7 +9,6 @@
 
 import os
 import subprocess
-import sys
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -18,7 +17,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, python_shim
 
 module = load_script("release.py")
 
@@ -1195,21 +1194,6 @@ def test_every_tail_step_runs_after_the_release_or_the_tag(name: str) -> None:
     )
 
 
-def python_shim(where: Path) -> Path:
-    """Каталог с `python`, зовущим интерпретатор набора, — для `PATH` шага.
-
-    СКРИПТ, А НЕ СИМВОЛЬНАЯ ССЫЛКА. Запущенный через ссылку, Python ищет
-    `pyvenv.cfg` рядом со ссылкой, не узнаёт венв окна и стартует базовым, без
-    его пакетов: `import report` падал в окне и проходил на раннере, где венва
-    нет (замер 26.10.2026, четыре случая `test_the_tail_stands_on_its_tag…`).
-    """
-    where.mkdir()
-    python = where / "python"
-    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
-    python.chmod(0o755)
-    return where
-
-
 def run_tagged(
     tmp_path: Path, tags: list[str], version: str, later: tuple[str, ...] = ()
 ) -> subprocess.CompletedProcess[str]:
@@ -1253,7 +1237,7 @@ def run_tagged(
     )
     for tag in later:
         git(["git", "tag", tag])
-    shim = python_shim(tmp_path / "bin")
+    shim = python_shim(tmp_path / "bin").parent
     temp = tmp_path / "temp"
     temp.mkdir()
     env = {
@@ -1459,7 +1443,7 @@ def run_label_step(tmp_path: Path, version: str) -> tuple[subprocess.CompletedPr
         f"Path({str(said)!r}).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n",
         encoding="utf-8",
     )
-    shim = python_shim(tmp_path / "bin")
+    shim = python_shim(tmp_path / "bin").parent
     env = {
         **os.environ,
         "PATH": f"{shim}{os.pathsep}{os.environ.get('PATH', '')}",
