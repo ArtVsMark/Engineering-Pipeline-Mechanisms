@@ -933,6 +933,12 @@
         ".rules/series.json"
       ]
     },
+    "scripts/headroom.py": {
+      "answer": "configured",
+      "where": [
+        ".rules/series.json"
+      ]
+    },
     "scripts/schedules_seen.py": {
       "answer": "configured",
       "where": [
