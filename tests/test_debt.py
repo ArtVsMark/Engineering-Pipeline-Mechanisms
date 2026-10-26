@@ -320,8 +320,8 @@ ONE_READ: Final[tuple[tuple[str, str, object], ...]] = (
     ("unknown", "stuck_changes", ([], ["#1 — x"], [])),
     ("red", "stuck_changes", ([], [], ["#1 — x"])),
     ("lagging", "branch_debt", ([], ["lint"])),
-    ("left", "findings_debt", [("abc1234", 5, "дефект", "x")]),
-    ("kept", "findings_debt", [("abc1234", 5, "риск", "x")]),
+    ("left", "findings_registry", (None, [("abc1234", 5, "дефект", "x")])),
+    ("kept", "findings_registry", (None, [("abc1234", 5, "риск", "x")])),
     ("rules_left", "rules_debt", (0, 1, 0)),
 )
 
@@ -332,7 +332,7 @@ def plan_with(monkeypatch: pytest.MonkeyPatch, reader: str, said: object) -> dic
     quiet: dict[str, object] = {
         "branch_debt": ([], []),
         "stuck_changes": ([], [], []),
-        "findings_debt": [],
+        "findings_registry": (None, []),
         "open_changes": frozenset(),
         "closed_issues": [],
         "inbox_body": ("", "", ""),
