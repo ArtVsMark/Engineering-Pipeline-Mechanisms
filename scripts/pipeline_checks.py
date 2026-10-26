@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import contract_form
+import feedback_form
 import gitcall
 import journal
 import paths
@@ -611,6 +612,12 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
                 "а по ссылкам обход не идёт — " + ", ".join(linked)
             )
     except contract_form.NotRun as exc:
+        problems.append(str(exc))
+    # Записи соседа о наших механизмах (#1665) — тем же приёмом: битая
+    # запись видна шагом `pipeline` у него, а не нашим обходом семьи.
+    try:
+        feedback_form.form_of(raw.get(feedback_form.SECTION))
+    except feedback_form.NotRun as exc:
         problems.append(str(exc))
     # Раздел путей — тем же приёмом (#1630): битый ключ отвергается сверкой
     # ответа, раньше, чем на нём споткнётся первый читатель таблицы.
