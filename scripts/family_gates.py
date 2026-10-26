@@ -190,9 +190,10 @@ def reasons_from(uptake: Any) -> dict[Reason, list[str]]:
 
     Запись соседа `feedback:` называет наш механизм путём (`scripts/x.py`), а
     строка очереди `rework` — `origin` вида `репозиторий:путь@тег`: сводятся по
-    соседу и пути. Текст соседа идёт через `feedback_registry.quoted` — это его
-    ввод, а не наша разметка (085). Файл обхода не той формы — `NotRun` у
-    `feedback_registry`, зовущий называет его строкой.
+    соседу и отношению `feedback_form.names_path`. Текст соседа идёт через
+    `feedback_registry.quoted` — это его ввод, а не наша разметка (085). Файл
+    обхода не той формы — `NotRun` у `feedback_registry`, зовущий называет его
+    строкой.
     """
     found: dict[Reason, list[str]] = {}
     for row in feedback_registry.collected(uptake).rows:
@@ -210,7 +211,15 @@ def reason_of(row: dict[str, Any], reasons: dict[Reason, list[str]] | None) -> s
         return ""
     origin = family.unversioned(str(row.get("origin") or ""))
     path = origin.split(":", 1)[-1]
-    said = reasons.get((str(row.get("repo") or "").casefold(), path))
+    repo = str(row.get("repo") or "").casefold()
+    # Механизм записи и путь `origin` сводит отношение формы, а не равенство:
+    # шаг сосед называет именем, а `origin` несёт файл прогона (взгляд на #1714).
+    said = [
+        one
+        for (whose, mechanism), told in reasons.items()
+        if whose == repo and feedback_form.names_path(mechanism, path)
+        for one in told
+    ]
     return f" · причина: {'; '.join(said)}" if said else " · причины в канале нет"
 
 

@@ -19,11 +19,12 @@ description: "Записать поставщику механизмов, что
 публикует сам проект
 ([174](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/174-facts-about-a-project-are-published-by-it.md)).
 
-**Замер 26.10.2026, ради которого навык заведён** (#1665): у поставщика наш
-собственный `skill_log.py` переписан к себе с другим кодом выхода, чем у
-каталога, — расхождение было названо только докстрокой нашего файла: канала к
-поставщику, кроме прозы, не было. Первая запись канала — эта, она лежит в
-нашем `.pipeline.yml`.
+**Замер 26.10.2026, ради которого навык заведён** (#1665 поставщика): у
+поставщика механизмов хук журнала навыков `skill_log.py`, взятый у каталога
+правил, переписан с другим кодом выхода, — и расхождение было названо только
+докстрокой файла поставщика: канала к каталогу, кроме прозы, не было. Первая
+запись канала — эта, она лежит в
+[`.pipeline.yml` поставщика](https://github.com/ArtVsMark/Engineering-Pipeline-Mechanisms/blob/main/.pipeline.yml).
 
 **Сперва спросили семью**
 ([162](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/162-a-gap-asks-the-neighbours-first.md)):

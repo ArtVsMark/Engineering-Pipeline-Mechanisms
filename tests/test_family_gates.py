@@ -288,3 +288,29 @@ def test_a_rework_row_takes_its_reason_from_the_neighbours_record() -> None:
     assert "причин" not in module.render_issue(said)
     assert module.reason_of(rows[0], None) == "", "канал не дан — хвоста нет"
     assert module.reason_of(rows[1], reasons) == " · причины в канале нет"
+
+
+@pytest.mark.parametrize(
+    ("mechanism", "path"),
+    [
+        ("scripts/a.py", "scripts/a.py"),
+        ("step-journal", ".github/workflows/step-journal.yml"),
+        (".claude/skills/x", ".claude/skills/x/SKILL.md"),
+        (".claude/hooks/push_guard.py", ".claude/hooks/push_guard.py"),
+    ],
+)
+def test_a_reason_is_found_for_every_form_of_mechanism(mechanism: str, path: str) -> None:
+    """Шаг — именем, навык — каталогом, скрипт — путём: причина находится у каждой формы."""
+    record = {
+        "slug": "x",
+        "mechanism": mechanism,
+        "version": "v1.0.0",
+        "kind": "rework",
+        "measured": "нужен вход",
+        "trace": "o/n#4",
+    }
+    reasons = module.reasons_from({"feedback": [{"repo": "o/n", "records": [record]}]})
+    row = {"rule": "001", "repo": "o/n", "origin": f"{OURS}:{path}@v1.0.0"}
+    assert "причина: доработка" in module.reason_of(row, reasons)
+    stranger = {**row, "origin": f"{OURS}:scripts/b.py@v1.0.0"}
+    assert module.reason_of(stranger, reasons) == " · причины в канале нет"

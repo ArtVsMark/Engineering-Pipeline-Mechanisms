@@ -50,8 +50,25 @@ SLUG_RE: Final = re.compile(r"[a-z0-9][a-z0-9-]*")
 MECHANISM_RE: Final = re.compile(
     r"step-[a-z0-9-]+|scripts/[a-z0-9_]+\.py|\.claude/(?:skills|hooks)/[\w.-]+(?:/[\w.-]+)*"
 )
+#: Файл общего шага по его имени: `step-journal` — `.github/workflows/step-journal.yml`.
+STEP_FILE: Final = ".github/workflows/{}.yml"
 #: След — задача у соседа: `владелец/репозиторий#N` или полный адрес.
 TRACE_RE: Final = re.compile(r"[\w.-]+/[\w.-]+#\d+|https://\S+")
+
+
+def names_path(mechanism: str, path: str) -> bool:
+    """Называет ли механизм записи файл `path` дерева поставщика.
+
+    Три формы `MECHANISM_RE` — три отношения, а не одно равенство (взгляд на
+    #1714): путь скрипта — тот же путь; имя шага — его файл прогона
+    (`STEP_FILE`); навык и хук окна — путь или каталог над ним
+    (`.claude/skills/x` называет `.claude/skills/x/SKILL.md`).
+    """
+    if mechanism.startswith("step-"):
+        return path == STEP_FILE.format(mechanism)
+    return path == mechanism or (
+        mechanism.startswith(".claude/") and path.startswith(mechanism.rstrip("/") + "/")
+    )
 
 
 @dataclass(frozen=True)

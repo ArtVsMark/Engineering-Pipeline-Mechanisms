@@ -155,3 +155,12 @@ def test_the_kit_answer_carries_the_section_as_a_comment() -> None:
     said = onboard.answer(["lint"], span=">=1.0,<2")
     assert "# feedback:" in said and "tell-the-supplier" in said
     assert policy.feedback_said(said) == ([], ""), "образец объявил раздел, а не показал его"
+
+
+def test_a_mechanism_names_its_file_and_only_it() -> None:
+    """Шаг — свой файл прогона, навык — свой каталог: соседний по началу имени — не он."""
+    assert module.names_path("step-journal", ".github/workflows/step-journal.yml")
+    assert not module.names_path("step-journal", ".github/workflows/step-journal-x.yml")
+    assert module.names_path(".claude/skills/x", ".claude/skills/x/SKILL.md")
+    assert not module.names_path(".claude/skills/x", ".claude/skills/xy/SKILL.md")
+    assert not module.names_path("scripts/a.py", "scripts/a.pyc")
