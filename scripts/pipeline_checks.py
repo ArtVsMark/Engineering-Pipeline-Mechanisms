@@ -318,6 +318,26 @@ def span_said(text: str) -> str | None:
         return None
 
 
+def feedback_said(text: str) -> tuple[list[feedback_form.Record], str]:
+    """Записи раздела `feedback:` из ТЕКСТА чужого ответа и причина, если не прочитаны.
+
+    Читатель — обход клонов семьи (#1665). В отличие от `span_said`, отказ здесь
+    не глотается: битый раздел соседа и «записей нет» значат разное, и реестр
+    обязан назвать первое, а не выдать его за второе (045). Пустая причина —
+    прочитано; раздела нет — записей нет. Разбор раздела тот же `form_of` (090).
+    """
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return [], f"ответ не разобран как YAML — {str(exc).splitlines()[0]}"
+    if not isinstance(raw, dict):
+        return [], ""
+    try:
+        return feedback_form.form_of(raw.get(feedback_form.SECTION)), ""
+    except feedback_form.NotRun as exc:
+        return [], str(exc)
+
+
 def file_text(path: Path, what: str) -> str:
     """Текст файла в UTF-8; не читается или не UTF-8 — `BadPolicy` с причиной (039).
 

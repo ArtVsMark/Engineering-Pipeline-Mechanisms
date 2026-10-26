@@ -1052,6 +1052,7 @@ def test_the_debt_names_a_time_without_zone_instead_of_a_trace() -> None:
 NOT_PLATFORM_TIME: Final[dict[str, tuple[int, str]]] = {
     "scripts/audit_profile.py::is_iso_day": (1, "дата строкой, а не время"),
     "scripts/drift.py::measured_day": (1, "дата выпуска из манифеста, берётся только день"),
+    "scripts/feedback_registry.py::seen_in": (1, "день первой встречи, записанный здесь же датой"),
     "scripts/items_left.py::born": (1, "время коммита из git log — пояс у git есть всегда"),
     "scripts/items_left.py::born_symbol": (1, "время коммита из git log — пояс у git есть всегда"),
     "scripts/items_left.py::tests_born": (1, "время коммита из git log — пояс у git есть всегда"),

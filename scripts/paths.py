@@ -39,6 +39,10 @@ SHOWCASE: Final = Path(".rules/showcase.json")
 #: закрыт и что из него выросло.
 FINDING_KINDS: Final = Path(".rules/finding-kinds.json")
 
+#: Наши вердикты по записям соседей о наших механизмах (#1665): ключ записи →
+#: исход. Адрес поставщика, а не проекта: записи о НАШИХ механизмах судим мы.
+FEEDBACK_VERDICTS: Final = Path(".rules/feedback-verdicts.json")
+
 #: Объявленные расписания и роль каждого: наблюдает оно или действует.
 SCHEDULES: Final = Path(".rules/schedules.json")
 
@@ -313,6 +317,7 @@ ALL: Final = (
     PROPOSALS,
     SHOWCASE,
     FINDING_KINDS,
+    FEEDBACK_VERDICTS,
     SCHEDULES,
     SERIES,
     RERUN,
