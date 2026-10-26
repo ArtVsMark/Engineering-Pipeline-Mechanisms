@@ -218,7 +218,7 @@ def render_issue(said: dict[str, Any]) -> str:
 
 def stable(body: str) -> str:
     """Тело без строк дня сборки: с ними сверка «то же состояние» держалась бы сутки."""
-    return "\n".join(line for line in body.strip().splitlines() if not line.startswith(DATED))
+    return findings.undated(body, DATED)
 
 
 def save(repo: str, token: str, said: dict[str, Any], *, apply: bool) -> None:

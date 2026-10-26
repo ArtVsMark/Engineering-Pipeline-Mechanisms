@@ -204,7 +204,7 @@ def render(
 
 def stable(body: str) -> str:
     """Тело без строки дня сборки: с ней сверка «то же состояние» держалась бы сутки."""
-    return "\n".join(line for line in body.strip().splitlines() if not line.startswith(DATED))
+    return findings.undated(body, (DATED,))
 
 
 def verdicts_at(path: Path) -> dict[str, feedback_form.Verdict]:

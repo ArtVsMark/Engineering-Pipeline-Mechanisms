@@ -6,6 +6,7 @@
 и непрочитанный клон названы, а не выданы за «записей нет» (045).
 """
 
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -186,7 +187,7 @@ def test_the_verdicts_file_is_read_or_refused_with_its_place(tmp_path: Path) -> 
     assert module.verdicts_at(ROOT / module.paths.FEEDBACK_VERDICTS) == {}
     broken = tmp_path / "v.json"
     broken.write_text(
-        '{"version": 1, "verdicts": {"o/r:false-pass/x": {"verdict": "rejected"}}}', "utf-8"
+        '{"schema": 1, "verdicts": {"o/r:false-pass/x": {"verdict": "rejected"}}}', "utf-8"
     )
     with pytest.raises(module.NotRun, match=r"v\.json"):
         module.verdicts_at(broken)
@@ -200,3 +201,24 @@ def test_a_row_keys_by_its_neighbour_and_collected_hides_the_unseen() -> None:
     assert row.key == form.key_of("O/A", row.record) == "o/a:false-refusal/x"
     said = module.Collected((row,), {"O/B": "битый"}, ("o/c",))
     assert said.unseen() == {"o/b", "o/c"}
+
+
+def test_main_writes_the_registry_and_says_what_it_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Весь заход: файл обхода и вердикты — в живую задачу, исход 0 и счёт словами."""
+    data = tmp_path / "uptake.json"
+    data.write_text(
+        json.dumps(uptake({"repo": "o/a", "records": [record()], "broken": ""})), "utf-8"
+    )
+    verdicts = tmp_path / module.paths.FEEDBACK_VERDICTS
+    verdicts.parent.mkdir(parents=True)
+    verdicts.write_text('{"schema": 1, "verdicts": {}}', "utf-8")
+    platform = Platform(None)
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", platform.live)
+    monkeypatch.setattr(module.ghrest, "request", platform.request)
+    argv = ["--uptake", str(data), "--root", str(tmp_path), "--repo", "o/us", "--apply"]
+    assert module.main(argv) == module.EXIT_OK
+    assert platform.calls == [("POST", "repos/o/us/issues")]
+    assert "записей соседей: 1, с вердиктом 0" in capsys.readouterr().out

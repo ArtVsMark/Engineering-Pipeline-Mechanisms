@@ -56,6 +56,16 @@ def marker(name: str) -> str:
     return f"<!-- {name}: {KEPT_BY_A_MECHANISM} -->"
 
 
+def undated(body: str, dated: tuple[str, ...]) -> str:
+    """Тело живой задачи без строк дня сборки — для сверки «то же состояние».
+
+    С днём сборки сверка держалась бы сутки, и задача переписывалась бы каждую
+    ночь без перемены. Одна на все живые задачи, которые ведёт механизм: карта
+    гейтов и реестр записей соседей спрашивают одно и то же (071).
+    """
+    return "\n".join(line for line in body.strip().splitlines() if not line.startswith(dated))
+
+
 def is_kept_by_a_mechanism(body: str) -> bool:
     """Ведёт ли тело этой задачи механизм, а не человек.
 

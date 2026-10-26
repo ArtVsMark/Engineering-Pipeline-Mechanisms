@@ -92,7 +92,7 @@ def test_one_record_is_read_by_name_with_its_place() -> None:
 
 def verdicts(**one: Any) -> dict[str, Any]:
     """Файл вердиктов с одной записью по ключу `o/r:false-refusal/x`."""
-    return {"version": 1, "verdicts": {"o/r:false-refusal/x": one}}
+    return {"schema": 1, "verdicts": {"o/r:false-refusal/x": one}}
 
 
 def test_the_live_verdicts_file_is_of_the_form() -> None:
@@ -108,7 +108,7 @@ def test_every_verdict_names_what_its_outcome_requires() -> None:
     assert key == "o/r:false-refusal/journal-tail-rejects-quote"
     said = module.verdicts_of(
         {
-            "version": 1,
+            "schema": 1,
             "verdicts": {
                 key: {"verdict": "accepted", "release": "v1.12.0"},
                 "o/r:false-pass/b": {"verdict": "rejected", "why": "зелёное законно: …"},
@@ -130,11 +130,11 @@ def test_every_verdict_names_what_its_outcome_requires() -> None:
         (verdicts(verdict="duplicate", of="o/r:false-refusal/x"), "ключ другой записи"),
         (verdicts(verdict="maybe"), "исход «maybe»"),
         (verdicts(verdict="fixed", release="v1.0.0", why="x"), "незнакомые поля why"),
-        ({"version": 1, "verdicts": {"o/r:unknown/x": {}}}, "ключ"),
-        ({"version": 1, "verdicts": {"o/r/x": {}}}, "ключ"),
-        ({"version": True, "verdicts": {}}, "version"),
-        ({"version": 2, "verdicts": {}}, "version"),
-        ({"version": 1, "verdicts": []}, "отображение"),
+        ({"schema": 1, "verdicts": {"o/r:unknown/x": {}}}, "ключ"),
+        ({"schema": 1, "verdicts": {"o/r/x": {}}}, "ключ"),
+        ({"schema": True, "verdicts": {}}, "schema"),
+        ({"schema": 2, "verdicts": {}}, "schema"),
+        ({"schema": 1, "verdicts": []}, "отображение"),
     ],
 )
 def test_every_broken_verdict_is_refused_with_its_key(data: Any, said: str) -> None:

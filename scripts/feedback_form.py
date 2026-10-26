@@ -145,8 +145,8 @@ VERDICTS: Final = {
     "duplicate": "of",
     "fixed": "release",
 }
-#: Версия формы файла вердиктов.
-VERDICTS_VERSION: Final = 1
+#: Номер формы файла вердиктов — ключ `schema`, как у прочих реестров `.rules/` (164).
+VERDICTS_SCHEMA: Final = 1
 #: Ключ вердикта: `владелец/репозиторий:вид/слаг`. Имя репозитория соседа —
 #: часть ключа, и переименование соседа рвёт связь: вердикт осиротеет, и
 #: реестр назовёт его сиротой, а не потеряет молча (045).
@@ -179,8 +179,8 @@ def verdicts_of(data: Any) -> dict[str, Verdict]:
     """
     if not isinstance(data, dict):
         raise NotRun("вердикты: ожидалось отображение")
-    if data.get("version") != VERDICTS_VERSION or isinstance(data.get("version"), bool):
-        raise NotRun(f"вердикты: version {data.get('version')!r} — ждётся {VERDICTS_VERSION}")
+    if data.get("schema") != VERDICTS_SCHEMA or isinstance(data.get("schema"), bool):
+        raise NotRun(f"вердикты: schema {data.get('schema')!r} — ждётся {VERDICTS_SCHEMA}")
     raw = data.get("verdicts", {})
     if not isinstance(raw, dict):
         raise NotRun("вердикты: verdicts — отображение «ключ → вердикт»")
