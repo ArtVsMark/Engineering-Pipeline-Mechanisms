@@ -599,6 +599,12 @@
         ".rules/bindings.json"
       ]
     },
+    "scripts/feedback_form.py": {
+      "answer": "configured",
+      "where": [
+        ".pipeline.yml"
+      ]
+    },
     "scripts/shipped_form.py": {
       "answer": "configured",
       "where": [

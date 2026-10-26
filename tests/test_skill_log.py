@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, python_shim
 
 HOOKS = ROOT / ".claude" / "hooks"
 SETTINGS = ROOT / ".claude" / "settings.json"
@@ -66,7 +66,7 @@ def floor_bin(tmp_path: Path) -> Path:
     floor = "{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
     where = tmp_path / "bin"
     where.mkdir(exist_ok=True)
-    (where / f"python{floor}").symlink_to(sys.executable)
+    python_shim(where, f"python{floor}")
     dirname = shutil.which("dirname")
     assert dirname, "без dirname обёртку не позвать"
     (where / "dirname").symlink_to(dirname)
