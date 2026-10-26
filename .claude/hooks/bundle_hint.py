@@ -33,9 +33,11 @@
 знает, и тело встроенного документа для него — данные, а не команда.
 
 ГРАНИЦЫ НАЗВАНЫ. Ловится нарезка `git checkout -b|-B|--orphan`, `git switch
--c|-C` (и длинные `--create`, `--force-create`) и `git worktree add -b|-B` с
-именем `agent/…`; ветка, созданная `git branch` и потом взятая, — нет: она ещё
-не работа. Короткий ключ читается и слитно (`-bagent/x`). Навык, прочитанный
+-c|-C|--create|--force-create|--orphan` и `git worktree add -b|-B` с именем
+`agent/…` — в любой записи, которую принимает разбор ключей git: склейка,
+слитное значение, сокращение длинного (`names`). Ветка, созданная `git
+branch` и потом взятая, — нет: она ещё не работа; `git worktree add --orphan`
+без `-b` берёт имя из пути — тоже нет. Навык, прочитанный
 файлом, а не позванный инструментом, журнал не видит, и совет тогда придёт —
 это и есть цена самоотчёта. То же с навыком, который человек позвал сам
 командой `/bundle-the-work`: если вызов прошёл мимо инструмента `Skill`, хук
@@ -59,12 +61,28 @@ SKILL: Final = "bundle-the-work"
 JOURNAL: Final = Path(".claude") / "state" / "skill-runs.jsonl"
 #: Корень проекта, если окно его не назвало: каталог, где хук запущен.
 HERE: Final = "."
-#: Ключи, создающие ветку: у `checkout` и у `switch`. Имя — следующее слово.
-CREATE: Final[dict[str, frozenset[str]]] = {
-    "checkout": frozenset({"-b", "-B", "--orphan"}),
-    "switch": frozenset({"-c", "-C", "--create", "--force-create"}),
+#: Короткие ключи, создающие ветку, — буквой: имя — остаток склейки или следующее слово.
+CREATE_SHORT: Final[dict[str, str]] = {
+    "checkout": "bB",
+    "switch": "cC",
     # `git worktree add -b <ветка> <путь>` — подкоманда в два слова (взгляд на #1711).
-    "worktree add": frozenset({"-b", "-B"}),
+    "worktree add": "bB",
+}
+#: Короткие ключи с необязательным значением: оно только слитное, и остаток
+#: склейки — их значение, а не ключи (`-tb` — это `--track=b`, не `-t -b`).
+STUCK_SHORT: Final[dict[str, str]] = {"checkout": "t", "switch": "t", "worktree add": ""}
+#: Длинные ключи, создающие ветку; читаются и однозначным сокращением.
+CREATE_LONG: Final[dict[str, tuple[str, ...]]] = {
+    "checkout": ("--orphan",),
+    "switch": ("--create", "--force-create", "--orphan"),
+    "worktree add": (),
+}
+#: Настоящие длинные ключи, которые сами — начало создающего: точное имя git
+#: читает им, а не сокращением (`git switch --force agent/x` ветку не создаёт).
+EXACT_LONG: Final[dict[str, frozenset[str]]] = {
+    "checkout": frozenset(),
+    "switch": frozenset({"--force"}),
+    "worktree add": frozenset(),
 }
 #: Больше этого журнал не читается: он копится за сессию, а нужен один признак.
 LIMIT: Final = 4 * 1024 * 1024
@@ -95,22 +113,55 @@ def created(command: str) -> list[str]:
                 rest = rest[2:] if rest[0] in push_guard.GLOBAL_WITH_VALUE else rest[1:]
             if rest[:2] == ["worktree", "add"]:
                 rest = ["worktree add", *rest[2:]]
-            if not rest or rest[0] not in CREATE:
+            if not rest or rest[0] not in CREATE_SHORT:
                 continue
-            flags = CREATE[rest[0]]
-            words = rest[1:]
-            for at, word in enumerate(words):
-                name = ""
-                if word in flags and at + 1 < len(words):
-                    name = words[at + 1]
-                elif word.startswith("--") and "=" in word and word.split("=", 1)[0] in flags:
-                    name = word.split("=", 1)[1]
-                elif not word.startswith("--") and len(word) > 2 and word[:2] in flags:
-                    # Слитная короткая форма `-bagent/x`: git её принимает, и
-                    # ветка резалась молча (поздний взгляд на #1711).
-                    name = word[2:]
-                if name.startswith(push_guard.AGENT_PREFIX):
-                    found.append(name)
+            found += [
+                name
+                for name in names(rest[0], rest[1:])
+                if name.startswith(push_guard.AGENT_PREFIX)
+            ]
+    return found
+
+
+def names(command: str, words: list[str]) -> list[str]:
+    """Имена веток, которые создают ключи `words` подкоманды `command`.
+
+    РАЗБОР — ПО ПРАВИЛАМ GIT (`parse-options`), А НЕ ПО ФОРМАМ (210: третий
+    заход взгляда на #1713 по одному месту). Короткие ключи склеиваются
+    (`-qb`), и ключ со значением берёт остаток склейки (`-fbagent/x`) или,
+    если он пуст, следующее слово. Длинный ключ — полным именем или
+    сокращением, значение — после `=` или следующим словом. После `--` ключей
+    нет. Сокращение, которое git отвергнет как неоднозначное (`git switch
+    --c`), здесь читается созданием: совет тогда лишний, но нарезки нет и так.
+    """
+    found: list[str] = []
+    at = 0
+    while at < len(words):
+        word = words[at]
+        at += 1
+        if word == "--":
+            break
+        if word.startswith("--"):
+            key, eq, value = word.partition("=")
+            if key in EXACT_LONG[command] or len(key) < 4:
+                continue
+            if not any(full.startswith(key) for full in CREATE_LONG[command]):
+                continue
+            if not eq and at < len(words):
+                value = words[at]
+                at += 1
+            found.append(value)
+        elif word.startswith("-") and len(word) > 1:
+            for place, letter in enumerate(word[1:], start=2):
+                if letter in STUCK_SHORT[command]:
+                    break
+                if letter in CREATE_SHORT[command]:
+                    value = word[place:]
+                    if not value and at < len(words):
+                        value = words[at]
+                        at += 1
+                    found.append(value)
+                    break
     return found
 
 

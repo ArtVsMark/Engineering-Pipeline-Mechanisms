@@ -68,6 +68,16 @@ def call(skill: str, session: str = SESSION, outcome: str = "ok") -> dict[str, s
         ("git switch -cagent/x origin/main", ["agent/x"]),
         ("git checkout -bfix/x", []),
         ("git worktree add -b agent/x /tmp/w origin/main", ["agent/x"]),
+        ("git switch --orphan agent/x", ["agent/x"]),
+        ("git checkout -qb agent/x", ["agent/x"]),
+        ("git checkout -fbagent/x", ["agent/x"]),
+        ("git switch --cre agent/x", ["agent/x"]),
+        ("git switch --force-c=agent/x", ["agent/x"]),
+        ("git checkout --orph agent/x", ["agent/x"]),
+        ("git switch --force agent/x", []),
+        ("git checkout -tb agent/x", []),
+        ("git checkout -- -b agent/x", []),
+        ("git checkout -q agent/x", []),
         ("git worktree add /tmp/w agent/x", []),
         ("git checkout agent/x", []),
         ("git checkout -b fix/x", []),
@@ -77,7 +87,7 @@ def call(skill: str, session: str = SESSION, outcome: str = "ok") -> dict[str, s
     ],
 )
 def test_every_form_of_cutting_an_agent_branch_is_seen(command: str, branches: list[str]) -> None:
-    """Формы нарезки — `checkout -b|-B`, `switch -c`, цепочка, обёртка; текст — не нарезка."""
+    """Нарезка в любой записи разбора ключей git — склейка, сокращение; текст — не нарезка."""
     assert module.created(command) == branches
 
 
