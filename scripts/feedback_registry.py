@@ -17,6 +17,10 @@
 клон или битый раздел — не «записи нет», и день первой встречи не
 сбрасывается (045).
 
+СРОК ВЕРДИКТА — 14 ДНЕЙ (`DEADLINE`, п. 5 #1665). Запись без вердикта дольше
+срока помечена в очереди, а прогон печатает по ней предупреждение: совет, а
+не красное — исход остаётся 0.
+
 ГРАНИЦЫ НАЗВАНЫ (046). Ключ держится на имени репозитория соседа:
 переименование рвёт связь, и вердикт старого ключа назван сиротой, а не
 потерян. Задача стоит рядом с удалённой — сосед удалил запись, а вердикт
@@ -31,7 +35,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -51,6 +55,11 @@ MARKER: Final = findings.marker("feedback-registry")
 TITLE: Final = "Записи соседей о наших механизмах: очередь на вердикт"
 #: Скрытый блок первых встреч: `<!-- feedback-seen: {"ключ": "ГГГГ-ММ-ДД"} -->`.
 SEEN_RE: Final = re.compile(r"<!-- feedback-seen: (?P<json>\{.*?\}) -->", re.DOTALL)
+#: СРОК ВЕРДИКТА — 14 ДНЕЙ С ПЕРВОЙ ВСТРЕЧИ (решение владельца 26.10.2026, #1665,
+#: п. 5). Дольше — совет, а не красное: запись соседа слияния не держит (084),
+#: но молчать о ней значило бы держать соседа в нашем трекере без ответа.
+DEADLINE: Final = timedelta(days=14)
+
 #: Начало строки с днём сборки: сверка «то же состояние» её не читает.
 DATED: Final = "Собрано:"
 
@@ -156,6 +165,27 @@ def seen_now(said: Collected, before: dict[str, date], today: date) -> dict[str,
     return dict(sorted(kept.items()))
 
 
+def overdue(
+    said: Collected,
+    verdicts: dict[str, feedback_form.Verdict],
+    seen: dict[str, date],
+    today: date,
+) -> dict[str, int]:
+    """Записи без вердикта дольше срока: ключ → дней с первой встречи.
+
+    День первой встречи — из блока задачи (`seen_now`); ключа там нет — сегодня,
+    и срок не просрочен: незнание дня не делает запись старой.
+    """
+    late: dict[str, int] = {}
+    for row in said.rows:
+        if row.key in verdicts:
+            continue
+        age = today - seen.get(row.key, today)
+        if age >= DEADLINE:
+            late[row.key] = age.days
+    return late
+
+
 def render(
     said: Collected,
     verdicts: dict[str, feedback_form.Verdict],
@@ -174,6 +204,8 @@ def render(
     def first(row: Row) -> str:
         return seen.get(row.key, today).strftime("%d.%m.%Y")
 
+    late = overdue(said, verdicts, seen, today)
+
     lines = [
         MARKER,
         "",
@@ -186,14 +218,16 @@ def render(
         "",
         f"{DATED} {today.strftime('%d.%m.%Y')}.",
         "",
-        f"## Без вердикта — {len(waiting)}",
+        f"## Без вердикта — {len(waiting)}"
+        + (f", дольше срока {DEADLINE.days} дн. — {len(late)}" if late else ""),
         "",
     ]
     for row in waiting:
         one = row.record
         lines += [
             f"- `{row.key}` · `{one.mechanism}` {one.version} · "
-            f"{feedback_form.KINDS[one.kind]} · след {quoted(one.trace)} · замечено {first(row)}",
+            f"{feedback_form.KINDS[one.kind]} · след {quoted(one.trace)} · замечено {first(row)}"
+            + (f" · **без вердикта {late[row.key]} дн.**" if row.key in late else ""),
             f"  - замер: {quoted(one.measured)}",
         ]
     if not waiting:
@@ -245,7 +279,7 @@ def save(
     *,
     apply: bool,
     today: date | None = None,
-) -> None:
+) -> dict[str, int]:
     """Переписывает живую задачу по месту или заводит одну — как задача карты гейтов.
 
     Пустой реестр задачи не заводит: адресат без записей — шум. Сухой заход
@@ -256,23 +290,25 @@ def save(
     number, current = findings.live_issue(repo, token, MARKER)
     seen = seen_now(said, seen_in(current), today)
     body = render(said, verdicts, seen, today)
+    late = overdue(said, verdicts, seen, today)
     if number is None and not (said.rows or said.broken):
         print(f"{'' if apply else report.DRY + ' '}записей соседей нет — задачу реестра не завожу")
-        return
+        return late
     if number is not None and stable(current) == stable(body):
         print(f"задача реестра записей #{number} уже описывает это состояние")
-        return
+        return late
     if not apply:
         print(f"{report.DRY} {'обновил бы' if number else 'завёл бы'} задачу реестра записей")
-        return
+        return late
     if number is None:
         fresh = ghrest.request(
             "POST", f"repos/{repo}/issues", token, {"title": TITLE, "body": body}
         )
         print(f"заведена задача реестра записей #{(fresh or {}).get('number')}")
-        return
+        return late
     ghrest.request("PATCH", f"repos/{repo}/issues/{number}", token, {"body": body})
     print(f"задача реестра записей #{number} обновлена")
+    return late
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -299,7 +335,14 @@ def main(argv: list[str] | None = None) -> int:
             f"{sum(row.key in verdicts for row in said.rows)}; "
             f"не прочитано: {len(said.broken) + len(said.unread)}"
         )
-        save(args.repo, token, said, verdicts, apply=args.apply)
+        late = save(args.repo, token, said, verdicts, apply=args.apply)
+        # СОВЕТ, А НЕ КРАСНОЕ (п. 5 #1665): запись дольше срока видна в журнале
+        # прогона предупреждением, исход остаётся 0 — слияния она не держит.
+        for key, days in sorted(late.items()):
+            print(
+                f"::warning::запись соседа {key} без вердикта {days} дн. при сроке "
+                f"{DEADLINE.days} — ответьте в {paths.FEEDBACK_VERDICTS}"
+            )
     except (OSError, ValueError, NotRun, ghrest.TransportError) as exc:
         print(f"реестр записей не собран: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
