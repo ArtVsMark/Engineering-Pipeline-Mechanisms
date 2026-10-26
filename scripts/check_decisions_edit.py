@@ -88,6 +88,37 @@ LINK_TARGET_RE: Final = re.compile(
 )
 
 
+#: Разделы площадки, к которым ведёт относительный адрес. Перечень один: его же
+#: берёт гейт ссылок `tests/test_doc_links.py`, судящий подъём.
+PLATFORM: Final = (
+    "issues",
+    "pull",
+    "pulls",
+    "discussions",
+    "wiki",
+    "commit",
+    "commits",
+    "compare",
+    "tree",
+    "blob",
+    "releases",
+    "actions",
+    "labels",
+    "milestone",
+    "projects",
+)
+#: ПОДЪЁМ К ПЛОЩАДКЕ — НЕ СОДЕРЖАНИЕ РЕШЕНИЯ (#1683). Адрес `../../../issues/7`
+#: из записи решений вёл в пустоту: до задачи доходит только подъём на два
+#: больше вложенности файла (`tests/test_doc_links.py::platform_rise`), и
+#: починка меняет одно число `../`. Раздел площадки и всё, что за ним, остаются
+#: содержанием: задача вместо изменения, другой номер — по-прежнему переписывание.
+PLATFORM_LINK_RE: Final = re.compile(
+    rf"\]\((?:\./)*(?:\.\./)+(?P<rest>(?:{'|'.join(PLATFORM)})/[^)\s]*)\)"
+)
+#: На что нормализуется подъём адреса площадки.
+PLATFORM_MARK: Final = "<площадка>"
+
+
 class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «чисто»."""
 
@@ -144,7 +175,7 @@ def frozen(text: str) -> dict[str, str]:
         if current:
             sections[current].append(line.rstrip())
     return {
-        name: LINK_TARGET_RE.sub(without_folder, "\n".join(body).strip())
+        name: without_rise(LINK_TARGET_RE.sub(without_folder, "\n".join(body).strip()))
         for name, body in sections.items()
     }
 
@@ -155,6 +186,11 @@ def without_folder(link: re.Match[str]) -> str:
     if posixpath.normpath(RECORDS + folder).split("/")[0] == "..":
         return link.group(0)
     return f"]({link.group('document')})"
+
+
+def without_rise(text: str) -> str:
+    """Адреса площадки без подъёма `../`: раздел и номер остаются, число звеньев — нет."""
+    return PLATFORM_LINK_RE.sub(lambda link: f"]({PLATFORM_MARK}/{link['rest']})", text)
 
 
 def at(ref: str, path: str) -> str:

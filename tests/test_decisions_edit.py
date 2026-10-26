@@ -175,6 +175,32 @@ def test_a_platform_link_keeps_its_kind() -> None:
     assert was != now
 
 
+def test_a_platform_rise_is_not_content() -> None:
+    """Подъём к площадке чинится без переписывания: число `../` не содержание (#1683)."""
+    was = edit.frozen("## Решение\n\nСм. [#12](../../../issues/12) и [#3](../../pull/3).\n")
+    now = edit.frozen(
+        "## Решение\n\nСм. [#12](../../../../issues/12) и [#3](../../../../pull/3).\n"
+    )
+    assert was == now
+
+
+@pytest.mark.parametrize(
+    "now",
+    ["../../../../pull/12", "../../../../issues/13", "../../../../ArtVsMark/x/issues/12"],
+    ids=["другой раздел", "другой номер", "не раздел площадки"],
+)
+def test_a_platform_target_is_still_content(now: str) -> None:
+    """Раздел, номер и чужой адрес остаются содержанием: нормализован только подъём."""
+    was = edit.frozen("## Решение\n\nСм. [#12](../../../issues/12).\n")
+    assert was != edit.frozen(f"## Решение\n\nСм. [#12]({now}).\n")
+
+
+def test_without_rise_keeps_the_section_and_the_number() -> None:
+    """Подъём снят, раздел и номер на месте; чужой адрес не тронут."""
+    said = edit.without_rise("[#7](../../../issues/7) [x](../../../../ArtVsMark/x/issues/7)")
+    assert said == f"[#7]({edit.PLATFORM_MARK}/issues/7) [x](../../../../ArtVsMark/x/issues/7)"
+
+
 def test_the_link_text_is_still_content(repo: Path, run_script: RunScript) -> None:
     """Текст ссылки остаётся содержанием: его правка — переписывание."""
     done = replaced(
