@@ -190,21 +190,26 @@ def verdict(
             f"Ряд мал: завершённых заходов `{watch.workflow}` на общей ветке {read} "
             f"из {watch.runs} объявленных — запас не судится (039)."
         ]
-    code, lines = EXIT_OK, []
+    # ИСХОД — ПО СТАРШИНСТВУ, А НЕ ПО ЧИСЛУ: «запас мал» сильнее «не судится».
+    # Числом 3 больше 1, и работа без замера глушила бы предупреждение о
+    # соседней, у которой запас на исходе (взгляд на #1700).
+    low_any = unjudged = False
+    lines: list[str] = []
     for name, minutes in sorted(watched.items()):
         if name not in worst:
-            code = max(code, EXIT_UNJUDGED)
+            unjudged = True
             lines.append(f"`{name}`: в {read} заходах ни одного замера — запас не судится.")
             continue
         cell, spent = worst[name]
         share = spent / (minutes * 60)
         low = share >= watch.share
-        code = max(code, EXIT_LOW) if low else code
+        low_any = low_any or low
         mark = "⚠️ запас мал" if low else "запас есть"
         lines.append(
             f"{mark}: `{cell}` — медленнейший {clock(spent)} при пределе {minutes}:00 "
             f"({share:.0%}, порог {watch.share:.0%}, заходов {read})"
         )
+    code = EXIT_LOW if low_any else EXIT_UNJUDGED if unjudged else EXIT_OK
     return code, lines
 
 

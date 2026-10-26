@@ -189,3 +189,11 @@ def test_main_writes_the_section_and_names_the_outcome(
     assert module.main(unwritable) == module.EXIT_BROKEN, "неписаный отчёт выдан за «запас мал»"
     bare = tree(tmp_path / "bare", declared=False)
     assert module.main(["--repo", "o/r", "--root", str(bare)]) == module.EXIT_UNJUDGED
+
+
+def test_a_low_headroom_outranks_a_job_without_samples() -> None:
+    """Запас мал у одной работы, у другой нет замера — исход 1, а не 3 (взгляд на #1700)."""
+    watched = {"test-matrix": 10, "test-next": 10}
+    code, lines = module.verdict(watch(), watched, {"test-matrix": ("test-matrix (3.14)", 600)}, 2)
+    assert code == module.EXIT_LOW, lines
+    assert any("ни одного замера" in one for one in lines)
