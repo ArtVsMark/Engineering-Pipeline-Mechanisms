@@ -54,7 +54,6 @@ from pathlib import Path
 from typing import Any, Final
 
 import ghrest
-import onboard
 import paths
 import pipeline_checks as policy
 import yaml
@@ -147,6 +146,19 @@ def limits(workflow_text: str, jobs: tuple[str, ...]) -> dict[str, int]:
     return found
 
 
+def expression() -> re.Pattern[str]:
+    """Образец выражения площадки — один на дерево, `onboard.EXPRESSION` (214).
+
+    ИМПОРТ — ЗДЕСЬ, А НЕ В ШАПКЕ МОДУЛЯ (взгляд на #1707). Ради одного образца
+    `onboard` тянет десяток модулей проекта, и отказ любого из них при загрузке
+    сторожа выходил кодом 1 — «запас мал» — в обход `guarded`. Внутри функции
+    тот же отказ случается уже под `guarded` и становится исходом 2.
+    """
+    import onboard
+
+    return onboard.EXPRESSION
+
+
 def shape_of(name: str) -> re.Pattern[str]:
     """Имя работы как образец записи площадки: выражение `${{ … }}` — любое значение.
 
@@ -155,9 +167,9 @@ def shape_of(name: str) -> re.Pattern[str]:
     совпадало ни с одной записью — сторож навсегда отвечал «не судится», не
     назвав причины.
     """
-    # Выражение узнаёт один образец — `onboard.EXPRESSION` (214).
+    # Выражение узнаёт один образец — `expression()` (214).
     pattern, last = "", 0
-    for found in onboard.EXPRESSION.finditer(name):
+    for found in expression().finditer(name):
         pattern += re.escape(name[last : found.start()]) + ".+?"
         last = found.end()
     return re.compile(pattern + re.escape(name[last:]))
@@ -172,7 +184,7 @@ def owner_of(job_name: str, watched: dict[str, int]) -> str:
     for name in watched:
         if job_name == name or job_name.startswith(f"{name} ("):
             return name
-        if onboard.EXPRESSION.search(name) and shape_of(name).fullmatch(job_name):
+        if expression().search(name) and shape_of(name).fullmatch(job_name):
             return name
     return ""
 
@@ -311,8 +323,13 @@ def guarded(argv: list[str] | None = None) -> int:
     Перечень ловимых (`TransportError`, `ValueError`) чинил форму и пропускал
     следующую — `AttributeError` пустого ответа, `KeyError` записи площадки.
     Здесь любое исключение после загрузки модуля — исход 2 с трассой (039).
-    Граница: отказ ИМПОРТА (`yaml`) случается до этой функции и выходит кодом 1;
-    его держит гейт установки шагов (`tests/test_steps_install_what_they_import.py`).
+    Граница: отказ ИМПОРТА из шапки модуля — `yaml`, `ghrest`, `paths`,
+    `pipeline_checks` и то, что тянут они сами, — случается до этой функции и
+    выходит кодом 1. Внешний `yaml` держит гейт установки шагов
+    (`tests/test_steps_install_what_they_import.py`); свои модули шапки — то,
+    без чего сторож не читает и объявления, их загрузку проверяет любой прогон
+    тестов. Тяжёлый `onboard` из шапки вынесен (`expression`), и его отказ —
+    уже под этой функцией.
     """
     try:
         return main(argv)

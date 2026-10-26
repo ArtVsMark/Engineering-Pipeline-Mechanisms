@@ -7,6 +7,7 @@
 """
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -129,6 +130,23 @@ def test_any_exception_is_a_refusal_not_a_low_headroom(
         module.main(argv)
     assert module.guarded(argv) == module.EXIT_BROKEN
     assert "не находка о запасе" in capsys.readouterr().err
+
+
+def test_a_broken_onboard_is_a_refusal_not_a_low_headroom(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ загрузки `onboard` — под `guarded`, исход 2, а не 1 «запас мал» (#1707).
+
+    `onboard` тянет десяток модулей проекта; импорт в шапке сторожа выводил
+    отказ любого из них кодом 1 мимо точки входа.
+    """
+    text = (ROOT / "scripts" / "headroom.py").read_text(encoding="utf-8")
+    assert "\nimport onboard\n" not in text, "onboard снова грузится в шапке модуля"
+    monkeypatch.setitem(sys.modules, "onboard", None)
+    with pytest.raises(ImportError):
+        module.shape_of("test (${{ matrix.py }})")
+    monkeypatch.setattr(module, "main", lambda _argv: module.shape_of("${{ x }}") and 0)
+    assert module.guarded([]) == module.EXIT_BROKEN
 
 
 def test_the_script_enters_through_the_guard() -> None:
