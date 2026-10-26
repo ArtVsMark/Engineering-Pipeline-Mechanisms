@@ -249,22 +249,28 @@ def test_a_neighbours_text_cannot_forge_a_marker_a_days_block_or_a_heading() -> 
 
 
 def test_a_record_without_a_verdict_past_the_deadline_is_marked() -> None:
-    """14 дней без вердикта — пометка в очереди; 13 — нет; вердикт снимает срок (п. 5 #1665)."""
+    """Дольше 14 дней без вердикта — пометка; ровно 14 — нет; вердикт снимает срок (п. 5 #1665)."""
     said = module.collected(
         uptake(
             {"repo": "o/a", "records": [record("old"), record("young"), record("done")]},
         )
     )
     seen = {
-        "o/a:false-refusal/old": TODAY - module.DEADLINE,
-        "o/a:false-refusal/young": TODAY - module.DEADLINE + timedelta(days=1),
+        "o/a:false-refusal/old": TODAY - module.DEADLINE - timedelta(days=1),
+        "o/a:false-refusal/young": TODAY - module.DEADLINE,
         "o/a:false-refusal/done": date(2026, 1, 1),
     }
     verdicts = {"o/a:false-refusal/done": form.Verdict("fixed", "v1.12.0")}
-    assert module.overdue(said, verdicts, seen, TODAY) == {"o/a:false-refusal/old": 14}
+    assert module.overdue(said, verdicts, seen, TODAY) == {"o/a:false-refusal/old": 15}
     body = module.render(said, verdicts, seen, TODAY)
     assert "дольше срока 14 дн. — 1" in body
-    assert body.count("**без вердикта") == 1 and "**без вердикта 14 дн.**" in body
+    assert body.count("**без вердикта дольше срока**") == 1
+    # Назавтра у уже просроченной записи состояние то же: число дней в тело не
+    # идёт, и сверка не переписывает задачу каждую ночь (взгляд на #1712).
+    late = module.collected(uptake({"repo": "o/a", "records": [record("old")]}))
+    today = module.render(late, {}, seen, TODAY)
+    tomorrow = module.render(late, {}, seen, TODAY + timedelta(days=1))
+    assert module.stable(tomorrow) == module.stable(today)
     assert module.overdue(said, verdicts, {}, TODAY) == {}, "день неизвестен — не просрочено"
 
 

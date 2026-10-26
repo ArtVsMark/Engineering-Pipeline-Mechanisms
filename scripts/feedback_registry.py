@@ -181,7 +181,7 @@ def overdue(
         if row.key in verdicts:
             continue
         age = today - seen.get(row.key, today)
-        if age >= DEADLINE:
+        if age > DEADLINE:
             late[row.key] = age.days
     return late
 
@@ -227,7 +227,10 @@ def render(
         lines += [
             f"- `{row.key}` · `{one.mechanism}` {one.version} · "
             f"{feedback_form.KINDS[one.kind]} · след {quoted(one.trace)} · замечено {first(row)}"
-            + (f" · **без вердикта {late[row.key]} дн.**" if row.key in late else ""),
+            # Пометка без числа дней (взгляд на #1712): число менялось бы каждые
+            # сутки, и сверка «то же состояние» переписывала бы задачу каждую
+            # ночь; дни называет предупреждение прогона.
+            + (" · **без вердикта дольше срока**" if row.key in late else ""),
             f"  - замер: {quoted(one.measured)}",
         ]
     if not waiting:
