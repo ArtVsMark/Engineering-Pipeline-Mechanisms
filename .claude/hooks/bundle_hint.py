@@ -35,9 +35,11 @@
 ГРАНИЦЫ НАЗВАНЫ. Ловится нарезка `git checkout -b|-B|--orphan`, `git switch
 -c|-C` (и длинные `--create`, `--force-create`) и `git worktree add -b|-B` с
 именем `agent/…`; ветка, созданная `git branch` и потом взятая, — нет: она ещё
-не работа. Навык, прочитанный
+не работа. Короткий ключ читается и слитно (`-bagent/x`). Навык, прочитанный
 файлом, а не позванный инструментом, журнал не видит, и совет тогда придёт —
-это и есть цена самоотчёта.
+это и есть цена самоотчёта. То же с навыком, который человек позвал сам
+командой `/bundle-the-work`: если вызов прошёл мимо инструмента `Skill`, хук
+журнала его не записал, и совет будет ложным — пропустите его.
 
 Вход: JSON события PreToolUse на stdin. Выход: всегда 0; совет — JSON на stdout.
 """
@@ -103,6 +105,10 @@ def created(command: str) -> list[str]:
                     name = words[at + 1]
                 elif word.startswith("--") and "=" in word and word.split("=", 1)[0] in flags:
                     name = word.split("=", 1)[1]
+                elif not word.startswith("--") and len(word) > 2 and word[:2] in flags:
+                    # Слитная короткая форма `-bagent/x`: git её принимает, и
+                    # ветка резалась молча (поздний взгляд на #1711).
+                    name = word[2:]
                 if name.startswith(push_guard.AGENT_PREFIX):
                     found.append(name)
     return found
