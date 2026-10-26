@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from tests.conftest import load_script
+from tests.test_portable import ANSWERS
 
 census = load_script("portable_census.py")
 release = load_script("release.py")
@@ -57,6 +58,20 @@ def test_the_section_counts_the_scale_and_marks_fresh_ours() -> None:
     assert "- `a`: as-is → ours" in said and "- `d`: — → as-is" in said
     assert "ушли из переписи: `c`" in said
     assert "**Каналы переноса без прогона:** `whole-port`" in said
+
+
+def test_the_table_rows_add_up_to_the_total() -> None:
+    """Строки таблицы складываются в итог: неотвеченное — своя строка, а не пропажа (`99c6b30`)."""
+    now = census.parsed(json.dumps(answers(a="as-is", b="unreviewed", c="ours")), "сейчас")
+    said = census.section(now, None, None)
+    assert "| `unreviewed` | 1 | — |" in said
+    rows = [line for line in said if line.startswith("| `")]
+    assert sum(int(line.split("|")[2]) for line in rows) == len(now.answers)
+
+
+def test_the_scale_is_the_gate_scale() -> None:
+    """Шкала раздела — та же, что допускает гейт формы переписи."""
+    assert set(census.SCALE) == ANSWERS
 
 
 def test_a_broken_census_is_refused_with_its_place() -> None:

@@ -666,7 +666,7 @@ def born_rows(
     taken: frozenset[int] = frozenset(),
     listed: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    """Строки раздела 4 для задач, рождённых работой по строкам разделов 4 и 6.
+    """Строки раздела 4 для задач, рождённых работой по строкам раздела 4.
 
     РЕШЕНИЕ ВЛАДЕЛЬЦА 24.09.2026 (#747): задача, заведённая по ходу работы над
     строкой ручного раздела, встаёт в раздел 4 сама. Иначе её не видит
@@ -674,11 +674,18 @@ def born_rows(
 
     РОДИЛАСЬ — ЗНАЧИТ СВЯЗАНА СО СТРОКОЙ: связью (`Refs`/`Closes`/`Part of
     #X` в теле — тем же разбором, что у изменений) или подзадачей X, где X —
-    адрес строки раздела 4 или 6. Ссылка на живые задачи-адресаты (план,
+    адрес строки раздела 4. Ссылка на живые задачи-адресаты (план,
     реестры) рождением не считается: их в этих разделах нет, а `Refs #639`
     несёт почти каждая задача. Задача, уже стоящая в разделе 4 или 6, второй
     раз не добавляется; добавленная становится обычной строкой — дальше её
     сохраняет и снимает тот же порядок, что руку, а её дети встают следом.
+
+    РОДИТЕЛЬ — ТОЛЬКО СТРОКА РАЗДЕЛА 4 (находка `a0396aa`, решение владельца
+    25.10.2026, #1655: «4 — работаем, 6 — ждём»). С #1655 в раздел 6 дописана
+    вся открытая работа (`queued_rows`), и родитель из него вёл ребёнка ждущей
+    задачи в «Работаем сейчас». Ребёнок ждущей ждёт с ней: его, как любую
+    открытую задачу вне плана, дописывает в раздел 6 `queued_rows`. Заодно
+    `sub_issues` спрашивается по строкам 4, а не по всей очереди 6 (`d6fd57f`).
 
     Порядок внутри раздела ставит владелец: механизм ставит строку последней в
     её группе (`grouped`, #1504).
@@ -701,18 +708,24 @@ def born_rows(
     выражается тем, что сборщик читает: строку переносят в раздел 6 (повтор
     отсекается и там), закрывают задачу либо снимают связь в её теле.
     """
-    parents = {
-        int(address[1:])
+    standing = {
+        one: {
+            int(address[1:])
+            for line in held.get(one, [])
+            if line.startswith("- ") and (address := address_of(line)).startswith("#")
+        }
         for one in HELD
-        for line in held.get(one, [])
-        if line.startswith("- ") and (address := address_of(line)).startswith("#")
     }
+    parents = standing.get(BORN_INTO, set())
     if not parents:
         return []
+    # Второй раз не встаёт задача, стоящая в ЛЮБОМ ручном разделе, — родитель
+    # же только из раздела 4.
+    taken = taken | {number for numbers in standing.values() for number in numbers}
     found: dict[int, tuple[str, int]] = {}
     opened = findings.open_listed(repo, token) if listed is None else listed
     for issue in opened:
-        if not may_be_born(issue, repo, parents | taken):
+        if not may_be_born(issue, repo, taken):
             continue
         links = changerefs.links_in(str(issue.get("body") or ""))
         linked = [link.number for link in links if link.number in parents]
@@ -720,7 +733,7 @@ def born_rows(
             found.setdefault(int(issue["number"]), (str(issue.get("title") or ""), linked[0]))
     for parent in sorted(parents):
         for issue in ghrest.paginate(f"repos/{repo}/issues/{parent}/sub_issues", token):
-            if may_be_born(issue, repo, parents | taken):
+            if may_be_born(issue, repo, taken):
                 found.setdefault(int(issue["number"]), (str(issue.get("title") or ""), parent))
     return [
         f"- **#{number}** — {title} *({BORN_TAIL} #{parent})*"

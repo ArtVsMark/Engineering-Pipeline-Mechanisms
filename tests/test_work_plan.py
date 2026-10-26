@@ -705,9 +705,10 @@ HELD_ROWS: dict[int, list[str]] = {
 
 
 def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Задача, связанная со строкой раздела 4 или 6, встаёт в раздел 4 (#747).
+    """Задача, связанная со строкой раздела 4, встаёт в раздел 4 (#747).
 
-    Связь — телом (`Refs #642`) или подзадачей (#640). Не встают: уже стоящая
+    Связь — телом (`Refs #640`) или подзадачей (#640). Строка раздела 6 —
+    ждущее, и её ребёнок рождённым не считается (`a0396aa`, #1655). Не встают: уже стоящая
     в плане (в том числе в собранном разделе), ссылающаяся только на план или
     реестр, изменение, закрытая подзадача, подзадача чужого хранилища, живая
     задача механизма со связью в теле и ссылка на номер из строки-находки
@@ -715,14 +716,15 @@ def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPa
     """
     paginate, _ = born_platform(
         [
-            {"number": 750, "title": "дыра инвентаря", "body": "Нашлось.\n\nRefs #642"},
+            {"number": 750, "title": "дыра инвентаря", "body": "Нашлось.\n\nRefs #640"},
             {"number": 642, "title": "инвентарь", "body": "Refs #640"},
             {"number": 752, "title": "чужая", "body": "Refs #639\nRefs #23"},
-            {"number": 753, "title": "изменение", "body": "Refs #642", "pull_request": {}},
-            {"number": 755, "title": "реестр", "body": f"{module.findings.marker('x')}\nrefs #642"},
-            {"number": 756, "title": "план", "body": f"{module.MARKER}\nRefs #642"},
+            {"number": 753, "title": "изменение", "body": "Refs #640", "pull_request": {}},
+            {"number": 755, "title": "реестр", "body": f"{module.findings.marker('x')}\nrefs #640"},
+            {"number": 756, "title": "план", "body": f"{module.MARKER}\nRefs #640"},
             {"number": 757, "title": "по находке", "body": "Refs #635"},
-            {"number": 758, "title": "уже в разделе 5", "body": "Refs #642"},
+            {"number": 758, "title": "уже в разделе 5", "body": "Refs #640"},
+            {"number": 763, "title": "дитя ждущей", "body": "Refs #642"},
         ],
         {
             640: [
@@ -758,10 +760,37 @@ def test_a_task_born_in_the_work_joins_section_four(monkeypatch: pytest.MonkeyPa
     )
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     assert module.born_rows("o/r", "t", HELD_ROWS, frozenset({758})) == [
-        f"- **#750** — дыра инвентаря *({module.BORN_TAIL} #642)*",
+        f"- **#750** — дыра инвентаря *({module.BORN_TAIL} #640)*",
         f"- **#751** — подзадача сборщика *({module.BORN_TAIL} #640)*",
         f"- **#761** — своя в другом регистре *({module.BORN_TAIL} #640)*",
     ]
+
+
+def test_a_child_of_a_waiting_row_is_not_born_and_its_parent_not_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Строка раздела 6 — не родитель: ребёнок не рождён, подзадачи её не спрошены (`a0396aa`).
+
+    Две сборки подряд сводятся к этому: строку, дописанную в очередь 6 на
+    первой, вторая родителем уже не сочтёт (`4b3143e`, `d6fd57f`).
+    """
+    paginate, asked = born_platform(
+        [{"number": 763, "title": "дитя ждущей", "body": "Refs #642"}],
+        {
+            642: [
+                {
+                    "number": 764,
+                    "title": "подзадача ждущей",
+                    "state": "open",
+                    "repository_url": HOME,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    held = {4: ["*курсив*"], 6: ["- **#642** — инвентарь переносимого"]}
+    assert module.born_rows("o/r", "t", held) == []
+    assert not [one for one in asked if one.endswith("/sub_issues")]
 
 
 def test_without_rows_nothing_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -775,11 +804,11 @@ def test_without_rows_nothing_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_born_task_lands_at_the_end_of_section_four(monkeypatch: pytest.MonkeyPatch) -> None:
     """Сквозь сборку: рождённая задача — последней строкой раздела 4, раздел 6 цел."""
     written = quiet_platform(monkeypatch)
-    paginate, _ = born_platform([{"number": 750, "title": "дыра", "body": "Refs #642"}], {})
+    paginate, _ = born_platform([{"number": 750, "title": "дыра", "body": "Refs #640"}], {})
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
     four = module.rows_of(written[0], module.HEADS[4])
-    assert four[-1] == f"- **#750** — дыра *({module.BORN_TAIL} #642)*"
+    assert four[-1] == f"- **#750** — дыра *({module.BORN_TAIL} #640)*"
     assert "#750" not in "\n".join(module.rows_of(written[0], module.HEADS[6]))
 
 
