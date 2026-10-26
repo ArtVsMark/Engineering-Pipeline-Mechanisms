@@ -381,6 +381,17 @@ def test_kirillicheskiy_klyuch_ryadom_s_treylerami_hvost_ne_lomaet() -> None:
     assert ca.COAUTHOR.findall(ca.tail(сообщение)) == ["Claude <noreply@anthropic.com>"]
 
 
+def test_hvost_strokami_eto_poslednij_abzac_iz_par() -> None:
+    """`tail_lines` — блок строками; пробел после двоеточия обязателен, отступ — проза (#1709)."""
+    assert ca.tail_lines("Т\n\nRefs #1\n\nНавык: x\nCo-Authored-By: К <k@e>\n") == [
+        "Навык: x",
+        "Co-Authored-By: К <k@e>",
+    ]
+    assert ca.tail_lines("Т\n\nСм:#12\nCo-Authored-By: К <k@e>") == []
+    assert ca.tail_lines("Т\n\n  Co-Authored-By: К <k@e>") == []
+    assert ca.tail_lines("Т\n \nCo-Authored-By: К <k@e>") == ["Co-Authored-By: К <k@e>"]
+
+
 def test_proza_v_tele_ne_otvergaet_izmenenie(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """ГЕЙТ, А НЕ РЕГУЛЯРКА (150): случай спрашивает решение гейта на живом
     коммите, чьё тело объясняет атрибуцию словами. Именно так и вышло 30
