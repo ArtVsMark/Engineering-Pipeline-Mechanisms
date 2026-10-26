@@ -239,9 +239,78 @@ def test_write_issue_reads_the_built_map_and_saves_it(
     out = tmp_path / "map.json"
     out.write_text(json.dumps(module.document(summary(), OURS)), encoding="utf-8")
     seen: list[bool] = []
-    monkeypatch.setattr(module, "save", lambda repo, token, said, *, apply: seen.append(apply))
+    given: list[Any] = []
+
+    def save(repo: str, token: str, said: Any, *, apply: bool, reasons: Any = None) -> None:
+        seen.append(apply)
+        given.append(reasons)
+
+    monkeypatch.setattr(module, "save", save)
     monkeypatch.setenv("GH_TOKEN", "t")
     assert module.write_issue(out, OURS, apply=True) == module.EXIT_OK and seen == [True]
+    # Файл обхода: исправный даёт причины, битый — карту без причин, а не отказ (084).
+    uptake = tmp_path / "uptake.json"
+    uptake.write_text('{"feedback": []}', encoding="utf-8")
+    assert module.write_issue(out, OURS, apply=True, uptake=uptake) == module.EXIT_OK
+    assert given[-1] == {}
+    uptake.write_text("{не JSON", encoding="utf-8")
+    assert module.write_issue(out, OURS, apply=True, uptake=uptake) == module.EXIT_OK
+    assert given[-1] is None
     monkeypatch.delenv("GH_TOKEN")
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     assert module.write_issue(out, OURS, apply=False) == module.EXIT_BROKEN
+
+
+def test_a_rework_row_takes_its_reason_from_the_neighbours_record() -> None:
+    """Очередь `rework` берёт причину из записи соседа о том же механизме (п. 7 #1665).
+
+    Свод по соседу и пути: `origin` строки — `репозиторий:путь@тег`, у записи —
+    путь. Нет записи — «причины в канале нет»; канал не дан — без хвоста (045).
+    """
+    record = {
+        "slug": "x",
+        "mechanism": "scripts/a.py",
+        "version": "v1.0.0",
+        "kind": "rework",
+        "measured": "нужен вход <путь>",
+        "trace": "o/n#4",
+    }
+    reasons = module.reasons_from({"feedback": [{"repo": "O/N", "records": [record]}]})
+    rows = [
+        {"rule": "001", "repo": "o/n", "where": "x", "origin": f"{OURS}:scripts/a.py@v1.0.0"},
+        {"rule": "002", "repo": "o/m", "where": "y", "origin": f"{OURS}:scripts/a.py@v1.0.0"},
+    ]
+    said = {"queues": {"rework": rows, "spread": [], "propose": []}, "held": {}}
+    body = module.render_issue(said, reasons)
+    first, second = [line for line in body.splitlines() if line.startswith("- 00")]
+    assert "причина: доработка" in first and "нужен вход &lt;путь&gt; (o/n#4)" in first
+    assert second.endswith("причины в канале нет")
+    assert "причин" not in module.render_issue(said)
+    assert module.reason_of(rows[0], None) == "", "канал не дан — хвоста нет"
+    assert module.reason_of(rows[1], reasons) == " · причины в канале нет"
+
+
+@pytest.mark.parametrize(
+    ("mechanism", "path"),
+    [
+        ("scripts/a.py", "scripts/a.py"),
+        ("step-journal", ".github/workflows/step-journal.yml"),
+        (".claude/skills/x", ".claude/skills/x/SKILL.md"),
+        (".claude/hooks/push_guard.py", ".claude/hooks/push_guard.py"),
+    ],
+)
+def test_a_reason_is_found_for_every_form_of_mechanism(mechanism: str, path: str) -> None:
+    """Шаг — именем, навык — каталогом, скрипт — путём: причина находится у каждой формы."""
+    record = {
+        "slug": "x",
+        "mechanism": mechanism,
+        "version": "v1.0.0",
+        "kind": "rework",
+        "measured": "нужен вход",
+        "trace": "o/n#4",
+    }
+    reasons = module.reasons_from({"feedback": [{"repo": "o/n", "records": [record]}]})
+    row = {"rule": "001", "repo": "o/n", "origin": f"{OURS}:{path}@v1.0.0"}
+    assert "причина: доработка" in module.reason_of(row, reasons)
+    stranger = {**row, "origin": f"{OURS}:scripts/b.py@v1.0.0"}
+    assert module.reason_of(stranger, reasons) == " · причины в канале нет"

@@ -195,6 +195,9 @@
     ".claude/skills/restart-the-window": {
       "answer": "as-is"
     },
+    ".claude/skills/tell-the-supplier": {
+      "answer": "as-is"
+    },
     ".claude/skills/rulebook-reread": {
       "answer": "as-is"
     },
@@ -942,6 +945,7 @@
     "scripts/release.py": {
       "answer": "configured",
       "where": [
+        ".rules/feedback-verdicts.json",
         "docs/dev/release.md"
       ]
     },

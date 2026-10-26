@@ -141,3 +141,26 @@ def test_every_broken_verdict_is_refused_with_its_key(data: Any, said: str) -> N
     """Отклонение без причины, чужой исход, не тег, дубль самого себя — отказ с ключом (154)."""
     with pytest.raises(module.NotRun, match=said):
         module.verdicts_of(data)
+
+
+def test_we_are_the_first_consumer_of_our_own_channel() -> None:
+    """Наш ответ несёт записи о механизмах каталога той же формы, что у соседа (п. 8 #1665)."""
+    records, why = policy.feedback_said((ROOT / ".pipeline.yml").read_text(encoding="utf-8"))
+    assert why == "" and records, "раздел feedback: нашего ответа пуст или не разобран"
+
+
+def test_the_kit_answer_carries_the_section_as_a_comment() -> None:
+    """Заготовка ответа несёт образец раздела комментарием: пустая запись — тоже запись (п. 9)."""
+    onboard = load_script("onboard.py")
+    said = onboard.answer(["lint"], span=">=1.0,<2")
+    assert "# feedback:" in said and "tell-the-supplier" in said
+    assert policy.feedback_said(said) == ([], ""), "образец объявил раздел, а не показал его"
+
+
+def test_a_mechanism_names_its_file_and_only_it() -> None:
+    """Шаг — свой файл прогона, навык — свой каталог: соседний по началу имени — не он."""
+    assert module.names_path("step-journal", ".github/workflows/step-journal.yml")
+    assert not module.names_path("step-journal", ".github/workflows/step-journal-x.yml")
+    assert module.names_path(".claude/skills/x", ".claude/skills/x/SKILL.md")
+    assert not module.names_path(".claude/skills/x", ".claude/skills/xy/SKILL.md")
+    assert not module.names_path("scripts/a.py", "scripts/a.pyc")
