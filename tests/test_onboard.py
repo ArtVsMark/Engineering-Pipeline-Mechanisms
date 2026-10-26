@@ -1266,13 +1266,33 @@ def test_a_dormant_area_table_is_named_until_the_role_is_declared(tmp_path: Path
     """Таблица областей без объявленной роли — названная спячка; роль объявлена — тишина."""
     assert module.dormant_areas_note(tmp_path) == "", "таблицы нет — и говорить не о чем"
     module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
-    said = module.dormant_areas_note(tmp_path)
-    assert "спит" in said and module.ROLE_PILOT in said
+    assert module.dormant_areas_note(tmp_path) == "", "скелет объявляет роль с раскатки (#1277)"
+    # Подключённый раньше проект: своя таблица ролей без роли — таблица спит.
     roles = tmp_path / module.paths.REVIEW_ROLES
     table = json.loads(roles.read_text(encoding="utf-8"))
+    table["required"] = ["тестировщик"]
+    roles.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
+    said = module.dormant_areas_note(tmp_path)
+    assert "спит" in said and module.ROLE_HOME in said
+    assert "не объявлена" in said and "нет профиля" not in said, said
     table["by_path"] = [{"paths": ["**/*"], "roles": [module.review_map.CATALOGUE_ROLE]}]
     roles.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
     assert module.dormant_areas_note(tmp_path) == ""
+
+
+def test_a_declared_role_without_a_profile_still_sleeps(tmp_path: Path) -> None:
+    """Роль объявлена, а профиля нет — тоже спячка: взгляд узнаёт роль по профилю (взгляд на #1696).
+
+    Подключённый раньше проект держит свою карту профилей: `--update` её не
+    переписывает, и одна строка в `required` оставила бы находки роли без роли.
+    """
+    module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
+    profiles = tmp_path / module.paths.ROLES
+    text = profiles.read_text(encoding="utf-8")
+    head = text.index("### 📜 Правила каталога")
+    profiles.write_text(text[:head], encoding="utf-8")
+    said = module.dormant_areas_note(tmp_path)
+    assert "спит" in said and "нет профиля" in said and "не объявлена" not in said, said
 
 
 def test_the_dormant_note_reads_the_consumers_path_table(tmp_path: Path) -> None:
@@ -1358,8 +1378,8 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
     kit = module.data_kit(ROOT, "o/r")
     table = review_map.table_shape(json.loads(kit[Path(".rules/review-roles.json")]))
     # ПУТЬ ЦЕЛИКОМ: заготовка → `role_declared` → `area_table` → `narrow`
-    # (находки `5f1a15d`, `72d2c49`). Скелет роль не объявляет — её пилот у
-    # механизмов (#1277), — и таблица спит; объявленная роль будит её.
+    # (находки `5f1a15d`, `72d2c49`). Скелет объявляет роль с раскатки (#1277);
+    # без роли таблица спит, объявленная роль будит её.
     shown = dict(kit)
 
     def shown_from_base(_: str, path: Path) -> str:
@@ -1371,12 +1391,16 @@ def test_the_live_data_kit_is_what_the_review_map_reads(
         return str(shown[Path(path)])
 
     monkeypatch.setattr(review_map, "shown_from_base", shown_from_base)
-    assert not review_map.role_declared("main"), "скелет объявил роль до раскатки (#1277)"
-    declared = {**table, "required": [*table["required"], review_map.CATALOGUE_ROLE]}
-    shown[Path(".rules/review-roles.json")] = json.dumps(declared, ensure_ascii=False)
-    assert review_map.role_declared("main"), "объявленная роль не видна карте"
+    assert review_map.role_declared("main"), "скелет не объявил роль после раскатки (#1277)"
+    assert review_map.declares_role(table), "скелет не объявил роль"
+    silent = {
+        **table,
+        "required": [one for one in table["required"] if one != review_map.CATALOGUE_ROLE],
+    }
+    shown[Path(".rules/review-roles.json")] = json.dumps(silent, ensure_ascii=False)
+    assert not review_map.role_declared("main"), "снятая роль видна карте"
+    shown[Path(".rules/review-roles.json")] = kit[Path(".rules/review-roles.json")]
     assert review_map.declares_role({"by_path": [{"roles": [review_map.CATALOGUE_ROLE]}]})
-    assert not review_map.declares_role(table), "скелет объявил роль"
     table_of_areas = review_map.area_table("main")
     # НЕЗАПОЛНЕННАЯ ЗАГОТОВКА НЕ СУЖАЕТ РОЛЬ (взгляд на #1455): правило с любой
     # областью заготовки отдаётся роли на любом пути — как без таблицы.

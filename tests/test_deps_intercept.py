@@ -7,7 +7,7 @@
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -820,14 +820,21 @@ def test_an_already_lifted_action_is_named_so(stand: Path, monkeypatch: pytest.M
 WATCHED = "src/restore.ts"
 
 
-def watch_stand(work: Path, read_at: str = SHA_OLD, watched: tuple[str, ...] = (WATCHED,)) -> None:
+def watch_stand(
+    work: Path,
+    read_at: str = SHA_OLD,
+    watched: tuple[str, ...] = (WATCHED,),
+    ignore: str | None = None,
+) -> None:
     """Стенд со слежкой: `actions/checkout` следит за каждым из `watched` с `read_at`."""
     (work / module.paths.VENDOR_WATCH).parent.mkdir(parents=True, exist_ok=True)
+    noise = "" if ignore is None else f'      "ignore": {module.json.dumps(ignore)},\n'
     entries = ",\n".join(
         "    {\n"
         '      "dep": "actions/checkout",\n'
         f'      "path": "{one}",\n'
         f'      "read_at": "{read_at}",\n'
+        f"{noise}"
         '      "by": "tests/x.py::Y"\n'
         "    }"
         for one in watched
@@ -840,13 +847,29 @@ def watch_stand(work: Path, read_at: str = SHA_OLD, watched: tuple[str, ...] = (
     git(work, "push", "--quiet", "origin", "HEAD:main")
 
 
-def vendor(monkeypatch: pytest.MonkeyPatch, compare: Any, said: list[tuple[str, str]]) -> None:
-    """Площадка с поставщиком: тег — `SHA_NEW`, `compare` — данный ответ, запись — в `said`."""
+def vendor(
+    monkeypatch: pytest.MonkeyPatch,
+    compare: Any,
+    said: list[tuple[str, str]],
+    files: dict[str, Any] | None = None,
+) -> None:
+    """Площадка с поставщиком: тег — `SHA_NEW`, `compare` — данный ответ, запись — в `said`.
+
+    `files` — ответ `contents` по коммиту: строка — текст файла, иное — ответ как есть.
+    """
 
     def ask(method: str, path: str, token: str, body: Any = None) -> Any:
         if method == "GET" and "/compare/" in path:
             said.append((method, path))
             return compare
+        if method == "GET" and "/contents/" in path:
+            said.append((method, path))
+            ref = path.rpartition("?ref=")[2]
+            one = (files or {}).get(ref)
+            if isinstance(one, str):
+                encoded = module.base64.b64encode(one.encode()).decode()
+                return {"encoding": "base64", "content": encoded}
+            return one
         if method == "GET":
             return {"sha": SHA_NEW}
         said.append((method, path))
@@ -951,6 +974,106 @@ def test_one_touched_watch_of_two_moves_neither(
         module.follow(stand, "actions/checkout", SHA_NEW, "t")
 
 
+# --- строки-шум слежки (#1689) ---
+
+#: Файл поставщика до и после: меняется версия CLI, вызов и условие — как были.
+BEFORE: Final = 'const version = "2.1.305";\nif (base) {\n  restore(base);\n}\n'
+NOISE: Final = r"^\s*const version = "
+
+
+def test_a_file_differing_only_in_noise_moves_the_watch(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Тронут, но разошлись только строки `ignore` — `read_at` сдвинут, файлы спрошены оба."""
+    watch_stand(stand, ignore=NOISE)
+    said: list[tuple[str, str]] = []
+    after = BEFORE.replace("2.1.305", "2.1.310")
+    vendor(monkeypatch, ahead(WATCHED), said, {SHA_OLD: BEFORE, SHA_NEW: after})
+    planned = module.follow(stand, "actions/checkout", SHA_NEW, "t")
+    assert f'"read_at": "{SHA_NEW}"' in planned[module.paths.VENDOR_WATCH]
+    asked = {one[1] for one in said if "/contents/" in one[1]}
+    assert asked == {
+        f"repos/actions/checkout/contents/{WATCHED}?ref={SHA_OLD}",
+        f"repos/actions/checkout/contents/{WATCHED}?ref={SHA_NEW}",
+    }
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        BEFORE.replace("if (base)", "if (base && trusted)"),
+        BEFORE.replace("2.1.305", "2.1.310").replace("  restore(base);\n", ""),
+    ],
+    ids=["условие", "шум-и-вызов"],
+)
+def test_a_change_beyond_the_noise_still_refuses(
+    stand: Path, monkeypatch: pytest.MonkeyPatch, after: str
+) -> None:
+    """Разошлось что-то кроме строк `ignore` — отказ с адресом, как без поля."""
+    watch_stand(stand, ignore=NOISE)
+    vendor(monkeypatch, ahead(WATCHED), [], {SHA_OLD: BEFORE, SHA_NEW: after})
+    with pytest.raises(module.Refused, match=f"тронут {WATCHED}"):
+        module.follow(stand, "actions/checkout", SHA_NEW, "t")
+
+
+def test_a_pattern_that_finds_nothing_refuses(stand: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Образец не нашёл ни одной строки ни в одной версии — поле мертво, отказ (075)."""
+    watch_stand(stand, ignore=r"^nothing like this")
+    vendor(monkeypatch, ahead(WATCHED), [], {SHA_OLD: BEFORE, SHA_NEW: BEFORE})
+    with pytest.raises(module.Refused, match="не нашёл ни одной строки"):
+        module.follow(stand, "actions/checkout", SHA_NEW, "t")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [None, [], {"encoding": "none", "content": ""}, {"content": "eA=="}],
+    ids=["пусто", "список", "больше-предела", "без-кодировки"],
+)
+def test_an_unread_vendor_file_does_not_run(
+    stand: Path, monkeypatch: pytest.MonkeyPatch, answer: Any
+) -> None:
+    """Файл поставщика не прочитан — заход не отработал, а не «совпало» (039)."""
+    watch_stand(stand, ignore=NOISE)
+    vendor(monkeypatch, ahead(WATCHED), [], {SHA_OLD: answer, SHA_NEW: BEFORE})
+    with pytest.raises(module.NotRun, match="без текста файла"):
+        module.follow(stand, "actions/checkout", SHA_NEW, "t")
+
+
+@pytest.mark.parametrize("ignore", ["", "(", 7], ids=["пусто", "не-образец", "не-строка"])
+def test_a_bad_ignore_does_not_run(
+    stand: Path, monkeypatch: pytest.MonkeyPatch, ignore: Any
+) -> None:
+    """Негодное `ignore` — заход не отработал, а не «шума нет»."""
+    watch_stand(stand, ignore=ignore)
+    vendor(monkeypatch, ahead(WATCHED), [], {SHA_OLD: BEFORE, SHA_NEW: BEFORE})
+    with pytest.raises(module.NotRun, match="`ignore`"):
+        module.follow(stand, "actions/checkout", SHA_NEW, "t")
+
+
+def test_the_noise_helpers_answer_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Три помощника по имени: текст файла, образец поля и суд «разошёлся только шум»."""
+    after = BEFORE.replace("2.1.305", "2.1.310")
+    vendor(monkeypatch, {}, [], {SHA_OLD: BEFORE, SHA_NEW: after})
+    assert module.vendor_text("actions/checkout", WATCHED, SHA_OLD, "t") == BEFORE
+    noise = module.ignored_pattern({"path": WATCHED, "ignore": NOISE}, module.paths.VENDOR_WATCH)
+    assert noise is not None
+    assert module.ignored_pattern({"path": WATCHED}, module.paths.VENDOR_WATCH) is None
+    assert module.only_noise("actions/checkout", WATCHED, SHA_OLD, SHA_NEW, noise, "t")
+    vendor(monkeypatch, {}, [], {SHA_OLD: BEFORE, SHA_NEW: after.replace("if (base)", "if (x)")})
+    assert not module.only_noise("actions/checkout", WATCHED, SHA_OLD, SHA_NEW, noise, "t")
+
+
+def test_an_untouched_file_with_noise_asks_no_contents(
+    stand: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Файл не тронут по `compare` — `contents` не спрашивается: поле только для тронутого."""
+    watch_stand(stand, ignore=NOISE)
+    said: list[tuple[str, str]] = []
+    vendor(monkeypatch, ahead("package.json"), said)
+    module.follow(stand, "actions/checkout", SHA_NEW, "t")
+    assert not [one for one in said if "/contents/" in one[1]]
+
+
 def test_a_missing_vendor_commit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """Коммита `read_at` у поставщика нет — сравнивать не с чем, это находка, а не поломка."""
 
@@ -1000,6 +1123,9 @@ def test_every_watch_is_pinned_and_read() -> None:
     for one in said["watched"]:
         assert module.SHA_RE.match(one["read_at"]), f"{one['dep']}: `read_at` не sha"
         assert one["path"] and one["why"], f"{one['dep']}: нет `path` или `why`"
+        if "ignore" in one:
+            assert isinstance(one["ignore"], str) and one["ignore"], f"{one['path']}: `ignore`"
+            module.re.compile(one["ignore"])
         pins = {
             found["ref"]
             for path in walk(ROOT / module.WORKFLOWS, "*.yml")
