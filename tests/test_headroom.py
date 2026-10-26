@@ -142,9 +142,10 @@ def test_a_broken_onboard_is_a_refusal_not_a_low_headroom(
     """
     text = (ROOT / "scripts" / "headroom.py").read_text(encoding="utf-8")
     assert "\nimport onboard\n" not in text, "onboard снова грузится в шапке модуля"
+    assert module.expression().fullmatch("${{ matrix.py }}"), "образец — тот же, что у onboard"
     monkeypatch.setitem(sys.modules, "onboard", None)
     with pytest.raises(ImportError):
-        module.shape_of("test (${{ matrix.py }})")
+        module.expression()
     monkeypatch.setattr(module, "main", lambda _argv: module.shape_of("${{ x }}") and 0)
     assert module.guarded([]) == module.EXIT_BROKEN
 
