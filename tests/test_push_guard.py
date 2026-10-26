@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 import report
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, python_shim
 
 HOOK = ROOT / ".claude" / "hooks" / "push_guard.py"
 #: То, что зовёт окно: обёртка выбирает интерпретатор планки (#1058). Набор
@@ -59,7 +59,7 @@ def floor_interpreter_on_path(tmp_path_factory: pytest.TempPathFactory) -> None:
     """
     floor = "{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
     where = tmp_path_factory.mktemp("floor-python")
-    (where / f"python{floor}").symlink_to(sys.executable)
+    python_shim(where, f"python{floor}")
     FLOOR_BIN["dir"] = str(where)
 
 
@@ -929,8 +929,7 @@ def test_a_local_window_runs_the_guard_by_a_python3_on_the_floor(tmp_path: Path)
     floor = "python{}.{}".format(*load_script("check_env.py").python_floor(ROOT))
     if any(Path(where, floor).exists() for where in ("/usr/bin", "/bin")):
         pytest.skip(f"{floor} стоит в /usr/bin — окна без него здесь не собрать")
-    python3 = tmp_path / "python3"
-    python3.symlink_to(sys.executable)
+    python3 = python_shim(tmp_path, "python3")
     harmless = ask_with_python3("ls", python3)
     assert harmless.returncode == 0, harmless.stderr
     shared = ask_with_python3("git push origin main", python3)

@@ -9,7 +9,6 @@
 
 import os
 import subprocess
-import sys
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -18,7 +17,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, load_script, python_shim
 
 module = load_script("release.py")
 
@@ -1238,9 +1237,7 @@ def run_tagged(
     )
     for tag in later:
         git(["git", "tag", tag])
-    shim = tmp_path / "bin"
-    shim.mkdir()
-    (shim / "python").symlink_to(sys.executable)
+    shim = python_shim(tmp_path / "bin").parent
     temp = tmp_path / "temp"
     temp.mkdir()
     env = {
@@ -1446,9 +1443,7 @@ def run_label_step(tmp_path: Path, version: str) -> tuple[subprocess.CompletedPr
         f"Path({str(said)!r}).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n",
         encoding="utf-8",
     )
-    shim = tmp_path / "bin"
-    shim.mkdir()
-    (shim / "python").symlink_to(sys.executable)
+    shim = python_shim(tmp_path / "bin").parent
     env = {
         **os.environ,
         "PATH": f"{shim}{os.pathsep}{os.environ.get('PATH', '')}",
