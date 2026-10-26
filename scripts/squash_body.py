@@ -38,23 +38,12 @@ from collections.abc import Iterable
 from typing import Final
 
 import changerefs
+import check_attribution
 import gitcall
 import paths
 
 #: Трейлеры, которые тело уплотнения переносит: соавторство и адрес окна.
 TRAILER_RE: Final = re.compile(r"^(?:Co-Authored-By|Claude-Session):\s*\S", re.IGNORECASE)
-#: Строка вида «Ключ: значение» — из таких целиком состоит хвостовой блок.
-#:
-#: КЛЮЧ — СЛОВО ЛЮБОГО ПИСЬМА, А НЕ ЛАТИНИЦА. Прежде ключ принимался только
-#: латинский, и `Навык: x` рядом с `Co-Authored-By` делал хвост прозой:
-#: `tail_block` отдавал пусто, и соавтор с адресом окна молча не доезжали до
-#: тела уплотнения (находка 94e0338). Класс шире одного ключа: кириллические
-#: `Разобрано:`, `Род:`, `Кандидат:` ломали хвост так же (c0bf7a2). Граница:
-#: ключ — одно слово, как у git; `Закрывает пункт:` ключом не считается, но
-#: живёт он в абзаце связей рядом с `Refs #N`, который хвостом не бывает и так.
-#: Тот же предикат держит `check_attribution.TRAILER_LINE`; что они согласны,
-#: сверяет тест.
-KEY_VALUE: Final = re.compile(r"^[^\W\d_][\w-]*:\s*\S")
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -75,17 +64,16 @@ def tail_block(text: str) -> list[str]:
     Абзац, в котором есть хоть одна прозаическая строка, хвостовым блоком не
     является — и это не придирка: именно так отличается директива от рассказа о
     ней.
+
+    РАЗБОР ОДИН — У ГЕЙТА АТРИБУЦИИ (`check_attribution.tail_lines`, взгляд на
+    #1709). Свой разбор здесь расходился с гейтом: ключ любого письма приняли
+    оба, но значение без пробела и строку с отступом — только этот, и соавтор,
+    перенесённый в тело уплотнения, гейт называл «без атрибуции». Ключ — слово
+    любого письма: `Навык:` и `Разобрано:` рядом с трейлерами хвост не ломают
+    (находки 94e0338, c0bf7a2); граница — ключ из одного слова, как у git, и
+    `Закрывает пункт:` живёт в абзаце связей рядом с `Refs #N`.
     """
-    строки = [line.rstrip() for line in text.strip().splitlines()]
-    хвост: list[str] = []
-    for line in reversed(строки):
-        if not line.strip():
-            break
-        хвост.append(line.strip())
-    хвост.reverse()
-    if not хвост or not all(KEY_VALUE.match(line) for line in хвост):
-        return []
-    return хвост
+    return check_attribution.tail_lines(text)
 
 
 def trailers_of(bodies: Iterable[str]) -> list[str]:

@@ -211,15 +211,24 @@ def test_the_tail_block_is_read_alike_by_the_body_and_the_attribution_gate() -> 
     и починка одного без другого оставила бы второй случай (правило 195).
     """
     ca = load_script("check_attribution.py")
-    сообщения = [
-        "Тема\n\nНавык: x\nCo-Authored-By: Кто <k@e.com>",
-        "Тема\n\nRod: x\nCo-Authored-By: Кто <k@e.com>",
-        "Тема\n\nЗакрывает пункт: x\nCo-Authored-By: Кто <k@e.com>",
-        "Тема\n\n1st: x\nCo-Authored-By: Кто <k@e.com>",
-        "Тема\n\nCo-Authored-By: Кто <k@e.com>\nи пара слов",
-    ]
-    for сообщение in сообщения:
-        assert bool(body.tail_block(сообщение)) == bool(ca.tail(сообщение)), сообщение
+    соавтор = "Co-Authored-By: Кто <k@e.com>"
+    # Строки, на которых прежние два разбора расходились (взгляд на #1709):
+    # значение без пробела, голый адрес, отступ, разделитель из пробелов.
+    сообщения = {
+        f"Тема\n\nНавык: x\n{соавтор}": True,
+        f"Тема\n\nRod: x\n{соавтор}": True,
+        f"Тема\n\nЗакрывает пункт: x\n{соавтор}": False,
+        f"Тема\n\n1st: x\n{соавтор}": False,
+        f"Тема\n\n{соавтор}\nи пара слов": False,
+        f"Тема\n\nСм:https://x\n{соавтор}": False,
+        f"Тема\n\nhttps://x\n{соавтор}": False,
+        f"Тема\n\nRefs:#1\n{соавтор}": False,
+        f"Тема\n\n  {соавтор}": False,
+        f"Тема\n  \n{соавтор}": True,
+    }
+    for сообщение, хвост in сообщения.items():
+        assert bool(body.tail_block(сообщение)) is хвост, сообщение
+        assert bool(ca.tail(сообщение)) is хвост, сообщение
 
 
 def test_the_same_trailer_twice_is_written_once() -> None:
