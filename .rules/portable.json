@@ -77,6 +77,12 @@
     "kit": {
       "answer": "as-is"
     },
+    ".claude/hooks/bundle_hint.py": {
+      "answer": "as-is"
+    },
+    ".claude/hooks/bundle_hint.sh": {
+      "answer": "as-is"
+    },
     ".claude/hooks/floor.sh": {
       "answer": "configured",
       "where": [

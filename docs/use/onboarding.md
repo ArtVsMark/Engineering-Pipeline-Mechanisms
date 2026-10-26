@@ -200,6 +200,7 @@ bash .claude/mechanisms.sh paths.py bindings
 |---|---|---|
 | `.claude/hooks/push_guard.sh` и `.py` | страж толчка: толчок только своей ветки `agent/<задача>` и только из неё, до вызова git ([202](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/202-a-merged-branch-is-recreated-by-any-push.md)) | как есть |
 | `.claude/hooks/skill_log.sh` и `.py` | журнал вызовов навыков в `.claude/state/skill-runs.jsonl` | как есть |
+| `.claude/hooks/bundle_hint.sh` и `.py` | совет окну при нарезке ветки `agent/…`, если `bundle-the-work` в журнале этой сессии нет; нарезку не держит | как есть |
 | `.claude/hooks/install_floor.sh` | установка интерпретатора планки в облачном окне | как есть |
 | `.claude/hooks/floor.sh` | число планки для хуков | заготовкой: заход вписывает планку механизмов |
 | `.claude/hooks/session-start.sh` | старт облачного окна: ставит интерпретатор планки | заготовкой: окружение проверки вашего дерева — слот в конце файла |
