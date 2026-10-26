@@ -75,6 +75,8 @@ def test_limits_are_read_from_the_workflow_not_written_twice() -> None:
     assert module.limits(CI, ("test-matrix",)) == {"test-matrix": 10}
     with pytest.raises(module.NotRun, match="timeout-minutes"):
         module.limits(CI.replace("    timeout-minutes: 10\n", ""), ("test-matrix",))
+    with pytest.raises(module.NotRun, match="timeout-minutes"):
+        module.limits(CI.replace("timeout-minutes: 10", "timeout-minutes: 0"), ("test-matrix",))
     with pytest.raises(module.NotRun, match="нет в прогоне"):
         module.limits(CI, ("test",))
     with pytest.raises(module.NotRun):
@@ -176,5 +178,14 @@ def test_main_writes_the_section_and_names_the_outcome(
 
     monkeypatch.setattr(module, "jobs_of_runs", refuse)
     assert module.main(argv) == module.EXIT_BROKEN
+
+    def garbled(*_: Any) -> Any:
+        raise ValueError("не JSON")
+
+    monkeypatch.setattr(module, "jobs_of_runs", garbled)
+    assert module.main(argv) == module.EXIT_BROKEN, "битый ответ выдан за «запас мал»"
+    monkeypatch.setattr(module, "jobs_of_runs", lambda *_: [[job("test-matrix (3.14)", 600)]])
+    unwritable = ["--repo", "o/r", "--root", str(root), "--report", str(tmp_path / "нет" / "r.md")]
+    assert module.main(unwritable) == module.EXIT_BROKEN, "неписаный отчёт выдан за «запас мал»"
     bare = tree(tmp_path / "bare", declared=False)
     assert module.main(["--repo", "o/r", "--root", str(bare)]) == module.EXIT_UNJUDGED

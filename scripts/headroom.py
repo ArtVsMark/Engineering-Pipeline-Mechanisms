@@ -127,7 +127,7 @@ def limits(workflow_text: str, jobs: tuple[str, ...]) -> dict[str, int]:
         if name not in jobs and key not in jobs:
             continue
         minutes = job.get("timeout-minutes")
-        if not isinstance(minutes, int) or isinstance(minutes, bool):
+        if not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0:
             raise NotRun(
                 f"у работы «{name}» нет числового timeout-minutes — запас не от чего мерить"
             )
@@ -249,14 +249,24 @@ def main(argv: list[str] | None = None) -> int:
     except NotRun as exc:
         print(f"сторож запаса не отработал: {exc}", file=sys.stderr)
         return EXIT_BROKEN
-    except ghrest.TransportError as exc:
+    except (ghrest.TransportError, ValueError) as exc:
+        # ВСЁ, ЧТО НЕ ПОЙМАНО, ВЫШЛО БЫ КОДОМ 1 — «ЗАПАС МАЛ» (039). Разбор
+        # ответа площадки роняет `ValueError`, и находка без замера была бы
+        # ложной — поэтому он здесь, рядом с отказом транспорта.
         print(f"сторож запаса не отработал: площадка не ответила — {exc}", file=sys.stderr)
         return EXIT_BROKEN
     code, lines = verdict(watch, watched, slowest(runs, watched), len(runs))
     print("\n".join(lines))
     if args.report:
-        with Path(args.report).open("a", encoding="utf-8") as report:
-            report.write("\n" + HEAD + "\n\n" + "".join(f"- {one}\n" for one in lines))
+        try:
+            with Path(args.report).open("a", encoding="utf-8") as report:
+                report.write("\n" + HEAD + "\n\n" + "".join(f"- {one}\n" for one in lines))
+        except OSError as exc:
+            print(
+                f"сторож запаса не отработал: отчёт {args.report} не дописан — {exc}",
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
     return code
 
 
