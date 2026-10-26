@@ -198,7 +198,7 @@ def quiet_platform(monkeypatch: pytest.MonkeyPatch, *, body: str = BODY) -> list
     )
     monkeypatch.setattr(module.debt, "branch_debt", lambda *_: ([], []))
     monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], [], []))
-    monkeypatch.setattr(module.debt, "findings_debt", lambda *_: [])
+    monkeypatch.setattr(module.debt, "findings_registry", lambda *_: (None, []))
     monkeypatch.setattr(module.debt, "open_changes", lambda *_: frozenset())
     monkeypatch.setattr(module.debt, "closed_issues", lambda *_: [])
     monkeypatch.setattr(module.debt, "inbox_body", lambda *_: ("", "", ""))
@@ -309,7 +309,7 @@ def test_a_silent_neighbour_does_not_make_a_section_look_full(
 
     monkeypatch.setattr(module.debt, "branch_debt", refuse)
     monkeypatch.setattr(
-        module.debt, "findings_debt", lambda *_: [("abc1234", 635, "дефект", "находка")]
+        module.debt, "findings_registry", lambda *_: (None, [("abc1234", 635, "дефект", "находка")])
     )
     built, broken, _ = module.sources("o/r", "t")
     said = "\n".join(module.render(3, built[3], "01.01.2026"))
@@ -332,7 +332,7 @@ def test_an_empty_open_list_is_a_refusal_not_nothing_open(monkeypatch: pytest.Mo
     monkeypatch.setattr(module.findings, "open_listed", real)
     monkeypatch.setattr(module.findings, "OPEN_PAUSE", 0)
     monkeypatch.setattr(
-        module.debt, "findings_debt", lambda *_: [("abc1234", 635, "дефект", "находка")]
+        module.debt, "findings_registry", lambda *_: (None, [("abc1234", 635, "дефект", "находка")])
     )
     built, _, _ = module.sources("o/r", "t")
     said = "\n".join(module.render(3, built[3], "01.01.2026"))
@@ -353,11 +353,11 @@ def test_the_registry_is_read_once_per_pass(monkeypatch: pytest.MonkeyPatch) -> 
     quiet_platform(monkeypatch)
     asked: list[int] = []
 
-    def counted(*_: Any, **__: Any) -> list[tuple[str, int, str, str]]:
+    def counted(*_: Any, **__: Any) -> tuple[int | None, list[tuple[str, int, str, str]]]:
         asked.append(1)
-        return []
+        return None, []
 
-    monkeypatch.setattr(module.debt, "findings_debt", counted)
+    monkeypatch.setattr(module.debt, "findings_registry", counted)
     assert module.main(["--repo", "o/r", "--apply"]) == module.EXIT_OK
     assert len(asked) == 1, f"реестр прочитан {len(asked)} раза за один заход"
 
@@ -382,7 +382,7 @@ def test_a_silent_registry_does_not_erase_what_was_already_read(
         raise module.ghrest.TransportError("реестр молчит")
 
     monkeypatch.setattr(module.debt, "branch_debt", lambda *_: ([], ["test-next (3.15)"]))
-    monkeypatch.setattr(module.debt, "findings_debt", refuse)
+    monkeypatch.setattr(module.debt, "findings_registry", refuse)
     built, broken, marks = module.sources("o/r", "t")
     said = "\n".join(module.render(3, built[3], "01.01.2026"))
     assert "test-next (3.15)" in said, "прочитанная половина источника выброшена"
@@ -903,7 +903,9 @@ def test_the_open_list_is_read_once_and_handed_to_every_channel(
         module.debt, "branch_debt", lambda r, t, seen=None: got.update(branch=seen) or ([], [])
     )
     monkeypatch.setattr(
-        module.debt, "findings_debt", lambda r, t, seen=None: got.update(findings=seen) or []
+        module.debt,
+        "findings_registry",
+        lambda r, t, seen=None: got.update(findings=seen) or (None, []),
     )
     monkeypatch.setattr(
         module.debt, "inbox_body", lambda r, t, c, seen=None: got.update(inbox=seen) or ("", "", "")
@@ -948,13 +950,16 @@ def test_late_minor_findings_accrue_in_source_five(monkeypatch: pytest.MonkeyPat
     quiet_platform(monkeypatch)
     monkeypatch.setattr(
         module.debt,
-        "findings_debt",
-        lambda *_: [
-            ("aaaaaaa", 10, "дефект", "слитое ломается"),
-            ("bbbbbbb", 10, "риск", "слитое сломается при условии"),
-            ("ccccccc", 10, "замечание", "слитое написано криво"),
-            ("ddddddd", 20, "замечание", "открытое написано криво"),
-        ],
+        "findings_registry",
+        lambda *_: (
+            77,
+            [
+                ("aaaaaaa", 10, "дефект", "слитое ломается"),
+                ("bbbbbbb", 10, "риск", "scripts/x.py:3 — слитое сломается при условии"),
+                ("ccccccc", 10, "замечание", "слитое написано криво"),
+                ("ddddddd", 20, "замечание", "открытое написано криво"),
+            ],
+        ),
     )
     monkeypatch.setattr(module.debt, "open_changes", lambda *_: frozenset({20}))
     built, broken, marks = module.sources("o/r", "t")
@@ -962,8 +967,13 @@ def test_late_minor_findings_accrue_in_source_five(monkeypatch: pytest.MonkeyPat
     five = "\n".join(built[5].rows)
     assert "aaaaaaa" in three and "ddddddd" in three, three
     assert "bbbbbbb" not in three and "ccccccc" not in three, three
-    assert "bbbbbbb" in five and "ccccccc" in five, five
-    assert "копится" in built[5].note, built[5].note
+    assert "bbbbbbb" not in five and "ccccccc" not in five, "список копящихся вернулся в план"
+    assert len(built[5].rows) == 1, built[5].rows
+    note = five
+    assert "находок на слитом копится: 2 —" in note, note
+    assert "по весу: замечание 1 · риск 1" in note, note
+    assert "по зонам: `scripts` 1 · без места 1" in note, note
+    assert "реестр находок #77" in note, note
     assert marks == {"aaaaaaa", "bbbbbbb", "ccccccc", "ddddddd"}, "копящееся выпало из снятия"
     assert not broken
 
@@ -982,7 +992,9 @@ def test_unread_openness_keeps_the_registry_and_owes_everything(
         raise module.ghrest.TransportError("список открытых молчит")
 
     monkeypatch.setattr(
-        module.debt, "findings_debt", lambda *_: [("bbbbbbb", 10, "риск", "слитое сломается")]
+        module.debt,
+        "findings_registry",
+        lambda *_: (None, [("bbbbbbb", 10, "риск", "слитое сломается")]),
     )
     monkeypatch.setattr(module.debt, "open_changes", refuse)
     built, _, marks = module.sources("o/r", "t")
@@ -1007,21 +1019,12 @@ def test_section_five_prints_its_groups_and_skips_the_empty() -> None:
     assert lines.index("- a") < lines.index("*Копящиеся находки · `x.py`*") < lines.index("- b")
 
 
-def test_accrued_findings_are_grouped_by_file() -> None:
-    """Находки — по файлу, без места — своей группой; одна группа — одно изменение."""
-    rows = [
-        "`aaaaaaa` · #1 — [риск] scripts/drift.py:12 — раз",
-        "`bbbbbbb` · #2 — [замечание] (без места) — два",
-        "`ccccccc` · #3 — [риск] scripts/drift.py:40-41 — три",
-        "`ddddddd` · #4 — [риск] tests/test_x.py:5 — четыре",
-    ]
-    groups = module.by_file("Копящиеся находки", rows)
-    assert [title for title, _ in groups] == [
-        "Копящиеся находки · `scripts/drift.py`",
-        "Копящиеся находки · `tests/test_x.py`",
-        f"Копящиеся находки · {module.NO_PLACE}",
-    ]
-    assert groups[0][1] == [rows[0], rows[2]]
+def test_a_finding_zone_is_the_top_folder_of_its_place() -> None:
+    """Зона — верхний каталог места; корень и «без места» — свои зоны (#1695)."""
+    assert module.zone_of("scripts/drift.py:12 — раз") == "`scripts`"
+    assert module.zone_of("`tests/test_x.py:5` — два") == "`tests`"
+    assert module.zone_of("CONTRACT_VERSION:1 — три") == module.ROOT_ZONE
+    assert module.zone_of("(без места) — четыре") == module.NO_PLACE
 
 
 @pytest.mark.parametrize(
@@ -1035,15 +1038,37 @@ def test_accrued_findings_are_grouped_by_file() -> None:
         ("(без места) — прозой", ""),
     ],
 )
-def test_a_finding_is_grouped_where_the_canon_places_it(title: str, place: str) -> None:
-    """Группа находки — место по канону `findings.place_of`, во всех формах (взгляд на #1264).
+def test_a_finding_is_zoned_where_the_canon_places_it(title: str, place: str) -> None:
+    """Зона находки — по канону `findings.place_of`, во всех формах (взгляд на #1264).
 
     Своя регулярка расходилась с каноном на кавычках, пути без расширения и
     нескольких строках, и такие находки ложились в «без места» (210).
     """
     assert findings.place_of(title) == place
-    [(group, _)] = module.by_file("К", [f"`aaaaaaa` · #1 — [риск] {title}"])
-    assert group == (f"К · `{place}`" if place else f"К · {module.NO_PLACE}")
+    expected = (
+        module.NO_PLACE
+        if not place
+        else (f"`{place.split('/')[0]}`" if "/" in place else module.ROOT_ZONE)
+    )
+    assert module.zone_of(title) == expected
+
+
+def test_the_kept_line_counts_instead_of_listing() -> None:
+    """Счёт, вес, зоны по убыванию и ссылка на реестр; без копящихся — пусто (#1695)."""
+    kept = [
+        ("a", 1, "риск", "scripts/x.py:1 — раз"),
+        ("b", 2, "риск", "scripts/y.py:2 — два"),
+        ("c", 3, "замечание", "tests/t.py:3 — три"),
+    ]
+    note = module.kept_line(kept, 12)
+    assert note.startswith("находок на слитом копится: 3 — "), note
+    assert "по весу: замечание 1 · риск 2" in note
+    assert "по зонам: `scripts` 2 · `tests` 1" in note
+    assert note.endswith("список и отпечатки — реестр находок #12")
+    assert "`a`" not in note, "отпечаток просочился в план"
+    assert module.kept_line(kept, None).endswith("— реестр находок")
+    assert module.kept_line([], 12) == ""
+    assert module.by_count(("`a`", 1)) > module.by_count(("`b`", 2))
 
 
 def test_groups_that_lose_a_row_are_refused() -> None:
@@ -1562,7 +1587,7 @@ def test_queued_rows_name_open_tasks_the_plan_lacks() -> None:
 def test_the_built_plan_routes_rows_and_queues_the_missing(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Сборка: раздел 6 под новым именем, соседская строка в 6, не стоявшая в плане — очередью."""
+    """Сборка: соседская строка — в 6, не стоявшая в плане — в 4 (#1695)."""
     written = quiet_platform(monkeypatch)
     listed = [
         {"number": 640, "labels": [{"name": module.WAITS_NEIGHBOUR}]},
@@ -1574,15 +1599,17 @@ def test_the_built_plan_routes_rows_and_queues_the_missing(
     six = written[0].split(f"## {module.HEADS[6]}", 1)[1]
     assert "*Ожидаем действия соседей*\n- **#640**" in six
     assert "*Ждёт своей очереди*\n- **#642**" in six
-    assert f"- **#711** — Без строки *({module.QUEUED_TAIL})*" in six
-    assert "#642" not in written[0].split("## 4 ·", 1)[1].split("## 5 ·", 1)[0]
-    assert "дописано задач, которых в плане не было: 1" in capsys.readouterr().out
+    four = written[0].split("## 4 ·", 1)[1].split("## 5 ·", 1)[0]
+    assert f"- **#711** — Без строки *({module.QUEUED_TAIL})*" in four
+    assert "#711" not in six, "не стоявшая в плане ушла в 6, а не в 4"
+    assert "#642" not in four
+    assert "в раздел 4 дописано задач, которых в плане не было: 1" in capsys.readouterr().out
 
 
 def test_laid_out_writes_born_and_queued_rows_into_the_section_of_their_label(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Рождённая — в 4, не стоявшая в плане — в 6, но обе по метке: соседская — в 6 (#1655)."""
+    """Рождённая и не стоявшая в плане — в 4, но обе по метке: соседская — в 6 (#1655, #1695)."""
     monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([]))
     held = {4: ["- **#10** — наша"], 6: ["- **#20** — своя очередь"]}
     listed = [
@@ -1600,7 +1627,8 @@ def test_laid_out_writes_born_and_queued_rows_into_the_section_of_their_label(
     four, six = "\n".join(said[4]), "\n".join(said[6])
     assert "#11" in four and module.BORN_TAIL in four
     assert "*Ожидаем действия соседей*\n- **#12**" in six
-    assert "*Ждёт своей очереди*\n- **#20**" in six and "- **#13** — Вне плана" in six
+    assert "*Ждёт своей очереди*\n- **#20**" in six and "#13" not in six
+    assert "- **#13** — Вне плана" in four
 
 
 def test_a_row_moved_between_sections_is_not_counted_as_done(
