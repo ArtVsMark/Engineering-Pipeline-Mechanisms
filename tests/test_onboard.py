@@ -1274,9 +1274,25 @@ def test_a_dormant_area_table_is_named_until_the_role_is_declared(tmp_path: Path
     roles.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
     said = module.dormant_areas_note(tmp_path)
     assert "спит" in said and module.ROLE_HOME in said
+    assert "не объявлена" in said and "нет профиля" not in said, said
     table["by_path"] = [{"paths": ["**/*"], "roles": [module.review_map.CATALOGUE_ROLE]}]
     roles.write_text(json.dumps(table, ensure_ascii=False), encoding="utf-8")
     assert module.dormant_areas_note(tmp_path) == ""
+
+
+def test_a_declared_role_without_a_profile_still_sleeps(tmp_path: Path) -> None:
+    """Роль объявлена, а профиля нет — тоже спячка: взгляд узнаёт роль по профилю (взгляд на #1696).
+
+    Подключённый раньше проект держит свою карту профилей: `--update` её не
+    переписывает, и одна строка в `required` оставила бы находки роли без роли.
+    """
+    module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
+    profiles = tmp_path / module.paths.ROLES
+    text = profiles.read_text(encoding="utf-8")
+    head = text.index("### 📜 Правила каталога")
+    profiles.write_text(text[:head], encoding="utf-8")
+    said = module.dormant_areas_note(tmp_path)
+    assert "спит" in said and "нет профиля" in said and "не объявлена" not in said, said
 
 
 def test_the_dormant_note_reads_the_consumers_path_table(tmp_path: Path) -> None:

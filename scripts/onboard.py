@@ -120,6 +120,7 @@ import check_env
 import check_rulebook_fresh
 import check_shipped
 import check_workflow_forms
+import findings
 import gitcall
 import paths
 import pipeline_checks as policy
@@ -1489,6 +1490,13 @@ def dormant_areas_note(consumer: Path) -> str:
     Нечитаемая таблица ролей — «не объявлена», как у карты
     (`review_map.role_declared`). Адреса — по таблице путей ПОТРЕБИТЕЛЯ
     (#1630): переназначенную им таблицу карта читает там же.
+
+    ОБЪЯВЛЕНИЯ МАЛО — НУЖЕН ПРОФИЛЬ (находка взгляда на #1696). Карта профилей
+    тоже данные: `--update` кладёт её, только если файла нет, и проект,
+    подключённый раньше, вписав одну строку в `required`, остался бы без
+    профиля. Взгляд узнаёт роль находки по заголовку профиля
+    (`findings.roles`), и без него находки роли лягут без роли — а заход
+    молчал бы. Поэтому тишина — только при обоих: роль объявлена и профиль есть.
     """
     try:
         areas = policy.project_path("area-paths", consumer)
@@ -1503,11 +1511,20 @@ def dormant_areas_note(consumer: Path) -> str:
         declared = review_map.declares_role(review_map.table_shape(roles))
     except OSError, ValueError, review_map.NotRun:
         declared = False
-    if declared:
+    profiled = review_map.CATALOGUE_ROLE in findings.roles(consumer / profiles)
+    if declared and profiled:
         return ""
+    missing = " и ".join(
+        said
+        for said, gone in (
+            (f"в `{table}` эта роль не объявлена", not declared),
+            (f"в `{profiles}` у неё нет профиля", not profiled),
+        )
+        if gone
+    )
     return (
         f"`{areas}` спит: карта взгляда отдаёт по ней правила роли "
-        f"«{review_map.CATALOGUE_ROLE}», а в `{table}` эта роль не объявлена. "
+        f"«{review_map.CATALOGUE_ROLE}», а {missing}. "
         "Таблица начнёт действовать, когда проект впишет роль в `required` или `by_path` и "
         f"даст ей профиль в `{profiles}`. Роль раскатана на семью: {ROLE_HOME}"
     )
