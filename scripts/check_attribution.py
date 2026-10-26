@@ -93,7 +93,12 @@ class GitFailed(RuntimeError):
 COAUTHOR = re.compile(r"^Co-Authored-By:\s*(.+?)\s*$", re.M | re.I)
 SESSION = re.compile(r"^Claude-Session:\s*(.+?)\s*$", re.M | re.I)
 #: Строка хвостового блока: `Ключ: значение`, и ключ без пробелов.
-TRAILER_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:\s")
+#:
+#: Ключ — слово ЛЮБОГО письма: латинский ключ делал хвост с `Навык:` или
+#: `Разобрано:` прозой, и коммит с настоящим соавтором шёл «без атрибуции» —
+#: ложный отказ (097). Тот же предикат у `squash_body.KEY_VALUE`, согласие
+#: сверяет тест.
+TRAILER_LINE = re.compile(r"^[^\W\d_][\w-]*:\s")
 
 
 def tail(body: str) -> str:

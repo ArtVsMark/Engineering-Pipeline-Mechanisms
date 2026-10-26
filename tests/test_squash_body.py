@@ -177,6 +177,51 @@ def test_a_paragraph_with_prose_in_it_is_not_a_tail_block() -> None:
     assert body.tail_block("Тема без хвоста вовсе") == []
 
 
+def test_a_cyrillic_key_beside_the_trailers_keeps_the_tail_block() -> None:
+    """`Навык:` или `Разобрано:` в одном абзаце с трейлерами — всё ещё хвост (94e0338, c0bf7a2).
+
+    Строку навыка естественно ставить к трейлерам, и прежний разбор, знавший
+    только латинский ключ, считал такой абзац прозой: соавтор и адрес окна
+    молча не доезжали до тела уплотнения. Число и знак в начале ключа хвост
+    по-прежнему ломают — ключ остаётся словом.
+    """
+    тело = (
+        "Починка\n\nRefs #1\n\n"
+        "Навык: build-a-gate\n"
+        "Разобрано: abc1234\n"
+        "Co-Authored-By: Кто <k@e.com>\n"
+        "Claude-Session: https://example/session\n"
+    )
+    assert body.trailers_of([тело]) == [
+        "Co-Authored-By: Кто <k@e.com>",
+        "Claude-Session: https://example/session",
+    ], "кириллический ключ снова сделал хвостовой блок прозой"
+    said = body.compose_from(["починка"], [тело])
+    assert "Co-Authored-By: Кто <k@e.com>" in said
+    assert "Навык: build-a-gate" in said
+    assert body.tail_block("Тема\n\n1st: x\nCo-Authored-By: Кто <k@e.com>") == []
+    assert body.tail_block("Тема\n\nЗакрывает пункт: x\nCo-Authored-By: Кто <k@e.com>") == []
+
+
+def test_the_tail_block_is_read_alike_by_the_body_and_the_attribution_gate() -> None:
+    """Хвост судят двое — тело уплотнения и гейт атрибуции, — и судят одинаково.
+
+    Разойдись предикаты — коммит, чей соавтор доехал до общей ветки, гейт назвал
+    бы «без атрибуции», или наоборот. Так и было: оба знали только латиницу,
+    и починка одного без другого оставила бы второй случай (правило 195).
+    """
+    ca = load_script("check_attribution.py")
+    сообщения = [
+        "Тема\n\nНавык: x\nCo-Authored-By: Кто <k@e.com>",
+        "Тема\n\nRod: x\nCo-Authored-By: Кто <k@e.com>",
+        "Тема\n\nЗакрывает пункт: x\nCo-Authored-By: Кто <k@e.com>",
+        "Тема\n\n1st: x\nCo-Authored-By: Кто <k@e.com>",
+        "Тема\n\nCo-Authored-By: Кто <k@e.com>\nи пара слов",
+    ]
+    for сообщение in сообщения:
+        assert bool(body.tail_block(сообщение)) == bool(ca.tail(сообщение)), сообщение
+
+
 def test_the_same_trailer_twice_is_written_once() -> None:
     """Подпись у ветки одна: повторять её по числу коммитов — шум, а не атрибуция."""
     один = "Шаг\n\nCo-Authored-By: Он <he@example.com>\n"
