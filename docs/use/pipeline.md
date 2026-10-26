@@ -54,15 +54,15 @@
 | 6h | Ответ каталогу по форме и пробы «не применимо» — действием каталога | `ci.yml` | `answer` | через сводный |
 | 6i | Сверка фактов с выпуском витрины жива: хеши по тегу и настоящий `check_facts.py`; выпуск недоступен — предупреждение, а не красное | `ci.yml` | `facts-contract` | через сводный |
 | 7 | **Сводный гейт**: тело — составным действием, которое потребитель зовёт шагом своего джоба (#1385) | `ci-complete.yml` → `.github/actions/ci-complete` | `ci-complete` | **единственный обязательный** |
-| 7a | Будильник сводного гейта: `ci` кончился — устаревшая сводка перезапускается | `ci-complete-wake.yml` → `step-ci-complete-wake.yml` (по `workflow_run` от `ci`) | `ci-complete-wake / ci-complete-wake` | нет, вне изменения |
+| 7a | Будильник сводного гейта: `ci` кончился — устаревшая сводка перезапускается | `ci-complete-wake.yml` → `step-ci-complete-wake.yml` (по `workflow_run` от `ci` и кнопкой по названной голове) | `ci-complete-wake / ci-complete-wake` | нет, вне изменения |
 | 8 | Очередь: порядок наш, слияние площадки | `automerge.yml`¹ → `step-automerge.yml` | `automerge / automerge` | нет |
 | 8a | Разбор слитого против задачи | `task-items.yml` → `step-task-items.yml` | `task-items / task-items` | нет, совещательный |
 | 8b | Пункт эпика следует своей задаче | `task-items.yml` → `step-task-items.yml` (ночной обход) | `task-items / task-items` | нет |
-| 8c | Оклик: вердикт находит окно | `hail.yml` → `step-hail.yml` (по `workflow_run` от `ci`) | `hail / hail` | нет, совещательный |
+| 8c | Оклик: вердикт находит окно | `hail.yml` → `step-hail.yml` (по `workflow_run` от `ci`, раз в час — конфликт `ci` не запускает — и кнопкой) | `hail / hail` | нет, совещательный |
 | — | Замер поставщика: площадка принимает тело уплотнения (решение 011; у потребителя нет) | `arm.yml` (кнопкой, по названному номеру) | `arm-probe` | нет, совещательный |
 | 9 | Красный `main`: тревога, мигания и красное, пережившее слияние | `main-red.yml` → `step-main-red.yml` | `main-red / main-red` | нет |
-| 10 | Красный `main`: разморозка | `automerge.yml` → `step-automerge.yml` (по `workflow_run` от `ci` на общей ветке) | `automerge / automerge` | нет |
-| 11 | Застрявшее: готово и не слито | `stuck.yml` → `step-stuck.yml` (по `workflow_run` от `ci`) | `stuck-prs / stuck-prs` | нет, совещательный |
+| 10 | Красный `main`: разморозка | `automerge.yml` → `step-automerge.yml` (любой заход очереди — от `ci` и `review`, событий изменения — метки, толчок, готовность и черновик — и кнопкой — сверяет здоровье общей ветки; метку `paused/main-red` ставит и снимает шаг 9) | `automerge / automerge` | нет |
+| 11 | Застрявшее: готово и не слито | `stuck.yml` → `step-stuck.yml` (по `workflow_run` от `ci` и кнопкой) | `stuck-prs / stuck-prs` | нет, совещательный |
 | 11a | Карта взгляда кодом общей ветки | `review.yml` → `step-review.yml` | `review / map` | нет, совещательный |
 | 12 | Ревью — последним: ждёт зелёного `ci-complete`, не дождался — идёт всё равно | `review.yml` → `step-review.yml` | `review / review` | нет |
 | 12b | Поздний взгляд по слитому | `review.yml` → `step-review.yml` (по расписанию, после `ci` на общей ветке и кнопкой) | `review / late-look` | нет |
