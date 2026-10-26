@@ -7,7 +7,7 @@
 """
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -246,3 +246,49 @@ def test_a_neighbours_text_cannot_forge_a_marker_a_days_block_or_a_heading() -> 
     assert sum(line.startswith("## Без вердикта") for line in body.splitlines()) == 1
     assert sum(line.startswith(module.DATED) for line in body.splitlines()) == 1
     assert module.quoted("a\n  b <c>") == "a b &lt;c&gt;"
+
+
+def test_a_record_without_a_verdict_past_the_deadline_is_marked() -> None:
+    """Дольше 14 дней без вердикта — пометка; ровно 14 — нет; вердикт снимает срок (п. 5 #1665)."""
+    said = module.collected(
+        uptake(
+            {"repo": "o/a", "records": [record("old"), record("young"), record("done")]},
+        )
+    )
+    seen = {
+        "o/a:false-refusal/old": TODAY - module.DEADLINE - timedelta(days=1),
+        "o/a:false-refusal/young": TODAY - module.DEADLINE,
+        "o/a:false-refusal/done": date(2026, 1, 1),
+    }
+    verdicts = {"o/a:false-refusal/done": form.Verdict("fixed", "v1.12.0")}
+    assert module.overdue(said, verdicts, seen, TODAY) == {"o/a:false-refusal/old": 15}
+    body = module.render(said, verdicts, seen, TODAY)
+    assert "дольше срока 14 дн. — 1" in body
+    assert body.count("**без вердикта дольше срока**") == 1
+    # Назавтра у уже просроченной записи состояние то же: число дней в тело не
+    # идёт, и сверка не переписывает задачу каждую ночь (взгляд на #1712).
+    late = module.collected(uptake({"repo": "o/a", "records": [record("old")]}))
+    today = module.render(late, {}, seen, TODAY)
+    tomorrow = module.render(late, {}, seen, TODAY + timedelta(days=1))
+    assert module.stable(tomorrow) == module.stable(today)
+    assert module.overdue(said, verdicts, {}, TODAY) == {}, "день неизвестен — не просрочено"
+
+
+def test_main_advises_on_every_overdue_record_and_still_exits_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Просроченная запись — предупреждение в журнале прогона, исход — 0: слияния не держит."""
+    data = tmp_path / "uptake.json"
+    data.write_text(json.dumps(uptake({"repo": "o/a", "records": [record()]})), "utf-8")
+    verdicts = tmp_path / module.paths.FEEDBACK_VERDICTS
+    verdicts.parent.mkdir(parents=True)
+    verdicts.write_text('{"schema": 1, "verdicts": {}}', "utf-8")
+    old = (TODAY - timedelta(days=30)).isoformat()
+    platform = Platform(5, f'<!-- feedback-seen: {{"o/a:false-refusal/x": "{old}"}} -->')
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", platform.live)
+    monkeypatch.setattr(module.ghrest, "request", platform.request)
+    argv = ["--uptake", str(data), "--root", str(tmp_path), "--repo", "o/us"]
+    assert module.main(argv) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert "::warning::запись соседа o/a:false-refusal/x без вердикта" in out
