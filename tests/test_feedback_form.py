@@ -70,3 +70,10 @@ def test_the_answer_check_judges_the_section(tmp_path: Path) -> None:
         policy.load(answer)
     answer.write_text(answer.read_text(encoding="utf-8").split("feedback:")[0], encoding="utf-8")
     assert "e2e" in policy.load(answer), "без раздела сверка проходит"
+
+
+def test_one_record_is_read_by_name_with_its_place() -> None:
+    """`record_of` — запись по имени; место в отказе — номер записи."""
+    assert module.record_of(good(), 1) == module.Record(**good())
+    with pytest.raises(module.NotRun, match="запись 7"):
+        module.record_of({**good(), "kind": "x"}, 7)
