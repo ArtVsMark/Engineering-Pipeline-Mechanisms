@@ -2,8 +2,8 @@
   "schema": "2.2",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Pipeline-Mechanisms — export/facts/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-26T08:08:29+00:00",
-  "commit": "19bb97ead63f1683b334925241e42e4db957adbb",
+  "generated_at": "2026-10-26T08:20:04+00:00",
+  "commit": "ceacf7c19c530f9b488646d8e9d646991832fce1",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,11 +19,11 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.11.27",
+  "version": "1.11.28",
   "release": "1.11",
   "coverage_percent": 94.3,
   "tests": {
-    "functions": 4623,
+    "functions": 4628,
     "modules": 196
   },
   "checks_per_pr": {
@@ -66,8 +66,8 @@
       "schema_of": "общий шаг фактов механизмов: детали покрытия и полнота версии",
       "coverage": {
         "read": true,
-        "covered": 18538,
-        "lines": 19655
+        "covered": 18543,
+        "lines": 19660
       },
       "version_whole": true
     },
