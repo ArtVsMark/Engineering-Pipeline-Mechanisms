@@ -21,8 +21,8 @@
 знает и не сочиняет; их текст переносится дословно. Со строками этих разделов
 сборщик делает четыре вещи, и все — чтение источника, а не сочинение: СНИМАЕТ
 строку, чей адрес закрыт, ДОБАВЛЯЕТ в раздел 4 открытую задачу, рождённую
-работой по строке раздела 4 или 6 (`born_rows`, #747), ДОПИСЫВАЕТ в раздел 6
-открытую задачу, которой в плане нет (`queued_rows`, #1655), и РАСКЛАДЫВАЕТ
+работой по строке раздела 4 или 6 (`born_rows`, #747), ДОПИСЫВАЕТ в раздел 4
+открытую задачу, которой в плане нет (`queued_rows`, #1655, #1695), и РАСКЛАДЫВАЕТ
 оба раздела по группам по меткам задач (`grouped`, #1433): метка соседа
 уводит строку в раздел 6, метка группы раздела 4 — в раздел 4 (`routed`).
 
@@ -75,6 +75,7 @@ import contextlib
 import os
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -172,22 +173,56 @@ class Source:
 #: починка, без которой стоит своё красное изменение.
 ZERO_TITLES: Final = ("0а · Ремонт общей ветки", "0б · Починка, без которой стоит изменение")
 FIVE_TITLES: Final = ("Правила каталога", "Дрейф", "Поводы для правила", "Копящиеся находки")
-#: Заголовок находки в строке реестра: «… — [вес] заголовок». Место в нём
-#: разбирает канон `findings.place_of`, а не своя регулярка: своя расходилась
-#: с ним на кавычках, пути без расширения и нескольких строках (взгляд на #1264).
-FINDING_TITLE_RE: Final = re.compile(r"\] (?P<title>.*)")
-#: Группа находки, у которой места нет.
+#: Зона находки без места: в заголовке пути нет.
 NO_PLACE: Final = "без места"
+#: Зона находки, чьё место — файл в корне дерева (`CONTRACT_VERSION`, `AGENTS.md`).
+ROOT_ZONE: Final = "корень"
 
 
-def by_file(title: str, rows: list[str]) -> list[tuple[str, list[str]]]:
-    """Копящиеся находки по файлу: одна группа — одно будущее изменение (#1263)."""
-    grouped: dict[str, list[str]] = {}
-    for row in rows:
-        found = FINDING_TITLE_RE.search(row)
-        place = findings.place_of(found["title"]) if found else ""
-        grouped.setdefault(f"`{place}`" if place else NO_PLACE, []).append(row)
-    return [(f"{title} · {place}", grouped[place]) for place in sorted(grouped)]
+def zone_of(title: str) -> str:
+    """Зона находки — верхний каталог её места по канону `findings.place_of`."""
+    place = findings.place_of(title)
+    if not place:
+        return NO_PLACE
+    head, slash, _ = place.partition("/")
+    return f"`{head}`" if slash else ROOT_ZONE
+
+
+def kept_line(kept: list[tuple[str, int, str, str]], registry: int | None) -> str:
+    """Копящиеся находки счётом и разбивкой, а не списком (решение владельца 26.10.2026, #1695).
+
+    СПИСОК ЖИВЁТ В РЕЕСТРЕ, ПЛАН НЕСЁТ СЧЁТ. Строки раздела 5 ничем не
+    читались — снимает находку `Разобрано:` из реестра, план её только
+    зеркалил (022). А тело плана площадка держит до 65 536 знаков: строка
+    находки около двухсот, и при трёх сотнях копящихся план перестал бы
+    записываться вовсе. Строка «находок на слитом копится: N» остаётся
+    дословно: по ней навык `bundle-the-work` судит порог волны. Разбивка — по
+    весу и по зоне: по зоне режется волна, а рода у открытой находки нет — его
+    называет человек при разборе, и угадывать его здесь значило бы решить за
+    него (057).
+
+    СТРОКОЙ, А НЕ ЗАМЕТКОЙ: непустой источник 5 копящиеся находки делали и
+    прежде, и шаг долга судит его по тем же строкам (`debt.FED_BY`) — счёт
+    вместо списка этого не меняет.
+    """
+    if not kept:
+        return ""
+    weights = Counter(weight for _, _, weight, _ in kept)
+    zones = Counter(zone_of(said) for *_, said in kept)
+    where = f"реестр находок #{registry}" if registry is not None else "реестр находок"
+    return (
+        f"находок на слитом копится: {len(kept)} — берутся по слову владельца, "
+        "раздел 6 не держат; по весу: "
+        + " · ".join(f"{one} {weights[one]}" for one in sorted(weights))
+        + "; по зонам: "
+        + " · ".join(f"{one} {count}" for one, count in sorted(zones.items(), key=by_count))
+        + f"; список и отпечатки — {where}"
+    )
+
+
+def by_count(item: tuple[str, int]) -> tuple[int, str]:
+    """Порядок зон: больше находок — раньше, при равенстве — по имени."""
+    return -item[1], item[0]
 
 
 def address_of(line: str) -> str:
@@ -301,13 +336,14 @@ def sources(
     # #639): дефект — в источнике 3, риск и замечание копятся в источнике 5.
     # Берёт их окно только по слову владельца, и раздел 6 они не держат
     # (решение владельца 17.10.2026, #639). Граница и её довод — у
-    # `debt.ACCRUED`. Копящееся не теряется: строка с отпечатком стоит в
-    # разделе 5, и снимает её то же `Разобрано:`.
+    # `debt.ACCRUED`. Копящееся не теряется: оно лежит в реестре, раздел 5
+    # несёт его счёт и ссылку (`kept_line`, #1695), снимает его то же
+    # `Разобрано:`.
     kept_part = Source()
     try:
-        everything = debt.findings_debt(repo, token, listed)
+        registry, everything = debt.findings_registry(repo, token, listed)
     except ghrest.TransportError as exc:
-        everything = None
+        registry, everything = None, None
         built[3] = Source(rows=stayed, unread=f"реестр находок не прочитан: {exc}")
         kept_part = Source(unread=f"реестр находок не прочитан: {exc}")
         broken.append("3")
@@ -329,15 +365,7 @@ def sources(
         marks = {one[0] for one in everything}
         rows = [f"`{mark}` · #{pr} — [{weight}] {said}" for mark, pr, weight, said in left]
         built[3] = Source(rows=rows + stayed, unread=lagging_silent, note=blind)
-        kept_part = Source(
-            rows=[f"`{mark}` · #{pr} — [{weight}] {said}" for mark, pr, weight, said in kept],
-            note=(
-                f"находок на слитом копится: {len(kept)} — берутся по слову владельца, "
-                "раздел 6 не держат"
-                if kept
-                else ""
-            ),
-        )
+        kept_part = Source(rows=[kept_line(kept, registry)] if kept else [])
         if lagging_silent:
             broken.append("3")
 
@@ -357,8 +385,7 @@ def sources(
         note="; ".join(part.note for part in parts if part.note),
         unread="; ".join(part.unread for part in parts if part.unread),
         groups=[
-            *zip(FIVE_TITLES[:-1], (part.rows for part in parts[:-1]), strict=True),
-            *by_file(FIVE_TITLES[-1], kept_part.rows),
+            *zip(FIVE_TITLES, (part.rows for part in parts), strict=True),
         ],
     )
     if built[5].unread:
@@ -684,7 +711,7 @@ def born_rows(
     25.10.2026, #1655: «4 — работаем, 6 — ждём»). С #1655 в раздел 6 дописана
     вся открытая работа (`queued_rows`), и родитель из него вёл ребёнка ждущей
     задачи в «Работаем сейчас». Ребёнок ждущей ждёт с ней: его, как любую
-    открытую задачу вне плана, дописывает в раздел 6 `queued_rows`. Заодно
+    открытую задачу вне плана, дописывает `queued_rows` — по её метке. Заодно
     `sub_issues` спрашивается по строкам 4, а не по всей очереди 6 (`d6fd57f`).
 
     Порядок внутри раздела ставит владелец: механизм ставит строку последней в
@@ -848,13 +875,21 @@ QUEUED_TAIL: Final = "не было в плане — дописал сборщ�
 def queued_rows(
     repo: str, listed: list[dict[str, Any]], taken: frozenset[int] | set[int]
 ) -> list[str]:
-    """Открытые задачи, которых нет ни в одном разделе плана, — строками раздела 6.
+    """Открытые задачи, которых нет ни в одном разделе плана, — строками раздела 4.
 
     РЕШЕНИЕ ВЛАДЕЛЬЦА 25.10.2026 (#1655): вся наша открытая работа стоит в
     плане. Задача без строки не видна ни окну, ни владельцу — замер того дня:
     шесть из 35 открытых (#782, #939–#943). Отсев — тот же, что у рождённой
     строки (`may_be_born`): живые задачи механизма, изменения, чужое хранилище
     и уже стоящее в плане строкой не становятся.
+
+    ВСТАЁТ В РАЗДЕЛ 4, А НЕ В 6 (слово владельца 26.10.2026, #1695): «6 пункт
+    я определяю сам, что у нас ждёт, либо если ждёт соседей; всё остальное
+    должно лететь в 4». До того такая задача уходила в 6, и задачи, заведённые
+    в работе с окном без связи со строкой раздела 4, — #1694, #1695, #1697 —
+    стояли в «Ждёт своей очереди», хотя работа шла по ним. Метка соседа
+    по-прежнему уводит строку в 6 (`section_of`), а хвост #1655 уже стоит в
+    разделе 6 строками и не двигается.
     """
     return [
         f"- **#{int(issue['number'])}** — {issue.get('title') or ''} *({QUEUED_TAIL})*"
@@ -1110,7 +1145,7 @@ def laid_out(
     )
     kept, moved = routed(held, labels)
     extra: dict[int, list[str]] = {one: list(moved[one]) for one in HELD}
-    for line, here in [*((one, BORN_INTO) for one in born), *((one, 6) for one in queued)]:
+    for line, here in [*((one, BORN_INTO) for one in born), *((one, BORN_INTO) for one in queued)]:
         extra[section_of(label_of(line, labels), here)].append(line)
     return {
         4: grouped(kept[4], labels, extra[4], GROUPS),
@@ -1367,14 +1402,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     written = [line for one in HELD for line in held[one] if line not in body]
     born = [line for line in written if BORN_TAIL in line]
-    queued = [line for line in written if QUEUED_TAIL in line]
+    queued = {
+        one: sum(1 for line in held[one] if line not in body and QUEUED_TAIL in line)
+        for one in HELD
+    }
     if args.apply:
         ghrest.request("PATCH", f"repos/{args.repo}/issues/{number}", token, {"body": said})
         print(f"план #{number} собран" + (f"; снято сделанных строк: {gone}" if gone else ""))
         if born:
             print(f"встало рождённых работой задач: {len(born)}")
-        if queued:
-            print(f"в раздел 6 дописано задач, которых в плане не было: {len(queued)}")
+        # РАЗДЕЛ НАЗЫВАЕТСЯ ПО ТОМУ, КУДА СТРОКА ЛЕГЛА: метка уводит её из 4 в 6,
+        # и одно имя на всех называло не тот раздел (находка `290ebd9`).
+        for one, count in queued.items():
+            if count:
+                print(f"в раздел {one} дописано задач, которых в плане не было: {count}")
     else:
         # НОМЕР ПЛАНА ПЕЧАТАЕТСЯ И СУХИМ ЗАХОДОМ: навык `work-the-plan` не
         # прибивает номер живой задачи и отсылает за ним сюда, а в самом теле
