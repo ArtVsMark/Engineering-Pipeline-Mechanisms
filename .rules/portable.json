@@ -14,6 +14,7 @@
   "own_issues": {
     "family-gates": "ещё не заведена: задачу заводит первый заход джоба `gates-task` прогона `badges.yml` после слияния (#1425, шаг 2) — номер пишется сюда, когда она появится",
     "feedback-registry": "ещё не заведена: задачу заводит джоб `gates-task` прогона `badges.yml`, когда ночной обход впервые найдёт у соседа запись `feedback:` (#1665) — номер пишется сюда, когда она появится",
+    "skills-digest": "ещё не заведена: задачу-аналитику заводит первый недельный заход `skills.yml` (сводка `skill_digest.py`, #1694) — номер пишется сюда, когда она появится",
     "review-findings": 23,
     "unlooked": 89,
     "main-red": 99,
@@ -412,6 +413,9 @@
     ".github/workflows/step-schedules-seen.yml": {
       "answer": "as-is"
     },
+    ".github/workflows/step-skills.yml": {
+      "answer": "as-is"
+    },
     ".github/workflows/step-stuck.yml": {
       "answer": "as-is"
     },
@@ -426,6 +430,12 @@
     },
     ".github/workflows/step-work-plan.yml": {
       "answer": "as-is"
+    },
+    ".github/workflows/skills.yml": {
+      "answer": "configured",
+      "where": [
+        ".github/workflows/skills.yml"
+      ]
     },
     ".github/workflows/stuck.yml": {
       "answer": "configured",
@@ -983,7 +993,16 @@
         ".rules/schedules.json"
       ]
     },
+    "scripts/skill_digest.py": {
+      "answer": "as-is"
+    },
+    "scripts/skill_record.py": {
+      "answer": "as-is"
+    },
     "scripts/skill_runs.py": {
+      "answer": "as-is"
+    },
+    "scripts/skill_signals.py": {
       "answer": "as-is"
     },
     "scripts/squash_body.py": {

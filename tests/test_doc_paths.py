@@ -56,6 +56,7 @@ ELSEWHERE: Final[dict[str, str]] = {
     ".github/badges/facts.json": "ветка `badges`, а у издателя — до публикации",
     ".github/badges/contracts.json": "ветка `badges`: манифест семьи рядом с фактами",
     ".github/badges/findings.json": "ветка `badges`: архив находок (`scripts/findings_archive.py`)",
+    ".github/badges/skills.json": "ветка `badges`: записи навыков (`scripts/skill_record.py`)",
 }
 
 

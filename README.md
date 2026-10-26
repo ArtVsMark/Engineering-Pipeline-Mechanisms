@@ -59,6 +59,7 @@
 [`step-agent-pr.yml`](.github/workflows/step-agent-pr.yml) (открытие изменения) ·
 [`step-task-items.yml`](.github/workflows/step-task-items.yml) (разбор слитого против задачи) ·
 [`step-deps-intercept.yml`](.github/workflows/step-deps-intercept.yml) (подъём закреплённых действий по сигналу Dependabot) ·
+[`step-skills.yml`](.github/workflows/step-skills.yml) (запись применения навыков на слитое изменение и недельная сводка) ·
 [`step-attribution-history.yml`](.github/workflows/step-attribution-history.yml) (атрибуция в истории общей ветки) ·
 [`step-python-next.yml`](.github/workflows/step-python-next.yml) (проба предрелизной версии языка).
 Токен владельца `MERGE_QUEUE_TOKEN` и ключ агента `CLAUDE_CODE_OAUTH_TOKEN`

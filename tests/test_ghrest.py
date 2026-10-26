@@ -182,6 +182,7 @@ YAML_READERS: Final = {
         "отличается от своего по дереву, а не по памяти (#634)"
     ),
     "headroom.py": "предел `timeout-minutes` объявленных работ прогона (#1697)",
+    "skill_signals.py": "шапка `SKILL.md` — признаки ожидания навыка, ключ `expected` (#1694)",
 }
 
 
@@ -1058,6 +1059,7 @@ NOT_PLATFORM_TIME: Final[dict[str, tuple[int, str]]] = {
     "scripts/items_left.py::tests_born": (1, "время коммита из git log — пояс у git есть всегда"),
     "scripts/runs_series.py::merge": (1, "полночь дня, собранная здесь же с поясом"),
     "scripts/runs_series.py::since_day": (1, "полночь дня, собранная здесь же с поясом"),
+    "scripts/skill_digest.py::week_of": (1, "день слияния из записи (%cs у git), берётся неделя"),
     "scripts/trunk_log.py::merge_dates": (1, "время коммита из git log — пояс у git есть всегда"),
     "scripts/unlooked.py::stalled": (2, "даты дня, берётся только день"),
     "scripts/window.py::commits": (1, "время коммита из git log (%cI) — пояс у git есть всегда"),
