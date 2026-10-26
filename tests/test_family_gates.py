@@ -286,3 +286,5 @@ def test_a_rework_row_takes_its_reason_from_the_neighbours_record() -> None:
     assert "причина: доработка" in first and "нужен вход &lt;путь&gt; (o/n#4)" in first
     assert second.endswith("причины в канале нет")
     assert "причин" not in module.render_issue(said)
+    assert module.reason_of(rows[0], None) == "", "канал не дан — хвоста нет"
+    assert module.reason_of(rows[1], reasons) == " · причины в канале нет"

@@ -691,7 +691,7 @@ def closed_feedback(tag: str, *, ours: bool = True) -> list[str]:
     head = "**Записи соседей о наших механизмах, закрытые выпуском** (#1665): "
     path = paths.FEEDBACK_VERDICTS.as_posix()
     try:
-        listed = git("ls-tree", "--name-only", tag, "--", path)
+        listed = git("ls-tree", "-z", "--name-only", tag, "--", path).strip("\0")
     except NotRun as exc:
         return [f"{head}не прочитано — {exc}."]
     if not listed:
