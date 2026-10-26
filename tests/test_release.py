@@ -7,6 +7,7 @@
 случаем, потому что выпуск делают редко и увидеть их надо сразу все.
 """
 
+import json
 import os
 import subprocess
 from collections.abc import Callable
@@ -1552,3 +1553,40 @@ def test_the_release_page_names_the_candidates_it_took(
     assert module.taken_candidates("v1.1.0", ours=False) == [], "у потребителя пустой — без строки"
     assert module.taken_candidates("v1.2.0", ours=False)[0].endswith("взято 2.")
     assert "не прочитано" in module.taken_candidates("v9.9.9")[0]
+
+
+def test_the_release_page_names_the_neighbours_records_it_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Выпуск называет записи соседей, чей вердикт «принято»/«починено» этим тегом (п. 6 #1665)."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path)]
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    verdicts = tmp_path / ".rules" / "feedback-verdicts.json"
+
+    def commit(tag: str, said: dict[str, object] | str | None) -> None:
+        if said is not None:
+            verdicts.parent.mkdir(exist_ok=True)
+            verdicts.write_text(said if isinstance(said, str) else json.dumps(said), "utf-8")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", tag], check=True)
+        subprocess.run([*git, "tag", tag], check=True)
+
+    commit("v1.0.0", None)
+    commit(
+        "v1.1.0",
+        {
+            "schema": 1,
+            "verdicts": {
+                "o/a:false-refusal/x": {"verdict": "fixed", "release": "v1.1.0"},
+                "o/a:partial/y": {"verdict": "accepted", "release": "v1.2.0"},
+                "o/b:false-pass/z": {"verdict": "rejected", "why": "законно"},
+            },
+        },
+    )
+    commit("v1.2.0", "{не JSON")
+    monkeypatch.chdir(tmp_path)
+    assert module.closed_feedback("v1.0.0") == [], "выпуск старше канала — раздела нет"
+    said = module.closed_feedback("v1.1.0")
+    assert said[0].endswith(": 1.") and said[2:] == ["- `o/a:false-refusal/x` · fixed"]
+    assert "не прочитано" in module.closed_feedback("v1.2.0")[0]
+    assert "не прочитано" in module.closed_feedback("v9.9.9")[0]

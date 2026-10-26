@@ -47,6 +47,8 @@ from typing import Any, Final
 
 import family
 import family_uptake
+import feedback_form
+import feedback_registry
 import findings
 import ghrest
 import kinds
@@ -179,8 +181,45 @@ TITLE: Final = "Карта гейтов семьи: три очереди кан
 DATED: Final = ("Собрано:", "Пусто на")
 
 
-def render_issue(said: dict[str, Any]) -> str:
-    """Тело живой задачи: источник карты, счёт исходов и три очереди с адресами."""
+#: Ключ причины из канала: сосед и путь нашего механизма, который он переписал.
+Reason = tuple[str, str]
+
+
+def reasons_from(uptake: Any) -> dict[Reason, list[str]]:
+    """Причины переписи из канала соседей (п. 7 #1665): сосед и механизм → записи.
+
+    Запись соседа `feedback:` называет наш механизм путём (`scripts/x.py`), а
+    строка очереди `rework` — `origin` вида `репозиторий:путь@тег`: сводятся по
+    соседу и пути. Текст соседа идёт через `feedback_registry.quoted` — это его
+    ввод, а не наша разметка (085). Файл обхода не той формы — `NotRun` у
+    `feedback_registry`, зовущий называет его строкой.
+    """
+    found: dict[Reason, list[str]] = {}
+    for row in feedback_registry.collected(uptake).rows:
+        one = row.record
+        found.setdefault((row.repo.casefold(), one.mechanism), []).append(
+            f"{feedback_form.KINDS[one.kind]} — {feedback_registry.quoted(one.measured)} "
+            f"({feedback_registry.quoted(one.trace)})"
+        )
+    return found
+
+
+def reason_of(row: dict[str, Any], reasons: dict[Reason, list[str]] | None) -> str:
+    """Хвост строки `rework` о причине: канал не дан — пусто, нет записи — так и сказано."""
+    if reasons is None:
+        return ""
+    origin = family.unversioned(str(row.get("origin") or ""))
+    path = origin.split(":", 1)[-1]
+    said = reasons.get((str(row.get("repo") or "").casefold(), path))
+    return f" · причина: {'; '.join(said)}" if said else " · причины в канале нет"
+
+
+def render_issue(said: dict[str, Any], reasons: dict[Reason, list[str]] | None = None) -> str:
+    """Тело живой задачи: источник карты, счёт исходов и три очереди с адресами.
+
+    `reasons` — причины переписи из канала соседей (`reasons_from`); не даны —
+    строки `rework` без хвоста, а не «причины нет»: канал не спрошен (045).
+    """
     source = said.get("source") or {}
     queued = said.get("queues") or {}
     lines = [
@@ -208,8 +247,9 @@ def render_issue(said: dict[str, Any]) -> str:
         for row in rows:
             if isinstance(row, dict):
                 origin = f" · от `{row['origin']}`" if row.get("origin") else ""
+                why = reason_of(row, reasons) if key == "rework" else ""
                 lines.append(
-                    f"- {row['rule']} · {row['repo']} · `{row.get('where') or '—'}`{origin}"
+                    f"- {row['rule']} · {row['repo']} · `{row.get('where') or '—'}`{origin}{why}"
                 )
             else:
                 lines.append(f"- {row}")
@@ -221,7 +261,14 @@ def stable(body: str) -> str:
     return findings.undated(body, DATED)
 
 
-def save(repo: str, token: str, said: dict[str, Any], *, apply: bool) -> None:
+def save(
+    repo: str,
+    token: str,
+    said: dict[str, Any],
+    *,
+    apply: bool,
+    reasons: dict[Reason, list[str]] | None = None,
+) -> None:
     """Переписывает живую задачу по месту или заводит одну — как задача дрейфа.
 
     Сухой заход называет то же действие, что совершил бы настоящий (взгляд на
@@ -229,7 +276,7 @@ def save(repo: str, token: str, said: dict[str, Any], *, apply: bool) -> None:
     сверку не входит. `ghrest.TransportError` — наверх: зовущий объявляет
     его третьим исходом.
     """
-    body = render_issue(said)
+    body = render_issue(said, reasons)
     number, current = findings.live_issue(repo, token, MARKER)
     if number is None and not any(said.get("queues", {}).values()):
         print(f"{'' if apply else report.DRY + ' '}очереди пусты — задачу карты не завожу")
@@ -250,15 +297,26 @@ def save(repo: str, token: str, said: dict[str, Any], *, apply: bool) -> None:
     print(f"задача карты гейтов #{number} обновлена")
 
 
-def write_issue(path: Path, repo: str, *, apply: bool) -> int:
-    """Живая задача по собранному файлу карты; нет файла или площадка молчит — исход 2."""
+def write_issue(path: Path, repo: str, *, apply: bool, uptake: Path | None = None) -> int:
+    """Живая задача по собранному файлу карты; нет файла или площадка молчит — исход 2.
+
+    `uptake` — файл обхода семьи: из него очередь `rework` берёт причину. Не
+    читается — карта пишется без причин, и это сказано строкой, а не тишиной:
+    причина — необязательный канал, задачу карты он не держит (084, 045).
+    """
     token = ghrest.token_from_env()
     if not token:
         print("задача карты не записана: нет токена площадки", file=sys.stderr)
         return EXIT_BROKEN
     try:
         said = json.loads(path.read_text(encoding="utf-8"))
-        save(repo, token, said, apply=apply)
+        reasons = None
+        if uptake is not None:
+            try:
+                reasons = reasons_from(json.loads(uptake.read_text(encoding="utf-8")))
+            except (OSError, ValueError, feedback_registry.NotRun) as exc:
+                print(f"::warning::причины переписи из канала не прочитаны: {report.cut(str(exc))}")
+        save(repo, token, said, apply=apply, reasons=reasons)
     except (OSError, ValueError, KeyError, ghrest.TransportError) as exc:
         print(f"задача карты не записана: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
@@ -275,10 +333,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="куда положить карту")
     parser.add_argument("--map", type=Path, help="собранная карта: записать по ней живую задачу")
     parser.add_argument("--apply", action="store_true", help="с --map: записать, а не показать")
+    parser.add_argument(
+        "--uptake", type=Path, help="с --map: файл обхода семьи — причины очереди rework"
+    )
     parser.add_argument("--repo", default=family_uptake.OURS, help="наш репозиторий")
     args = parser.parse_args(argv)
     if args.map is not None:
-        return write_issue(args.map, args.repo, apply=args.apply)
+        return write_issue(args.map, args.repo, apply=args.apply, uptake=args.uptake)
     if args.summary is None or args.out is None:
         parser.error("нужны --summary и --out, либо --map")
     try:

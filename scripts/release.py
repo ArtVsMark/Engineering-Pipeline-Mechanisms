@@ -46,6 +46,7 @@
 """
 
 import argparse
+import json
 import os
 import sys
 from collections import Counter
@@ -56,6 +57,7 @@ import build_changelog
 import changerefs
 import check_version
 import family_uptake
+import feedback_form
 import ghrest
 import gitcall
 import paths
@@ -663,10 +665,51 @@ def page_body(version: str, repo: str) -> str:
         census = [f"Перепись отдачи не собрана: {exc}."]
     if census:
         lines += ["", *census]
-    taken = taken_candidates(f"v{version}", ours=repo.casefold() == family_uptake.OURS.casefold())
+    ours = repo.casefold() == family_uptake.OURS.casefold()
+    taken = taken_candidates(f"v{version}", ours=ours)
     if taken:
         lines += ["", *taken]
+    closed = closed_feedback(f"v{version}", ours=ours)
+    if closed:
+        lines += ["", *closed]
     return "\n".join(lines)
+
+
+#: Исходы вердикта, которые закрывают запись соседа выпуском.
+CLOSED_BY_RELEASE: Final = ("accepted", "fixed")
+
+
+def closed_feedback(tag: str, *, ours: bool = True) -> list[str]:
+    """Раздел «закрытые записи соседей»: вердикты, чей выпуск — этот тег (п. 6 #1665).
+
+    Запись соседа закрывается выпуском, когда вердикт по ней — «принято» или
+    «починено» с этим тегом. Файл вердиктов читается С ДЕРЕВА ПО ТЕГУ, а не с
+    рабочего: страница описывает то, что выпущено. Файла на теге нет — выпуск
+    старше канала, раздела нет; не разобран — строка с причиной (045). Пусто
+    названо словами только у поставщика, как у очередей карты (027).
+    """
+    head = "**Записи соседей о наших механизмах, закрытые выпуском** (#1665): "
+    path = paths.FEEDBACK_VERDICTS.as_posix()
+    try:
+        listed = git("ls-tree", "--name-only", tag, "--", path)
+    except NotRun as exc:
+        return [f"{head}не прочитано — {exc}."]
+    if not listed:
+        return []
+    try:
+        said = feedback_form.verdicts_of(json.loads(git("show", f"{tag}:{path}")))
+    except (NotRun, ValueError, feedback_form.NotRun) as exc:
+        return [f"{head}не прочитано — {exc}."]
+    closed = sorted(
+        key for key, one in said.items() if one.verdict in CLOSED_BY_RELEASE and one.said == tag
+    )
+    if not closed:
+        return [f"{head}нет."] if ours else []
+    return [
+        f"{head}{len(closed)}.",
+        "",
+        *(f"- `{key}` · {said[key].verdict}" for key in closed),
+    ]
 
 
 def taken_candidates(tag: str, *, ours: bool = True) -> list[str]:

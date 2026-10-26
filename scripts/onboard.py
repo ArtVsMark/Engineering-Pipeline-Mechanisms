@@ -1031,6 +1031,7 @@ SKILLS_KITTED: Final = tuple(
         "role-profile",
         "rulebook-keeps-how-to-work",
         "rulebook-reread",
+        "tell-the-supplier",
         "what-the-graph-misses",
         "work-the-plan",
     )
@@ -1149,6 +1150,9 @@ KIT_REFUSED: Final = {
     paths.DECISIONS: "записи ваших решений; пустой каталог законен",
     paths.ENTRANCE: "ваш вход: он называет ВАШЕ отданное; другой файл — разделом shipped",
     paths.PORTABLE: "перепись того, что ВЫ отдаёте; нет файла — нет её раздела на странице выпуска",
+    paths.FEEDBACK_VERDICTS: (
+        "вердикты по записям соседей о ВАШИХ механизмах; нет файла — нет раздела выпуска"
+    ),
 }
 #: Пути области в заготовке: ЛЮБОЙ путь — в корне и вглубь (`review_map.matches`).
 #: Не пустые: пустой `paths` карта читает «поверхности нет» и правила области
@@ -2172,7 +2176,26 @@ def answer(
     if beyond:
         more = "\n".join(row(one) for one in beyond)
         said += f"{policy.BEYOND}:\n{more}\n"
-    return said
+    return said + FEEDBACK_SAMPLE
+
+
+#: ОБРАЗЕЦ РАЗДЕЛА `feedback:` — КОММЕНТАРИЕМ (п. 9 #1665). Канал к поставщику
+#: раздаётся вместе с ответом, но пустая запись была бы записью: раздел ложится
+#: закомментированным, и проект раскрывает его, когда есть что сказать.
+#: Заполнять — навыком `tell-the-supplier`, форму судит шаг `pipeline`.
+FEEDBACK_SAMPLE: Final = """
+# Что механизм поставщика сделал у вас не так — записью, а не прозой в трекере
+# (навык `tell-the-supplier`, форма — договор поставщика, раздел `feedback:`).
+# feedback:
+#   version: 1
+#   records:
+#     - slug: <устойчивое-имя>
+#       mechanism: <step-…, scripts/….py или .claude/…>
+#       version: <тег выпуска поставщика, vX.Y.Z>
+#       kind: <false-refusal | false-pass | not-run | partial | rework | bypass>
+#       measured: <что видно и сколько раз>
+#       trace: <владелец/репозиторий#N — ваша задача>
+"""
 
 
 def update(
