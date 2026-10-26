@@ -182,6 +182,17 @@ CANDIDATE_RE: Final = re.compile(
     re.MULTILINE,
 )
 
+#: ВЫЗВАННЫЙ НАВЫК — СТРОКОЙ КОММИТА (#1694). Навык не краснеет: невызванный
+#: неотличим от вызванного (решение 031). Строка `Навык: <имя>` — самоотчёт
+#: окна о вызове, сырая запись для счёта «навык ждали — вызван»: её переносит
+#: тело уплотнения (`squash_body`), имя судит `check_pr_meta.skill_problems`.
+#: Самоотчёт и назван самоотчётом: забытая строка неотличима от невызванного
+#: навыка, и счёт, читающий её, обязан это говорить.
+SKILL_KEY: Final = "Навык:"
+SKILL_RE: Final = re.compile(
+    rf"^\s*(?P<mark>{re.escape(SKILL_KEY)})\s*(?P<text>\S.*?)\s*$", re.IGNORECASE | re.MULTILINE
+)
+
 #: ЗАДЕРЖКА, ОБЪЯВЛЕННАЯ ДО ОТКРЫТИЯ. Стоп-метку `hold` можно поставить только
 #: ПОСЛЕ того, как изменение открыто, а согласие очереди шаг открытия ставит
 #: сразу — между этими мгновениями изменение полностью готово к слиянию.
@@ -921,4 +932,20 @@ def candidates_in_all(texts: Iterable[str]) -> list[str]:
             line = f"{CANDIDATE_KEY} {match['queue']} · {match['rule']} · {match['repo']}"
             if line not in found:
                 found.append(line)
+    return found
+
+
+def skills_in_all(texts: Iterable[str]) -> list[str]:
+    """Имена навыков из строк «Навык: …» всех текстов — без повторов, в порядке появления.
+
+    В строке можно назвать несколько через запятую; обратные кавычки вокруг
+    имени снимаются — имя пишут и как код.
+    """
+    found: list[str] = []
+    for text in texts:
+        for match in marked_lines(text, SKILL_RE):
+            for name in match["text"].split(","):
+                said = name.strip().strip("`").strip()
+                if said and said not in found:
+                    found.append(said)
     return found

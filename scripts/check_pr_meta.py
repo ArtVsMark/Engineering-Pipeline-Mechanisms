@@ -96,6 +96,31 @@ def kind_problems(landing: str, kinds: dict[str, Any]) -> list[str]:
     return told
 
 
+#: Где лежат навыки дерева: имя навыка — имя его папки с `SKILL.md`.
+SKILLS: Final = Path(".claude") / "skills"
+
+
+def known_skills(root: Path = Path()) -> frozenset[str]:
+    """Навыки дерева — папки с `SKILL.md`; навыков нет — пусто."""
+    where = root / SKILLS
+    if not where.is_dir():
+        return frozenset()
+    return frozenset(one.name for one in where.iterdir() if (one / "SKILL.md").is_file())
+
+
+def skill_problems(landing: str, known: frozenset[str]) -> list[str]:
+    """Строки «Навык:», чьё имя не навык этого дерева (#1694).
+
+    Опечатка в имени дала бы счёту вызов навыка, которого нет, а настоящий
+    остался бы невызванным — счёт врал бы в обе стороны (045).
+    """
+    return [
+        f"«{changerefs.SKILL_KEY} {name}» — навыка «{name}» нет в `{SKILLS.as_posix()}`"
+        for name in changerefs.skills_in_all([landing])
+        if name not in known
+    ]
+
+
 def load_event() -> dict[str, Any]:
     """Читает событие площадки: предмет проверки — изменение, а не ветка."""
     path = os.environ.get("GITHUB_EVENT_PATH", "")
@@ -254,6 +279,8 @@ def text_problems(
             problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")
     if messages and finding_kinds.table_path("finding-kinds").is_file():
         problems += kind_problems(landing, finding_kinds.read())
+    if messages and (known := known_skills()):
+        problems += skill_problems(landing, known)
     said = "\n".join([body, landing, coming.body if coming else ""])
     for line in dict.fromkeys(changerefs.stray_closing_words(said)):
         problems.append(f"в строке «{line}» {STRAY_CLOSING}")
