@@ -1587,7 +1587,7 @@ def test_queued_rows_name_open_tasks_the_plan_lacks() -> None:
 def test_the_built_plan_routes_rows_and_queues_the_missing(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Сборка: раздел 6 под новым именем, соседская строка в 6, не стоявшая в плане — очередью."""
+    """Сборка: соседская строка — в 6, не стоявшая в плане — в 4 (#1695)."""
     written = quiet_platform(monkeypatch)
     listed = [
         {"number": 640, "labels": [{"name": module.WAITS_NEIGHBOUR}]},
@@ -1599,15 +1599,17 @@ def test_the_built_plan_routes_rows_and_queues_the_missing(
     six = written[0].split(f"## {module.HEADS[6]}", 1)[1]
     assert "*Ожидаем действия соседей*\n- **#640**" in six
     assert "*Ждёт своей очереди*\n- **#642**" in six
-    assert f"- **#711** — Без строки *({module.QUEUED_TAIL})*" in six
-    assert "#642" not in written[0].split("## 4 ·", 1)[1].split("## 5 ·", 1)[0]
-    assert "дописано задач, которых в плане не было: 1" in capsys.readouterr().out
+    four = written[0].split("## 4 ·", 1)[1].split("## 5 ·", 1)[0]
+    assert f"- **#711** — Без строки *({module.QUEUED_TAIL})*" in four
+    assert "#711" not in six, "не стоявшая в плане ушла в 6, а не в 4"
+    assert "#642" not in four
+    assert "в раздел 4 дописано задач, которых в плане не было: 1" in capsys.readouterr().out
 
 
 def test_laid_out_writes_born_and_queued_rows_into_the_section_of_their_label(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Рождённая — в 4, не стоявшая в плане — в 6, но обе по метке: соседская — в 6 (#1655)."""
+    """Рождённая и не стоявшая в плане — в 4, но обе по метке: соседская — в 6 (#1655, #1695)."""
     monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter([]))
     held = {4: ["- **#10** — наша"], 6: ["- **#20** — своя очередь"]}
     listed = [
@@ -1625,7 +1627,8 @@ def test_laid_out_writes_born_and_queued_rows_into_the_section_of_their_label(
     four, six = "\n".join(said[4]), "\n".join(said[6])
     assert "#11" in four and module.BORN_TAIL in four
     assert "*Ожидаем действия соседей*\n- **#12**" in six
-    assert "*Ждёт своей очереди*\n- **#20**" in six and "- **#13** — Вне плана" in six
+    assert "*Ждёт своей очереди*\n- **#20**" in six and "#13" not in six
+    assert "- **#13** — Вне плана" in four
 
 
 def test_a_row_moved_between_sections_is_not_counted_as_done(
