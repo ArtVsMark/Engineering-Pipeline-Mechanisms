@@ -70,6 +70,19 @@ def test_an_absent_key_is_undeclared_and_a_broken_one_is_refused(tmp_path: Path)
         module.Watch.read(path)
 
 
+@pytest.mark.parametrize(("runs", "fits"), [(1, True), (100, True), (101, False), (0, False)])
+def test_a_series_longer_than_a_page_is_refused(tmp_path: Path, runs: int, fits: bool) -> None:
+    """Ряд длиннее страницы площадки был бы вечным «ряд мал» — отказ с пределом (#1700)."""
+    path = tmp_path / "series.json"
+    said = {"workflow": "ci.yml", "jobs": ["t"], "share": 0.7, "runs": runs}
+    path.write_text(json.dumps({"headroom": said}), encoding="utf-8")
+    if fits:
+        assert module.Watch.read(path) is not None
+        return
+    with pytest.raises(module.NotRun, match=f"до {module.RUNS_CAP}"):
+        module.Watch.read(path)
+
+
 def test_limits_are_read_from_the_workflow_not_written_twice() -> None:
     """Предел — из `timeout-minutes` прогона; нет числа или работы — отказ."""
     assert module.limits(CI, ("test-matrix",)) == {"test-matrix": 10}
@@ -90,6 +103,38 @@ def test_a_matrix_cell_belongs_to_its_job_and_a_neighbour_does_not() -> None:
     assert module.owner_of("test-matrix", watched) == "test-matrix"
     assert module.owner_of("test-matrix-x", watched) == ""
     assert module.owner_of("test", watched) == ""
+
+
+def test_a_job_named_by_an_expression_owns_what_the_platform_substituted() -> None:
+    """`test (${{ matrix.py }})` приходит как `test (3.14)` — это его запись (#1700)."""
+    watched = {"test (${{ matrix.py }})": 10}
+    assert module.owner_of("test (3.14)", watched) == "test (${{ matrix.py }})"
+    assert module.owner_of("test ()", watched) == ""
+    assert module.owner_of("testx (3.14)", watched) == ""
+    assert module.owner_of("test", watched) == ""
+
+
+def test_any_exception_is_a_refusal_not_a_low_headroom(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Трасса — исход 2, а не 1 «запас мал»: класс закрыт в точке входа (#1700, 210)."""
+    root = tree(tmp_path)
+
+    def empty(*_: Any) -> Any:
+        return None.get("jobs")  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(module, "jobs_of_runs", empty)
+    argv = ["--repo", "o/r", "--root", str(root)]
+    with pytest.raises(AttributeError):
+        module.main(argv)
+    assert module.guarded(argv) == module.EXIT_BROKEN
+    assert "не находка о запасе" in capsys.readouterr().err
+
+
+def test_the_script_enters_through_the_guard() -> None:
+    """Точка входа процесса — `guarded`, а не голый `main`: иначе трасса снова код 1."""
+    text = (ROOT / "scripts" / "headroom.py").read_text(encoding="utf-8")
+    assert "sys.exit(guarded())" in text and "sys.exit(main())" not in text
 
 
 def test_only_a_job_that_ran_is_timed() -> None:
