@@ -17,6 +17,18 @@
 корень, а на площадке разрешается в задачу. Такие адреса из проверки выведены
 списком РАЗРЕШЁННОГО (068): не «всё, что вышло за корень, пропускаем», а
 «вышло за корень и дальше идёт известный раздел площадки».
+
+НО ПОДЪЁМ У НЕГО СЧИТАЕТСЯ (#1683). Площадка разрешает адрес обычным правилом
+URL от страницы `…/blob/main/<путь>`, и до `/<хозяин>/<репо>/issues/7` доходит
+только подъём ровно на два больше вложенности файла: из корня — `../../`, из
+`docs/decisions/` — `../../../../`. Замер 26.10.2026 по опубликованной записи
+`011`: `../../../issues/196` открывал `…/blob/issues/196`, `../../pull/235` —
+`…/blob/main/pull/235`, оба пустые; по дереву неверных было 142 из 267, в 53
+документах, и не краснел ни один — проверка пропускала любой подъём.
+ГРАНИЦЫ (195): фрагменты `changelog.d/` судятся как лежащие в корне — их текст
+собирается в корневой `CHANGELOG.md`; документ заготовки `kit/data/` лежит у
+потребителя на два каталога выше, и подъём в нём сейчас не судится иначе —
+адресов площадки там нет.
 """
 
 import re
@@ -100,6 +112,33 @@ def goes_to_the_platform(target: str) -> bool:
     return bool(rest) and rest[0] in PLATFORM
 
 
+#: Фрагменты журнала: их текст живёт в корневом `CHANGELOG.md`, а не на месте.
+FRAGMENTS: Final = "changelog.d/"
+#: Живой документ под приставкой фрагментов — судится на своём месте.
+FRAGMENTS_README: Final = "changelog.d/README.md"
+#: Звено подъёма в начале адреса.
+RISE: Final = "../"
+
+
+def platform_rise(here: str) -> int:
+    """Сколько `../` ведут со страницы документа `here` к корню репозитория на площадке.
+
+    Страница документа — `…/blob/main/<here>`: два звена над корнем дерева и
+    по звену на каталог. Фрагмент журнала читается в корневом журнале.
+    """
+    if here.startswith(FRAGMENTS) and here != FRAGMENTS_README:
+        return 2
+    return here.count("/") + 2
+
+
+def rise_of(target: str) -> int:
+    """Сколько звеньев `../` стоит в начале адреса."""
+    count = 0
+    while target.startswith(RISE, count * len(RISE)):
+        count += 1
+    return count
+
+
 def unresolved(path: Path, text: str | None = None) -> list[str]:
     """Ссылки документа, которым некуда вести; `text` — содержимое, если файл не он."""
     if text is None:
@@ -109,7 +148,15 @@ def unresolved(path: Path, text: str | None = None) -> list[str]:
     for number, line in enumerate(text.splitlines(), start=1):
         for match in LINK_RE.finditer(line):
             target = match["target"].strip("<>")
-            if target.startswith(OUTSIDE) or goes_to_the_platform(target):
+            if target.startswith(OUTSIDE):
+                continue
+            if goes_to_the_platform(target):
+                rise, need = rise_of(target), platform_rise(here)
+                if rise != need:
+                    problems.append(
+                        f"{here}:{number} — «{target}» поднимается на {rise}, "
+                        f"до площадки нужно {need}"
+                    )
                 continue
             where, _, anchor = target.partition("#")
             if not where:
@@ -219,6 +266,33 @@ def test_every_example_is_still_in_the_tree() -> None:
     seen = {said for _, _, said in named_paths()}
     dead = sorted(set(EXAMPLES) - seen)
     assert not dead, f"примеры больше нигде не стоят — исключения снять: {dead}"
+
+
+@pytest.mark.parametrize(
+    ("here", "need"),
+    [
+        ("AGENTS.md", 2),
+        ("docs/README.md", 3),
+        ("docs/decisions/011-x.md", 4),
+        (".claude/skills/x/SKILL.md", 5),
+        ("changelog.d/x.fixed.md", 2),
+        ("changelog.d/released/1.0.0/x.fixed.md", 2),
+        ("changelog.d/README.md", 3),
+    ],
+)
+def test_the_platform_rise_follows_the_page(here: str, need: int) -> None:
+    """Подъём до площадки — вложенность страницы плюс два; фрагмент — как корень."""
+    assert platform_rise(here) == need
+
+
+def test_a_short_or_long_platform_rise_is_named(tmp_path: Path) -> None:
+    """Обе половины: неверный подъём назван с числами, верный — нет."""
+    doc = ROOT / "docs" / "decisions" / "x.md"
+    text = "[#1](../../../issues/1) [#2](../../../../pull/2) [#3](../../../../../issues/3)\n"
+    problems = unresolved(doc, text)
+    assert len(problems) == 2, problems
+    assert "поднимается на 3, до площадки нужно 4" in problems[0]
+    assert "поднимается на 5, до площадки нужно 4" in problems[1]
 
 
 def test_the_check_sees_links_at_all() -> None:
