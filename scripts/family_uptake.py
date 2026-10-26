@@ -43,11 +43,12 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Final
 
 import catalogue
+import feedback_form
 import ghrest
 import onboard
 import paths
@@ -114,6 +115,11 @@ class Took:
     #: Диапазон `contract:` из его `.pipeline.yml`. `None` — не объявлен или
     #: не прочитан: «на свежем» без него не сказать, и он назван, а не угадан.
     span: str | None = None
+    #: Записи соседа о наших механизмах — раздел `feedback:` его ответа (#1665).
+    feedback: tuple[feedback_form.Record, ...] = ()
+    #: Почему раздел `feedback:` не прочитан; пусто — прочитан или его нет.
+    #: Битый раздел назван, а не выдан за «записей нет» (045).
+    feedback_broken: str = ""
 
     @property
     def steps(self) -> tuple[str, ...]:
@@ -265,7 +271,16 @@ def took(repo: str, where: Path, timeout: float = TIMEOUT) -> Took:
     answer = clone / paths.PIPELINE
     text = answer.read_text(encoding="utf-8", errors="replace") if answer.is_file() else ""
     span = policy.span_said(text) if text else None
-    return Took(repo=repo, pins=tuple(sorted(pins)), span=span)
+    # ЗАПИСИ СОСЕДА ЧИТАЮТСЯ ТЕМ ЖЕ КЛОНОМ (#1665): ответ уже здесь, и второго
+    # обхода ради одного раздела не нужно — ни клонов, ни вызовов к API.
+    records, broken = policy.feedback_said(text) if text else ([], "")
+    return Took(
+        repo=repo,
+        pins=tuple(sorted(pins)),
+        span=span,
+        feedback=tuple(records),
+        feedback_broken=broken,
+    )
 
 
 def sweep(
@@ -367,6 +382,18 @@ def uptake(seen: list[Took], unread: list[str], offered: list[str]) -> dict[str,
             }
             for one in took_ours
             for given in (one.given(offered),)
+        ],
+        # ЗАПИСИ СОСЕДЕЙ — У ВСЕХ ПРОЧИТАННЫХ, а не только у взявших вызовом
+        # (#1665): переписавший наш механизм к себе шагов не зовёт, а доработку
+        # как раз он и называет. Реестр записей ведёт `feedback_registry`.
+        "feedback": [
+            {
+                "repo": one.repo,
+                "records": [asdict(record) for record in one.feedback],
+                "broken": one.feedback_broken,
+            }
+            for one in seen
+            if one.feedback or one.feedback_broken
         ],
     }
 
