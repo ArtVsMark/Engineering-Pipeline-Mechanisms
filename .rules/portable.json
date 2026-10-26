@@ -185,6 +185,9 @@
     ".claude/skills/rulebook-keeps-how-to-work": {
       "answer": "as-is"
     },
+    ".claude/skills/restart-the-window": {
+      "answer": "as-is"
+    },
     ".claude/skills/rulebook-reread": {
       "answer": "as-is"
     },
@@ -532,6 +535,10 @@
         ".rules/showcase.json"
       ]
     },
+    ".rules/window-names.json": {
+      "answer": "ours",
+      "why": "@family"
+    },
     ".rules/workflow-forms.json": {
       "answer": "configured",
       "where": [
@@ -849,6 +856,12 @@
     },
     "scripts/hail.py": {
       "answer": "as-is"
+    },
+    "scripts/window_name.py": {
+      "answer": "as-is",
+      "where": [
+        ".rules/window-names.json"
+      ]
     },
     "scripts/items.py": {
       "answer": "as-is"
