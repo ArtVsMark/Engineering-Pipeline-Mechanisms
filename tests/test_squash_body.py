@@ -273,3 +273,13 @@ def test_a_taken_candidate_reaches_the_trunk_once() -> None:
         ["взял\n\nКандидат: rework · 001 · o/r", "ещё\n\nКандидат: rework · 001 · o/r"],
     )
     assert said.count("Кандидат: rework · 001 · o/r") == 1
+
+
+def test_an_invoked_skill_reaches_the_trunk_once_per_name() -> None:
+    """Строки «Навык:» переносятся в тело уплотнения, по имени на строку, без повторов (#1694)."""
+    said = body.compose_from(
+        ["построил гейт", "дочинил"],
+        ["гейт\n\nНавык: build-a-gate, `a-gate-obeys-every-rule`", "ещё\n\nнавык: build-a-gate"],
+    )
+    assert said.count("Навык: build-a-gate") == 1
+    assert "Навык: a-gate-obeys-every-rule" in said
