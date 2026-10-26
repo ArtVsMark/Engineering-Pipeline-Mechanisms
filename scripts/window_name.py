@@ -29,7 +29,8 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import onboard
 import paths
@@ -54,13 +55,30 @@ class BadTable(ValueError):
     """Таблица кратких имён не читается или нарушает свою форму."""
 
 
-def names(table: Path = TABLE) -> dict[str, str]:
-    """Репозиторий → краткое имя; форма и единственность имён проверяются при чтении."""
+def read(table: Path) -> dict[str, Any]:
+    """Таблица целиком; не читается или не объект — отказ с адресом."""
     try:
         raw = json.loads(table.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise BadTable(f"{table} не прочитана: {exc}") from exc
-    found = raw.get("names") if isinstance(raw, dict) else None
+    if not isinstance(raw, dict):
+        raise BadTable(f"{table}: ожидался объект")
+    return raw
+
+
+def zone(table: Path = TABLE) -> ZoneInfo:
+    """Пояс владельца, по которому считается день в имени окна."""
+    said = read(table).get("timezone")
+    try:
+        return ZoneInfo(str(said))
+    except (ValueError, ZoneInfoNotFoundError) as exc:
+        raise BadTable(f"{table}: пояс «{said}» не известен — {exc}") from exc
+
+
+def names(table: Path = TABLE) -> dict[str, str]:
+    """Репозиторий → краткое имя; форма и единственность имён проверяются при чтении."""
+    raw = read(table)
+    found = raw.get("names")
     if not isinstance(found, dict) or not found:
         raise BadTable(f"{table}: нет непустого раздела `names`")
     seen: dict[str, str] = {}
@@ -89,22 +107,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"окружение «{args.env}» не из {', '.join(ENVIRONMENTS)} (038)", file=sys.stderr)
         return EXIT_BROKEN
     try:
-        table = names()
+        table, owner_zone = names(), zone()
     except BadTable as exc:
         print(f"имя окна не собрано: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     repo = onboard.repo_of(Path(args.root))
     if not repo:
-        print("имя окна не собрано: `origin` клона не называет репозиторий площадки")
+        print(
+            "имя окна не собрано: `origin` клона не называет репозиторий площадки",
+            file=sys.stderr,
+        )
         return EXIT_UNJUDGED
     short = table.get(repo.lower())
     if short is None:
         print(
             f"имя окна не собрано: у {repo} нет краткого имени — строка дописывается "
-            f"поставщиком в `{paths.WINDOW_NAMES}` (#1703)"
+            f"поставщиком в `{paths.WINDOW_NAMES}` (#1703)",
+            file=sys.stderr,
         )
         return EXIT_UNJUDGED
-    print(compose(env, short, datetime.date.today()))
+    # stdout несёт только имя: отказ уходит в stderr, и вывод, взятый как
+    # имя без кода выхода, фразой отказа не станет (взгляд на #1704).
+    print(compose(env, short, datetime.datetime.now(owner_zone).date()))
     return EXIT_OK
 
 

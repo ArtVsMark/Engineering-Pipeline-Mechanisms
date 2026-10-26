@@ -48,8 +48,15 @@ def test_a_project_in_the_table_gets_its_name(
     root = clone(tmp_path / "c", "https://github.com/artvsmark/engineering-progress-ledger.git")
     code = module.main(["--env", "local", "--root", str(root)])
     assert code == module.EXIT_OK
-    today = f"{datetime.date.today():%d.%m}"
+    today = f"{datetime.datetime.now(module.zone()).date():%d.%m}"
     assert capsys.readouterr().out.strip() == f"[LOCAL] EPL · {today}"
+
+
+def test_the_day_is_the_owners_not_the_containers(tmp_path: Path) -> None:
+    """Пояс — из таблицы: облачный контейнер идёт по UTC (взгляд на #1704)."""
+    assert module.zone().key == "Europe/Moscow"
+    with pytest.raises(module.BadTable, match="пояс"):
+        module.zone(table(tmp_path / "t.json", {"A/B": "AB"}))
 
 
 def test_a_project_outside_the_table_is_not_invented(
@@ -58,14 +65,19 @@ def test_a_project_outside_the_table_is_not_invented(
     """Имя из частей адреса правдоподобно и неверно — исход 3 с адресом таблицы."""
     root = clone(tmp_path / "c", "https://github.com/Someone/Other.git")
     assert module.main(["--env", "WEB", "--root", str(root)]) == module.EXIT_UNJUDGED
-    out = capsys.readouterr().out
-    assert "Someone/Other" in out and str(module.paths.WINDOW_NAMES) in out
+    said = capsys.readouterr()
+    # stdout несёт только имя: отказ, взятый за имя, назвал бы им окно (взгляд на #1704).
+    assert said.out == ""
+    assert "Someone/Other" in said.err and str(module.paths.WINDOW_NAMES) in said.err
 
 
-def test_a_clone_without_a_platform_origin_is_not_judged(tmp_path: Path) -> None:
-    """Локальный путь вместо адреса площадки — не судится."""
+def test_a_clone_without_a_platform_origin_is_not_judged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Локальный путь вместо адреса площадки — не судится, и stdout пуст."""
     root = clone(tmp_path / "c", str(tmp_path / "elsewhere"))
     assert module.main(["--env", "WEB", "--root", str(root)]) == module.EXIT_UNJUDGED
+    assert capsys.readouterr().out == ""
 
 
 def test_an_unknown_environment_is_refused() -> None:
