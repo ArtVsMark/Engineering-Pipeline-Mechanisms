@@ -1023,6 +1023,7 @@ SKILLS_KITTED: Final = tuple(
         "close-a-finding",
         "direction-coverage",
         "propose-a-rule",
+        "restart-the-window",
         "retell-from-the-source",
         "role-profile",
         "rulebook-keeps-how-to-work",
