@@ -46,7 +46,9 @@
 
 import argparse
 import json
+import re
 import sys
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -66,6 +68,8 @@ KEY: Final = "headroom"
 #: Исходы работы, у которых длительность — замер: прошла, упала, отменена
 #: (отмена по пределу и есть случай сторожа). Пропущенная не шла вовсе.
 TIMED: Final = frozenset({"success", "failure", "cancelled", "timed_out"})
+#: Заходов за один запрос площадки (`per_page`) — и потолок объявленного ряда.
+RUNS_CAP: Final = 100
 #: Заголовок раздела в отчёте ряда.
 HEAD: Final = "## Запас работ против их предела"
 
@@ -102,10 +106,14 @@ class Watch:
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise NotRun(f"объявление сторожа «{KEY}» в {path} не прочитано: {exc}") from exc
-        if not watch.jobs or not 0 < watch.share <= 1 or watch.runs < 1:
+        # БОЛЬШЕ СТРАНИЦЫ — НИКОГДА НЕ СУДИТСЯ (взгляд на #1700): площадка отдаёт
+        # не больше `RUNS_CAP` заходов за запрос, `read < runs` было бы вечным, и
+        # сторож молча отвечал бы «ряд мал». Предел назван отказом объявления.
+        if not watch.jobs or not 0 < watch.share <= 1 or not 1 <= watch.runs <= RUNS_CAP:
             raise NotRun(
                 f"объявление сторожа в {path} пусто или противоречиво: работ "
-                f"{len(watch.jobs)}, доля {watch.share}, заходов {watch.runs} (075)"
+                f"{len(watch.jobs)}, доля {watch.share}, заходов {watch.runs} "
+                f"(от 1 до {RUNS_CAP}, 075)"
             )
         return watch
 
@@ -138,13 +146,45 @@ def limits(workflow_text: str, jobs: tuple[str, ...]) -> dict[str, int]:
     return found
 
 
+def expression() -> re.Pattern[str]:
+    """Образец выражения площадки — один на дерево, `onboard.EXPRESSION` (214).
+
+    ИМПОРТ — ЗДЕСЬ, А НЕ В ШАПКЕ МОДУЛЯ (взгляд на #1707). Ради одного образца
+    `onboard` тянет десяток модулей проекта, и отказ любого из них при загрузке
+    сторожа выходил кодом 1 — «запас мал» — в обход `guarded`. Внутри функции
+    тот же отказ случается уже под `guarded` и становится исходом 2.
+    """
+    import onboard
+
+    return onboard.EXPRESSION
+
+
+def shape_of(name: str) -> re.Pattern[str]:
+    """Имя работы как образец записи площадки: выражение `${{ … }}` — любое значение.
+
+    ИМЯ С ВЫРАЖЕНИЕМ ПЛОЩАДКА ПОДСТАВЛЯЕТ (взгляд на #1700): объявлено
+    `test (${{ matrix.py }})`, а приходит `test (3.14)`, и сравнение строк не
+    совпадало ни с одной записью — сторож навсегда отвечал «не судится», не
+    назвав причины.
+    """
+    # Выражение узнаёт один образец — `expression()` (214).
+    pattern, last = "", 0
+    for found in expression().finditer(name):
+        pattern += re.escape(name[last : found.start()]) + ".+?"
+        last = found.end()
+    return re.compile(pattern + re.escape(name[last:]))
+
+
 def owner_of(job_name: str, watched: dict[str, int]) -> str:
     """Какой объявленной работе принадлежит запись площадки; пусто — ничьей.
 
-    Ячейка матрицы приходит как «имя (значение)»: `test-matrix (3.14)`.
+    Ячейка матрицы приходит как «имя (значение)»: `test-matrix (3.14)` — так
+    площадка дописывает значения матрицы к имени без выражения.
     """
     for name in watched:
         if job_name == name or job_name.startswith(f"{name} ("):
+            return name
+        if expression().search(name) and shape_of(name).fullmatch(job_name):
             return name
     return ""
 
@@ -275,5 +315,29 @@ def main(argv: list[str] | None = None) -> int:
     return code
 
 
+def guarded(argv: list[str] | None = None) -> int:
+    """`main` с исходом отказа на любое исключение: трасса — не «запас мал».
+
+    КЛАСС, А НЕ ФОРМА (взгляд на #1700, 210). Непойманное исключение Python
+    выходит кодом 1, а 1 у сторожа — «запас мал»: отказ выдавался за находку.
+    Перечень ловимых (`TransportError`, `ValueError`) чинил форму и пропускал
+    следующую — `AttributeError` пустого ответа, `KeyError` записи площадки.
+    Здесь любое исключение после загрузки модуля — исход 2 с трассой (039).
+    Граница: отказ ИМПОРТА из шапки модуля — `yaml`, `ghrest`, `paths`,
+    `pipeline_checks` и то, что тянут они сами, — случается до этой функции и
+    выходит кодом 1. Внешний `yaml` держит гейт установки шагов
+    (`tests/test_steps_install_what_they_import.py`); свои модули шапки — то,
+    без чего сторож не читает и объявления, их загрузку проверяет любой прогон
+    тестов. Тяжёлый `onboard` из шапки вынесен (`expression`), и его отказ —
+    уже под этой функцией.
+    """
+    try:
+        return main(argv)
+    except Exception:
+        traceback.print_exc()
+        print("сторож запаса не отработал: исключение выше — не находка о запасе", file=sys.stderr)
+        return EXIT_BROKEN
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(guarded())
