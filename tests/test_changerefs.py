@@ -1123,3 +1123,13 @@ def test_a_taken_candidate_is_read_only_in_its_own_form() -> None:
 def test_the_candidate_queues_are_the_queues_of_the_map() -> None:
     """Очереди ключа — ровно очереди карты гейтов: одна таблица, сверяет тест (214)."""
     assert set(changerefs.CANDIDATE_QUEUES) == set(load_script("family_gates.py").QUEUES)
+
+
+def test_skills_are_read_from_the_marker_and_not_from_an_example() -> None:
+    """«Навык:» — имена через запятую, кавычки сняты; пример в коде — не вызов (#1694)."""
+    text = "Навык: build-a-gate, `close-a-finding`\nпишут так: `Навык: answer-a-rule`\n"
+    assert changerefs.skills_in_all([text, "Навык: build-a-gate"]) == [
+        "build-a-gate",
+        "close-a-finding",
+    ]
+    assert changerefs.skills_in_all(["```\nНавык: answer-a-rule\n```"]) == []

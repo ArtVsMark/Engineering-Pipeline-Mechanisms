@@ -1975,3 +1975,17 @@ def test_no_task_with_a_reason_is_a_third_answer(
     env = write_event(tmp_path, ["area/docs", "documentation"], body)
     result = run_script("check_pr_meta.py", "--files", "README.md", env=env)
     assert ("нет связи с задачей" not in result.text) is passes, result.text
+
+
+def test_the_meta_gate_refuses_an_unknown_skill_name(tmp_path: Path) -> None:
+    """«Навык:» с именем не из `.claude/skills` — отказ; известное — нет (#1694)."""
+    check = load_script("check_pr_meta.py")
+    (tmp_path / ".claude" / "skills" / "build-a-gate").mkdir(parents=True)
+    (tmp_path / ".claude" / "skills" / "build-a-gate" / "SKILL.md").write_text("", encoding="utf-8")
+    (tmp_path / ".claude" / "skills" / "empty").mkdir()
+    known = check.known_skills(tmp_path)
+    assert known == frozenset({"build-a-gate"})
+    assert check.skill_problems("Навык: build-a-gate", known) == []
+    [told] = check.skill_problems("Навык: biuld-a-gate", known)
+    assert "biuld-a-gate" in told
+    assert check.known_skills(tmp_path / "нет") == frozenset()

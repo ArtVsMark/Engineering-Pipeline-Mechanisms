@@ -164,6 +164,9 @@ def compose_from(subjects: list[str], bodies: list[str]) -> str:
     # Взятый кандидат карты гейтов (шаг 3 #1425) доезжает до общей ветки: по
     # нему страница выпуска называет, что выпуск взял из очередей.
     candidates = changerefs.candidates_in_all(bodies)
+    # Вызванные навыки доезжают до общей ветки (#1694): по ним сборщик сырых
+    # записей судит «навык ждали — вызван», а читает он слитое тело.
+    skills = changerefs.skills_in_all(bodies)
     # Трейлеры берутся из хвостового блока КАЖДОГО коммита и склеиваются без
     # повторов: подпись у ветки одна, повторять её по числу коммитов — шум.
     trailers = trailers_of(bodies)
@@ -181,6 +184,8 @@ def compose_from(subjects: list[str], bodies: list[str]) -> str:
         lines += ["", *[str(meeting) for meeting in windows]]
     if candidates:
         lines += ["", *candidates]
+    if skills:
+        lines += ["", *[f"{changerefs.SKILL_KEY} {name}" for name in skills]]
     if trailers:
         lines += ["", *trailers]
     return "\n".join(lines)
