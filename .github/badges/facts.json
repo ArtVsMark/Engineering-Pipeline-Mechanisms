@@ -2,8 +2,8 @@
   "schema": "2.2",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Pipeline-Mechanisms — export/facts/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-27T00:17:36+00:00",
-  "commit": "61e6344ae01c4f0f2a4c011ffe4f9656f689cbf3",
+  "generated_at": "2026-10-27T00:41:46+00:00",
+  "commit": "28afe1d3ecbcd1c23aa6eb5a9860679e212f63df",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,27 +19,29 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.11.44",
+  "version": "1.11.45",
   "release": "1.11",
-  "coverage_percent": 94.4,
+  "coverage_percent": 94.3,
   "tests": {
-    "functions": 4707,
-    "modules": 201
+    "functions": 4729,
+    "modules": 204
   },
   "checks_per_pr": {
-    "count": 23,
+    "count": 25,
     "names": [
       "answer",
       "attribution / attribution",
       "automerge / automerge",
       "contract / contract",
       "debt / debt",
+      "digest / skills",
       "facts-contract",
       "journal / journal",
       "lint / lint",
       "parts",
       "pipeline / pipeline",
       "pr-meta / pr-meta",
+      "record / skills",
       "review / findings",
       "review / late-look",
       "review / late-queue",
@@ -55,7 +57,7 @@
     ],
     "by_class": {
       "required": 9,
-      "advisory": 12,
+      "advisory": 14,
       "off": 0,
       "unreviewed": 2
     }
@@ -66,8 +68,8 @@
       "schema_of": "общий шаг фактов механизмов: детали покрытия и полнота версии",
       "coverage": {
         "read": true,
-        "covered": 19169,
-        "lines": 20311
+        "covered": 19443,
+        "lines": 20612
       },
       "version_whole": true
     },
@@ -499,7 +501,7 @@
           },
           "steps": {
             "taken": 8,
-            "of": 30,
+            "of": 31,
             "names": [
               "automerge",
               "journal",
@@ -575,8 +577,8 @@
         ]
       },
       "scripts": {
-        "runnable": 88,
-        "started": 30
+        "runnable": 90,
+        "started": 32
       }
     }
   }
