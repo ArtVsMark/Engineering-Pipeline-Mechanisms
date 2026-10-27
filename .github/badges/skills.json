@@ -1,0 +1,72 @@
+{
+ "schema": 1,
+ "records": [
+  {
+   "pr": 1715,
+   "merged_at": "2026-10-27",
+   "commit": "28afe1d3ecbcd1c23aa6eb5a9860679e212f63df",
+   "touched": [
+    ".claude/skills/a-gate-obeys-every-rule/SKILL.md",
+    ".claude/skills/a-task-before-the-work/SKILL.md",
+    ".claude/skills/answer-a-rule/SKILL.md",
+    ".claude/skills/audit-the-answers/SKILL.md",
+    ".claude/skills/build-a-gate/SKILL.md",
+    ".claude/skills/bundle-the-work/SKILL.md",
+    ".claude/skills/close-a-finding/SKILL.md",
+    ".claude/skills/direction-coverage/SKILL.md",
+    ".claude/skills/propose-a-rule/SKILL.md",
+    ".claude/skills/restart-the-window/SKILL.md",
+    ".claude/skills/retell-from-the-source/SKILL.md",
+    ".claude/skills/role-profile/SKILL.md",
+    ".claude/skills/rulebook-keeps-how-to-work/SKILL.md",
+    ".claude/skills/rulebook-reread/SKILL.md",
+    ".claude/skills/tell-the-supplier/SKILL.md",
+    ".claude/skills/what-the-graph-misses/SKILL.md",
+    ".claude/skills/work-the-plan/SKILL.md",
+    ".github/workflows/badges.yml",
+    ".github/workflows/handover-probe.yml",
+    ".github/workflows/skills.yml",
+    ".github/workflows/step-skills.yml",
+    ".pipeline.yml",
+    ".rules/claims.json",
+    ".rules/portable.json",
+    ".rules/schedules.json",
+    "README.md",
+    "changelog.d/skill-records-step.contract.md",
+    "docs/use/pipeline.md",
+    "scripts/skill_digest.py",
+    "scripts/skill_record.py",
+    "scripts/skill_signals.py",
+    "tests/test_doc_paths.py",
+    "tests/test_ghrest.py",
+    "tests/test_portable.py",
+    "tests/test_review_safety.py",
+    "tests/test_skill_digest.py",
+    "tests/test_skill_record.py",
+    "tests/test_skill_signals.py"
+   ],
+   "added": [
+    ".github/workflows/skills.yml",
+    ".github/workflows/step-skills.yml",
+    "changelog.d/skill-records-step.contract.md",
+    "scripts/skill_digest.py",
+    "scripts/skill_record.py",
+    "scripts/skill_signals.py",
+    "tests/test_skill_digest.py",
+    "tests/test_skill_record.py",
+    "tests/test_skill_signals.py"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "retell-from-the-source"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
+  }
+ ]
+}
