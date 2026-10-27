@@ -1,0 +1,49 @@
+# Применение навыков: запись на слитое изменение и недельная сводка (#1694).
+#
+# Запись — по закрытию СЛИТОГО изменения: коммит слияния берётся из события,
+# а не головой ветки, — следующее слияние могло встать раньше. Сводка — раз в
+# неделю по понедельникам. Кнопка — оба захода: догнать потерянное событие
+# записи и пересобрать сводку без расписания (104).
+#
+# СПЕРВА СПРОСИЛИ СЕМЬЮ (162) — 26.10.2026, чтением прогонов соседей и
+# каталога, без запуска: записи о применении навыков на слитое изменение нет ни
+# у кого. У соседа Glossary-Python навык зовёт прогон проверки карточек, у
+# каталога прогон сверяет форму навыков — о вызове навыка окном не спрашивает
+# ни один. Строим своё; хранение взято у нашего же архива находок на `badges`.
+name: skills
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: "29 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "слитый коммит, о котором дописать запись; пусто — голова main"
+        required: false
+        type: string
+      digest:
+        description: "свести недельный ряд в задачу-аналитику вместо записи"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  # Имя составное: заход — общим шагом `step-skills.yml` (#1694).
+  record:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+      || (github.event_name == 'workflow_dispatch' && !inputs.digest)
+    uses: ./.github/workflows/step-skills.yml
+    with:
+      commit: ${{ github.event.pull_request.merge_commit_sha || inputs.commit || '' }}
+  digest:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.digest)
+    uses: ./.github/workflows/step-skills.yml
+    with:
+      digest: true

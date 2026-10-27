@@ -963,12 +963,21 @@ def consumer_has(said: str, answers: dict[str, Any]) -> bool:
     head = "/".join(said.split("/")[:3])
     if head.startswith(".claude/skills/"):
         return bool(answers.get(head, {}).get("answer") == "as-is")
-    return any(
-        said == where or said.startswith(f"{where}/")
+    configured = [
+        where
         for one in answers.values()
         if one.get("answer") == "configured"
         for where in one.get("where", [])
-    )
+    ]
+    # КАТАЛОГ У ПОТРЕБИТЕЛЯ ЕСТЬ, ЕСЛИ ЗАХОД КЛАДЁТ В НЕГО ХОТЬ ОДИН ФАЙЛ — тот же
+    # довод, что у каталога навыков выше, для любого каталога (#1694): признак
+    # навыка называет каталог шаблоном (`.claude/hooks/*`), а не файлом.
+    laid = [one.as_posix() for one in (*onboard.TREE_KITTED, *onboard.DATA_KITTED)]
+    if (ROOT / said).is_dir() and any(
+        one.startswith(f"{said.rstrip('/')}/") for one in [*laid, *configured]
+    ):
+        return True
+    return any(said == where or said.startswith(f"{where}/") for where in configured)
 
 
 def missing_at_the_consumer(skill: str, answers: dict[str, Any]) -> list[str]:
