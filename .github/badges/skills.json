@@ -432,6 +432,49 @@
     "retell-from-the-source"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1730,
+   "merged_at": "2026-10-28",
+   "commit": "3f2ca279ee86b7f272ec7a5faca99f232ff12e78",
+   "touched": [
+    ".claude/hooks/bundle_hint.py",
+    ".claude/skills/what-the-graph-misses/SKILL.md",
+    "changelog.d/wave2-kit-and-channels.fixed.md",
+    "docs/use/onboarding.md",
+    "kit/data/.claude/mechanisms.sh",
+    "kit/data/.rules/mechanism-rules.json",
+    "kit/data/.rules/review-roles.json",
+    "scripts/feedback_form.py",
+    "scripts/feedback_registry.py",
+    "scripts/onboard.py",
+    "scripts/release.py",
+    "scripts/skill_record.py",
+    "tests/test_consumer_preflight.py",
+    "tests/test_family_gates.py",
+    "tests/test_feedback_form.py",
+    "tests/test_feedback_registry.py",
+    "tests/test_git_keeps_the_tree.py",
+    "tests/test_onboard.py",
+    "tests/test_skill_record.py"
+   ],
+   "added": [
+    "changelog.d/wave2-kit-and-channels.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
