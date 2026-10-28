@@ -511,6 +511,34 @@
     "retell-from-the-source"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1732,
+   "merged_at": "2026-10-29",
+   "commit": "46245bd4339e320dd1be4b3851b210c7c8312c54",
+   "touched": [
+    "changelog.d/default-path-beside-key.changed.md",
+    "docs/use/onboarding.md",
+    "docs/use/pipeline.md",
+    "kit/data/docs/agent/review.md",
+    "kit/data/docs/agent/roles.md",
+    "tests/test_path_keys.py"
+   ],
+   "added": [
+    "changelog.d/default-path-beside-key.changed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "build-a-gate",
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
