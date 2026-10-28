@@ -251,13 +251,16 @@ def is_fix(repo: str, token: str, change: dict[str, Any]) -> bool:
 
     ОБЪЯВЛЕНИЕ СВЕРЯЕТСЯ И В СЧЁТЕ, А НЕ ТОЛЬКО НА ТОЛЧКЕ (взгляд на #1661):
     починка, чей предмет уже зелен или закрыт, — обычное изменение, и в счёт
-    трёх она входит.
+    трёх она входит. Самоссылка — `Чинит красное: #<свой номер>` — починкой не
+    делает: машина её отличает, и это не та половина, что названа по 057
+    (взгляд на #1661, `6f68482`).
     """
     body = str(change.get("body") or "")
+    own = int(change.get("number") or 0)
     step = changerefs.fixes_main_in(body)
     if step and main_red(repo, token, step):
         return True
-    return any(live_red(repo, token, one) for one in changerefs.fixes_red_in(body))
+    return any(live_red(repo, token, one) for one in changerefs.fixes_red_in(body) if one != own)
 
 
 def zero_pass(repo: str, token: str, step: str | None, reds: list[int]) -> tuple[int, str] | None:
@@ -328,7 +331,13 @@ def look(root: Path, branch: str) -> tuple[int, str]:
             f"по ветке «{branch}» изменение уже открыто (#{here[0]['number']}) — "
             "толчок чинит своё и предела не прибавляет"
         )
-    mine = [one for one in own_open(repo, token, session) if not is_fix(repo, token, one)]
+    # ПОЧИНКИ СПРАШИВАЮТСЯ, ТОЛЬКО КОГДА ОНИ РЕШАЮТ (взгляд на #1661, `06bc9f4`).
+    # При свободных местах вычет починок вердикта не меняет, а вопрос о каждой
+    # из них — запрос к площадке, и отказ чтения общей ветки кончал толчок
+    # исходом 2 там, где мест и так хватало.
+    mine = own_open(repo, token, session)
+    if len(mine) >= LIMIT:
+        mine = [one for one in mine if not is_fix(repo, token, one)]
     if len(mine) >= LIMIT:
         step, reds = fix_declared(root)
         verdict = zero_pass(repo, token, step, reds)

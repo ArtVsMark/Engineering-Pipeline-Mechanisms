@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import badges_read
+import ci_complete
 import ghrest
 import main_guard
 import paths
@@ -61,9 +62,9 @@ EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
 
 
-#: Исходы, которые считаются настоящим красным. Слово в слово как у шага 9:
-#: отменённая не пройдена, но и не отказ, а «идёт» вердикта не несёт вовсе.
-REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
+#: Исходы, которые считаются настоящим красным, — ссылкой на канон у сводного
+#: гейта (`ci_complete.REAL_RED`), а не копией.
+REAL_RED: Final = ci_complete.REAL_RED
 
 #: Витрина проекта: факты, опубликованные шагом значков в ветку производного `badges`
 #: по адресу контракта семьи, `.github/badges/facts.json` (#759). Адрес тот же,
