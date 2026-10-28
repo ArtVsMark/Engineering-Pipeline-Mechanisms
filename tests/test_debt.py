@@ -1504,7 +1504,9 @@ def literal_sets(tree: ast.Module) -> list[frozenset[str]]:
     found = []
     for node in tree.body:
         value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
-        if isinstance(value, ast.Call) and getattr(value.func, "id", "") == "frozenset":
+        func = value.func if isinstance(value, ast.Call) else None
+        named = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if isinstance(value, ast.Call) and named == "frozenset":
             value = value.args[0] if value.args else None
         if isinstance(value, ast.Set) and all(
             isinstance(one, ast.Constant) and isinstance(one.value, str) for one in value.elts
