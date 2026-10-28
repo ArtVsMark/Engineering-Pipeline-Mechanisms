@@ -67,6 +67,7 @@ import check_shipped
 import consumers
 import family_uptake
 import ghrest
+import main_guard
 import onboard
 import paths
 import pipeline_checks
@@ -469,4 +470,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

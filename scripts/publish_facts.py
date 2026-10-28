@@ -23,11 +23,11 @@
 import argparse
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Final
 
 import gitcall
+import main_guard
 import paths
 
 #: Что шаг кладёт на ветку `badges` — путь от корня ветки. Ветку держит этот
@@ -252,4 +252,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

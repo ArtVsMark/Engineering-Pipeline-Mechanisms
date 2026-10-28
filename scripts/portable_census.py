@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import gitcall
+import main_guard
 import paths
 import report
 import version as project_version
@@ -197,4 +198,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

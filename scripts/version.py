@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Final
 
 import gitcall
+import main_guard
 import paths
 
 #: Релизный тег: строго `vX.Y.Z`. Маска для git и образец здесь — форма
@@ -461,4 +462,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

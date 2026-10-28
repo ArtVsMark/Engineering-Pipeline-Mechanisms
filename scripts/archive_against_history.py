@@ -51,6 +51,7 @@ from typing import Any, Final
 
 import changerefs
 import gitcall
+import main_guard
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -210,4 +211,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

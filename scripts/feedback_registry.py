@@ -43,6 +43,7 @@ import family_uptake
 import feedback_form
 import findings
 import ghrest
+import main_guard
 import paths
 import report
 
@@ -353,4 +354,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))
