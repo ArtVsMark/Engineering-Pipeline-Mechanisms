@@ -292,3 +292,10 @@ def test_main_advises_on_every_overdue_record_and_still_exits_zero(
     assert module.main(argv) == module.EXIT_OK
     out = capsys.readouterr().out
     assert "::warning::запись соседа o/a:false-refusal/x без вердикта" in out
+
+
+def test_a_neighbours_text_neither_mentions_nor_links() -> None:
+    """`@имя` и `#N` в замере соседа не уведомляют и не ссылаются (`1fb9d21`, `9356cb3`)."""
+    said = module.quoted("позвал @кто-то по #12")
+    assert "@кто" not in said and "#12" not in said
+    assert said.replace(module.WORD_JOINER, "") == "позвал @кто-то по #12", "читается тем же"
