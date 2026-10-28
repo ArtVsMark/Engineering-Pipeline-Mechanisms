@@ -41,6 +41,7 @@ import main_guard
 import paths
 import pipeline_checks as policy
 import report
+import runs_series
 
 EXIT_OK: Final = 0
 EXIT_MISSED: Final = 1
@@ -63,8 +64,9 @@ TOLERATED: Final = 1
 #: Исходы прогона, считающиеся состоявшимся заходом. Отменённый заходом не
 #: считается: он не сделал работы, ради которой заведён.
 HAPPENED: Final = frozenset({"success", "failure", "neutral", "timed_out", "action_required"})
-#: Исходы, означающие упавший заход.
-FELL: Final = frozenset({"failure", "timed_out", "action_required"})
+#: Исходы, означающие упавший заход: красное — одно на всех, ссылкой на
+#: `runs_series.REAL_RED`, а не копией (взгляд на #1691, 195).
+FELL: Final = runs_series.REAL_RED
 
 
 class NotRun(RuntimeError):

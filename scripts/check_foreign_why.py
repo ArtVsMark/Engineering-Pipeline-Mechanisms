@@ -182,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     # (`rules/ru/` и выгрузка рядом) отдало бы «неприменимо» любому дереву,
     # сложенному похоже, — а это ошибка в сторону тишины.
     own = gitcall.own_repo(args.root)
-    if own.lower() == catalogue.REPO.lower():
+    if catalogue.is_catalogue(own):
         print(
             f"неприменимо: дерево — сам каталог ({own}), его разборы и есть источник "
             "выгрузки — чужого «почему» в нём нет"

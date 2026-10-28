@@ -123,6 +123,14 @@ def on_the_shared_branch(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 #: вытесняла зелёную живого прогона. Нашёл разбор на #107.
 WITHOUT_VERDICT: Final = frozenset({"cancelled", "skipped"})
 
+#: Исходы, которые считаются НАСТОЯЩИМ красным, — один набор на очередь, предел
+#: окна, шаг 9, долг и починку общей ветки. Отменённая не пройдена, но и не
+#: отказ; «идёт» вердикта не несёт вовсе; `neutral` и `stale` — не провал.
+#: Живёт здесь, у сводного гейта, а не в `runs_series`: его зовёт и лёгкий
+#: `agent_pr`, которому тяжёлый `runs_series` тянуть незачем (взгляд на #1661,
+#: `6c42e7b`). Копию буквами держит `tests/test_debt.py::test_the_red_set_lives_in_one_place`.
+REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
+
 
 def has_verdict(run: dict[str, Any]) -> bool:
     """Есть ли у записи вердикт вообще — первый ключ выбора между записями.
