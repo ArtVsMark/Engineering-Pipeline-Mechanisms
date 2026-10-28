@@ -299,3 +299,5 @@ def test_a_neighbours_text_neither_mentions_nor_links() -> None:
     said = module.quoted("позвал @кто-то по #12")
     assert "@кто" not in said and "#12" not in said
     assert said.replace(module.WORD_JOINER, "") == "позвал @кто-то по #12", "читается тем же"
+    # След у самого соседа и почта — не наши задачи и не упоминания.
+    assert module.quoted("след o/n#4, почта a@b.c") == "след o/n#4, почта a@b.c"

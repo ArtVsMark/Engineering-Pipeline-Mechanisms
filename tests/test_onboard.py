@@ -1295,13 +1295,13 @@ def test_a_declared_role_without_a_profile_still_sleeps(tmp_path: Path) -> None:
     assert "спит" in said and "нет профиля" in said and "не объявлена" not in said, said
 
 
-
 def test_an_unreadable_profile_map_sleeps_and_does_not_fall(tmp_path: Path) -> None:
     """Карта профилей не в UTF-8 — названная спячка, а не падение захода (`534ecc4`)."""
     module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
     (tmp_path / module.paths.ROLES).write_bytes(b"\xff\xfe broken")
     said = module.dormant_areas_note(tmp_path)
     assert "спит" in said and "нет профиля" in said, said
+
 
 def test_the_dormant_note_reads_the_consumers_path_table(tmp_path: Path) -> None:
     """Потребитель переназначил таблицу ролей — спячку судят по ЕГО адресу (#1630)."""
@@ -2564,7 +2564,6 @@ def test_a_broken_record_is_not_run(tmp_path: Path) -> None:
     assert module.laid_of(tmp_path) == {}
 
 
-
 def test_a_broken_record_refuses_before_the_first_file(tmp_path: Path) -> None:
     """Битый перечень — отказ ДО первого файла, а не после хуков (взгляд на #1651, `41c6027`)."""
     (tmp_path / module.paths.KIT_LAID).parent.mkdir(parents=True)
@@ -2573,6 +2572,7 @@ def test_a_broken_record_refuses_before_the_first_file(tmp_path: Path) -> None:
     with pytest.raises(module.NotRun):
         module.lay(tmp_path, {hook: "#!/bin/sh\n"}, "o/r")
     assert not (tmp_path / hook).exists(), "хук лёг до отказа"
+
 
 # --- навыки окна копией (#1552) ---------------------------------------------
 

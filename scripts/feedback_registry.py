@@ -118,7 +118,9 @@ def quoted(text: object) -> str:
     читается тем же, а площадка ни упоминания, ни ссылки не видит.
     """
     flat = " ".join(str(text).split()).replace("<", "&lt;").replace(">", "&gt;")
-    return re.sub(r"([@#])(?=\w)", rf"\1{WORD_JOINER}", flat)
+    # Только голый знак: `o/n#4` — след у самого соседа, а не наша задача, и
+    # `e@mail` — почта, а не упоминание; обезвреживается знак без слова перед ним.
+    return re.sub(r"(?<![\w.-])([@#])(?=\w)", rf"\1{WORD_JOINER}", flat)
 
 
 def collected(uptake: Any) -> Collected:
