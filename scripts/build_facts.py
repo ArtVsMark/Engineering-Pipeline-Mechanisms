@@ -529,6 +529,11 @@ def published_names() -> list[str]:
 ARCHIVE: Final = "findings.json"
 #: Карта гейтов семьи на той же ветке: пишет её `family_gates.py` шагом `badges.yml` (#1425).
 FAMILY_GATES: Final = "family-gates.json"
+#: Сырые записи применения навыков на той же ветке: пишет их `skill_record.py`
+#: шагом `step-skills.yml` на каждом слиянии (#1694). Литералом, как архив:
+#: что он равен имени `skill_record.RECORDS`, сверяет тест. Без него уборка
+#: значков стирала ряд следующим же заходом — записи #1715 и #1717 пропали так.
+SKILL_RECORDS: Final = "skills.json"
 
 
 #: Файлы общего шага `step-facts.yml` на той же ветке — его имена, а не наши:
@@ -540,7 +545,7 @@ SHARED_STEP: Final = ("facts.json", "project.svg", "family-check.json")
 
 
 def branch_files() -> list[str]:
-    """Всё, что ветка `badges` вправе держать: изданное сборкой, общий шаг, значок и архив.
+    """Всё, что ветка `badges` вправе держать: изданное сборкой, общий шаг, значок, архив и записи.
 
     СНЯТОЕ С ВЕТКИ УХОДИТ ВМЕСТЕ С ИНВЕНТАРЁМ (взгляд на #1198). Публикация
     копирует поверх и прежде ничего не удаляла: снятый значок оставался на
@@ -548,7 +553,7 @@ def branch_files() -> list[str]:
     от живого. Перечень выводится из инвентаря, а не из списка снятых по
     имени: значок, убранный из `BADGES`, уходит с ветки следующим заходом.
     """
-    return sorted({*published_names(), *SHARED_STEP, UNIFIED, ARCHIVE, FAMILY_GATES})
+    return sorted({*published_names(), *SHARED_STEP, UNIFIED, ARCHIVE, FAMILY_GATES, SKILL_RECORDS})
 
 
 def prune(directory: Path) -> list[str]:
