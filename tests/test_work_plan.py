@@ -1731,12 +1731,12 @@ def test_rules_half_on_the_catalogue_tree_is_inapplicable(monkeypatch: pytest.Mo
     assert said == module.Source(note=module.debt.CATALOGUE_TREE)
 
 
-def plan_runs_on(condition: str, event: str, workflow: str = "", branch: str = "") -> bool:
+def plan_runs_on(condition: str, event: str, workflow: str = "", cause: str = "") -> bool:
     """Условие работы плана, вычисленное на событии: только `||`, `==`, `!=` и строки."""
     known = {
         "github.event_name": event,
         "github.event.workflow_run.name": workflow,
-        "github.event.workflow_run.head_branch": branch,
+        "github.event.workflow_run.event": cause,
     }
     clauses = [one.strip() for one in condition.split("||")]
     for clause in clauses:
@@ -1748,7 +1748,7 @@ def plan_runs_on(condition: str, event: str, workflow: str = "", branch: str = "
 
 
 def test_the_plan_rebuilds_after_the_registry_sweep_on_main_only() -> None:
-    """План слушает `review` и пересобирается по нему только на общей ветке (#1726)."""
+    """План слушает `review` и не пересобирается по взгляду на изменение (#1726, #1727)."""
     import yaml
 
     flow = yaml.safe_load(
@@ -1758,8 +1758,11 @@ def test_the_plan_rebuilds_after_the_registry_sweep_on_main_only() -> None:
     assert "review" in flow[True]["workflow_run"]["workflows"], "уборка реестра плана не будит"
     condition = flow["jobs"]["work-plan"].get("if", "")
     assert condition, "без условия заход идёт на каждый взгляд по изменению"
-    assert plan_runs_on(condition, "workflow_run", "review", "main"), "уборка не пересобирает план"
-    assert not plan_runs_on(condition, "workflow_run", "review", "agent/x"), "взгляд пересобирает"
-    assert plan_runs_on(condition, "workflow_run", "ci", "agent/x"), "ci изменения отсечён"
-    assert plan_runs_on(condition, "workflow_run", "drift", "main")
+    assert plan_runs_on(condition, "workflow_run", "review", "workflow_run"), "уборка отсечена"
+    assert plan_runs_on(condition, "workflow_run", "review", "schedule"), "поздний взгляд отсечён"
+    assert plan_runs_on(condition, "workflow_run", "review", "workflow_dispatch"), "верификатор"
+    # Взгляд на изменение — и из форка с веткой `main`: судится событие, а не ветка.
+    assert not plan_runs_on(condition, "workflow_run", "review", "pull_request"), "взгляд"
+    assert plan_runs_on(condition, "workflow_run", "ci", "pull_request"), "ci изменения отсечён"
+    assert plan_runs_on(condition, "workflow_run", "drift", "schedule")
     assert plan_runs_on(condition, "workflow_dispatch"), "ручная кнопка отсечена (104)"
