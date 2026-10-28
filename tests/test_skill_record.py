@@ -110,3 +110,62 @@ def test_the_budget_fits_under_the_job_limit() -> None:
     step = yaml.safe_load((ROOT / ".github" / "workflows" / "step-skills.yml").read_text("utf-8"))
     assert step["jobs"]["skills"]["timeout-minutes"] * 60 > module.BUDGET
     assert module.ATTEMPT_WORST <= module.BUDGET, "в бюджет не влезает и одна попытка"
+    # Подготовка до публикации — внутри того же бюджета (100): граница истории,
+    # шапки навыков и ответ на коммите — по `READ`, разбор коммита — три `LOCAL`.
+    read = module.skill_signals.READ
+    prepare = (3 + len(TABLE)) * read + 3 * module.gitcall.LOCAL
+    assert prepare < module.BUDGET, "подготовка записи не влезает в бюджет захода"
+
+
+def test_a_publish_past_the_runs_deadline_does_not_start(tmp_path: Path) -> None:
+    """Бюджет дан от входа захода и уже исчерпан — попытка не начинается (100)."""
+    with pytest.raises(module.NotRun, match="бюджета"):
+        module.publish({"pr": 1}, tmp_path, clock=lambda: 100.0, deadline=100.0)
+
+
+def test_before_the_first_skill_line_nothing_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """До первой строки `Навык:` в истории `invoked` неизвестен — записи нет.
+
+    Поздний взгляд на #1715: докстрока обещала это, а кода не было.
+    """
+    git = repo(tmp_path)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "гейт (#12)\n\nтело"], check=True)
+    # Текущий каталог — чужая история: всё читается из `--root` (взгляд на #1724).
+    monkeypatch.chdir(ROOT)
+    assert module.named_skills_yet("HEAD", tmp_path) is False
+    assert module.main(["--commit", "HEAD", "--root", str(tmp_path)]) == module.EXIT_OK
+    assert "строки «Навык:» в истории ещё не было" in capsys.readouterr().out
+    subprocess.run(
+        [*git, "commit", "-q", "--allow-empty", "-m", "ещё (#13)\n\nНавык: build-a-gate"],
+        check=True,
+    )
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "после (#14)"], check=True)
+    assert module.named_skills_yet("HEAD", tmp_path), "граница — предки, а не только сам коммит"
+
+
+def test_a_broken_path_table_is_the_third_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Битый раздел `paths:` на коммите — исход 2 с причиной, а не трасса (#1715)."""
+    git = repo(tmp_path)
+    (tmp_path / ".pipeline.yml").write_text("paths:\n  нет-такого: x\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "гейт (#12)\n\nНавык: build-a-gate"], check=True)
+    monkeypatch.chdir(tmp_path)
+    assert module.main(["--commit", "HEAD", "--root", str(tmp_path)]) == module.EXIT_BROKEN
+
+
+def test_a_commit_before_the_signals_records_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """У навыков на коммите ещё нет признаков — ожидание неизвестно, записи нет (#1715)."""
+    git = repo(tmp_path)
+    (tmp_path / ".claude" / "skills" / "x").mkdir(parents=True)
+    (tmp_path / ".claude" / "skills" / "x" / "SKILL.md").write_text("---\nname: x\n---\n", "utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "гейт (#12)\n\nНавык: x"], check=True)
+    monkeypatch.chdir(tmp_path)
+    assert module.main(["--commit", "HEAD", "--root", str(tmp_path)]) == module.EXIT_OK
+    assert "признаков навыков на нём ещё не было" in capsys.readouterr().out

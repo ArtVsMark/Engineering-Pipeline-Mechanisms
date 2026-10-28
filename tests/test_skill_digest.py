@@ -1,11 +1,13 @@
 """Недельная сводка навыков: ряд с размером выборки, семья поимённо, текст человека цел (#1694)."""
 
+import json
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.conftest import RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script
 
 module = load_script("skill_digest.py")
 
@@ -27,11 +29,25 @@ def test_the_tally_counts_expected_invoked_and_unexpected_per_week() -> None:
             rec(4, "не дата", ["a"], ["a"]),
         ]
     )
-    assert said["2026-W44"]["a"] == [2, 1, 0]
-    assert said["2026-W44"]["b"] == [1, 0, 0]
-    assert said["2026-W44"]["c"] == [0, 0, 1]
-    assert said["2026-W43"]["b"] == [1, 1, 0]
-    assert said["?"]["a"] == [1, 1, 0], "день не разобран — своя строка, а не нынешняя неделя"
+    assert said["2026-W44"][("?", "a")] == [2, 1, 0]
+    assert said["2026-W44"][("?", "b")] == [1, 0, 0]
+    assert said["2026-W44"][("?", "c")] == [0, 0, 1]
+    assert said["2026-W43"][("?", "b")] == [1, 1, 0]
+    assert said["?"][("?", "a")] == [1, 1, 0], (
+        "день не разобран — своя строка, а не нынешняя неделя"
+    )
+
+
+def test_a_neighbours_row_is_not_folded_into_ours() -> None:
+    """Записи соседа и свои — разными строками навыка: «по семье» читается по проектам."""
+    records = [
+        *module.mine("o/мы", [rec(1, "2026-10-26", ["a"], ["a"])]),
+        *module.mine("o/сосед", [rec(7, "2026-10-26", ["a"], [])]),
+    ]
+    said = module.tally(records)["2026-W44"]
+    assert said[("o/мы", "a")] == [1, 1, 0] and said[("o/сосед", "a")] == [1, 0, 0]
+    text = module.block(records, [], [], TODAY)
+    assert "| o/мы | `a` | 1 | 1 | 0 |" in text and "| o/сосед | `a` | 1 | 0 | 0 |" in text
 
 
 def test_the_block_names_the_neighbours_it_could_not_read() -> None:
@@ -124,3 +140,34 @@ def test_a_store_of_a_foreign_form_and_an_unread_day_are_named() -> None:
         module.records_of({"schema": 1, "records": {}})
     assert module.records_of({"records": [{"pr": 1}, "мусор"]}) == [{"pr": 1}]
     assert module.week_of("2026-10-26") == "2026-W44" and module.week_of("") == "?"
+
+
+def test_the_unknown_week_goes_last_and_takes_no_place(tmp_path: Path) -> None:
+    """Неделя «?» — после всех настоящих и вне счёта `WEEKS` (поздний взгляд на #1715)."""
+    days = [f"2026-{month:02d}-15" for month in range(1, 13)]
+    records = [rec(n, day, ["a"], ["a"]) for n, day in enumerate(days)] + [rec(99, "", ["a"], [])]
+    text = module.block(records, [], [], TODAY)
+    weeks = [line for line in text.splitlines() if line.startswith("### Неделя")]
+    assert len(weeks) == module.WEEKS + 1 and weeks[-1] == "### Неделя ?"
+
+
+def test_the_family_walk_stops_at_its_estimate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Соседи за пределом обхода — «не прочитаны» поимённо и без вызова площадки."""
+    asked: list[str] = []
+
+    def by_api(repo: str, name: str, token: str) -> dict[str, Any]:
+        asked.append(repo)
+        return {"schema": 1, "records": []}
+
+    monkeypatch.setattr(module.badges_read, "by_api", by_api)
+    family = [f"o/n{one}" for one in range(module.FAMILY_AT_MOST + 2)]
+    _, _, unread = module.gather("o/мы", "t", family)
+    assert unread == family[module.FAMILY_AT_MOST :]
+    assert len(asked) == 1 + module.FAMILY_AT_MOST
+
+
+def test_the_schedule_estimate_matches_the_walk() -> None:
+    """Оценка вызовов площадки в расписании — по пределу обхода, а не на глаз (005)."""
+    said = json.loads((ROOT / ".rules" / "schedules.json").read_text(encoding="utf-8"))
+    entry = said["runs"]["skills.yml"]
+    assert entry["gh_calls_per_run"] == 2 + 2 + module.FAMILY_AT_MOST * 2 + 1
