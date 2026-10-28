@@ -73,7 +73,7 @@
 | 12c | Находки получают адресата | `review.yml` → `step-review.yml` | `review / findings` | нет, совещательный |
 | 12e | Уборка разобранного с реестра | `review.yml` → `step-review.yml` (по слиянию и расписанию) | `review / sweep` | нет, совещательный |
 | 12f | Проверка премисы находки: опровергнуть или подтвердить | `review.yml` → `step-review.yml` (кнопкой и по плану, по отпечатку из #23) | `review / verify` | нет, совещательный |
-| 12g | План работ: зеркало источников 0–6 | `work-plan.yml` → `step-work-plan.yml` (по `workflow_run` от `ci` и `drift`) | `work-plan / work-plan` | нет, совещательный |
+| 12g | План работ: зеркало источников 0–6 | `work-plan.yml` → `step-work-plan.yml` (по `workflow_run` от `ci`, `drift` и `review`; по `review` — только прогон на общей ветке: реестр находок пишет он, и заход только по `ci` гонится с уборкой реестра, #1726) | `work-plan / work-plan` | нет, совещательный |
 | 12i | Верификатор по плану: висящие находки по слитому — на проверку премисы | `verify-queue.yml` → `step-verify-queue.yml` (по `workflow_run` от `work-plan`) | `verify-queue / verify-queue` | нет, совещательный |
 | 12h | Пропущенный и упавший заход по расписанию | `schedules-seen.yml` → `step-schedules-seen.yml` (по `workflow_run` от `ci`) | `schedules-seen / schedules-seen` | нет, совещательный |
 | 13 | Каталог правил: входящие | `rules-inbox.yml` | `inbox` | нет |

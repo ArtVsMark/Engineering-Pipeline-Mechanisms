@@ -1729,3 +1729,37 @@ def test_rules_half_on_the_catalogue_tree_is_inapplicable(monkeypatch: pytest.Mo
     monkeypatch.setattr(module.debt, "rules_debt", lambda _: None)
     said = module.rules_part(module.debt.catalogue.REPO, "t")
     assert said == module.Source(note=module.debt.CATALOGUE_TREE)
+
+
+def plan_runs_on(condition: str, event: str, workflow: str = "", branch: str = "") -> bool:
+    """Условие работы плана, вычисленное на событии: только `||`, `==`, `!=` и строки."""
+    known = {
+        "github.event_name": event,
+        "github.event.workflow_run.name": workflow,
+        "github.event.workflow_run.head_branch": branch,
+    }
+    clauses = [one.strip() for one in condition.split("||")]
+    for clause in clauses:
+        name, op, literal = clause.split(maxsplit=2)
+        assert name in known and op in {"==", "!="}, f"условие вышло из разобранной формы: {clause}"
+        if (known[name] == literal.strip("'")) == (op == "=="):
+            return True
+    return False
+
+
+def test_the_plan_rebuilds_after_the_registry_sweep_on_main_only() -> None:
+    """План слушает `review` и пересобирается по нему только на общей ветке (#1726)."""
+    import yaml
+
+    flow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "work-plan.yml").read_text(encoding="utf-8")
+    )
+    # `on:` YAML 1.1 читает как True.
+    assert "review" in flow[True]["workflow_run"]["workflows"], "уборка реестра плана не будит"
+    condition = flow["jobs"]["work-plan"].get("if", "")
+    assert condition, "без условия заход идёт на каждый взгляд по изменению"
+    assert plan_runs_on(condition, "workflow_run", "review", "main"), "уборка не пересобирает план"
+    assert not plan_runs_on(condition, "workflow_run", "review", "agent/x"), "взгляд пересобирает"
+    assert plan_runs_on(condition, "workflow_run", "ci", "agent/x"), "ci изменения отсечён"
+    assert plan_runs_on(condition, "workflow_run", "drift", "main")
+    assert plan_runs_on(condition, "workflow_dispatch"), "ручная кнопка отсечена (104)"
