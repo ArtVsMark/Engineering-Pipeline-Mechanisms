@@ -40,6 +40,7 @@ from typing import Final
 import changerefs
 import check_attribution
 import gitcall
+import main_guard
 import paths
 
 #: Трейлеры, которые тело уплотнения переносит: соавторство и адрес окна.
@@ -205,4 +206,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

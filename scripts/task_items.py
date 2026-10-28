@@ -45,6 +45,7 @@ import findings
 import ghrest
 import items
 import late_look
+import main_guard
 import report
 
 #: Доказательство пункта: чем именно он закрыт. Идёт СЛЕДОМ за строкой пункта
@@ -549,4 +550,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

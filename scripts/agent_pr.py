@@ -41,6 +41,7 @@ import ci_complete
 import ghrest
 import gitcall
 import labels
+import main_guard
 import paths
 import report
 import scope
@@ -890,4 +891,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

@@ -59,6 +59,7 @@ import sys
 import check_facts
 import ghrest
 import gitcall
+import main_guard
 
 #: Издатель договора фактов — механизмы (#1563). Имя нужно, когда прогон
 #: не назвал репозиторий: сухой заход окна выпускает за того же издателя.
@@ -501,4 +502,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Исходы здесь — числами, а не константами: 1 — «выпускать нельзя», и
+    # трасса тем же кодом читалась бы отказом выпуска (поздний взгляд на #1723).
+    raise SystemExit(main_guard.run(main, 2))

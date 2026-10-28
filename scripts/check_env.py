@@ -37,6 +37,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Final
 
+import main_guard
 import paths
 
 #: Строка установки в прогоне: `pip install "ruff>=0.6,<1" "mypy>=1.11,<2"`.
@@ -258,4 +259,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

@@ -88,6 +88,7 @@ import drift
 import finding_kinds
 import findings
 import ghrest
+import main_guard
 import paths
 import pipeline_checks as policy
 import trunk_log
@@ -1451,7 +1452,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run() -> None:
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))
 
 
 if __name__ == "__main__":

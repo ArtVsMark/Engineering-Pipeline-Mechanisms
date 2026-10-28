@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Final
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import main_guard
 import onboard
 import paths
 
@@ -133,4 +134,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

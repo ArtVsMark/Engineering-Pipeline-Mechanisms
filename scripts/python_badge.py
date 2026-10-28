@@ -76,6 +76,7 @@ from xml.sax.saxutils import escape
 import build_facts
 import check_env
 import ghrest
+import main_guard
 import paths
 import pipeline_checks
 import python_versions
@@ -816,4 +817,4 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

@@ -59,6 +59,7 @@ import hail
 import items
 import items_left
 import labels
+import main_guard
 import main_red
 import pipeline_checks as policy
 import report
@@ -982,4 +983,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))
