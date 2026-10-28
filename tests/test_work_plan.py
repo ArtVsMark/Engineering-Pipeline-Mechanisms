@@ -252,6 +252,27 @@ def test_an_unsaid_merge_state_is_unread_not_empty(monkeypatch: pytest.MonkeyPat
     assert module.main(["--repo", "o/r"]) == module.EXIT_PARTIAL
 
 
+def test_unasked_fixes_mark_section_zero_not_sections_one_and_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ чтения починок — непрочитанный раздел 0, а не 1–2 (взгляд на #1661, `8f00a92`).
+
+    Под общим обработчиком он объявлял «не спрошены» разделы 1–2, а раздел
+    0, высший в плане, молча терял строки починок.
+    """
+    quiet_platform(monkeypatch)
+    monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], [], ["#7 — работа"]))
+
+    def refused(*_: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module, "zero_fixes", refused)
+    built, broken, _ = module.sources("o/r", "t")
+    assert "починки раздела 0 не спрошены" in built[0].unread
+    assert "0" in broken and "1" not in broken and "2" not in broken
+    assert built[2].rows == ["#7 — работа — красное на своей голове"]
+
+
 def test_no_living_plan_is_a_refusal_not_an_empty_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     """Живой задачи плана нет — отказ, а не пустой план.
 

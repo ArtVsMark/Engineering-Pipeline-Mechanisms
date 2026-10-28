@@ -280,6 +280,7 @@ def sources(
     # (3). Пока отказ доходил только до нулевого, третий получал пустой список
     # и выглядел полным (045).
     lagging_silent = ""
+    zero_silent = ""
     try:
         holding, lagging = debt.branch_debt(repo, token, listed)
         built[0] = Source(rows=[f"**{one}** — держит слияние" for one in holding])
@@ -301,7 +302,16 @@ def sources(
         )
         if unknown:
             broken.append("1")
-        fixing_main, fixing_red, held = zero_fixes(repo, token, red)
+        # ПОЧИНКИ — ЧЕТВЁРТЫЙ ВОПРОС К ПЛОЩАДКЕ, И ОТКАЗ ЕГО — РАЗДЕЛА 0
+        # (взгляд на #1661). Под общим `except` ниже он объявлял «не спрошены»
+        # разделы 1–2, а раздел 0, высший в плане, молча терял строки починок.
+        try:
+            fixing_main, fixing_red, held = zero_fixes(repo, token, red)
+        except ghrest.TransportError as exc:
+            fixing_main, fixing_red, held = [], [], set()
+            zero_silent = f"починки раздела 0 не спрошены: {exc}"
+            if "0" not in broken:
+                broken.append("0")
         built[2] = Source(
             rows=[
                 f"{one} — красное на своей голове"
@@ -312,7 +322,7 @@ def sources(
         main_rows = built[0].rows + fixing_main
         built[0] = Source(
             rows=main_rows + fixing_red,
-            unread=built[0].unread,
+            unread="; ".join(one for one in (built[0].unread, zero_silent) if one),
             groups=list(zip(ZERO_TITLES, (main_rows, fixing_red), strict=True)),
         )
     except ghrest.TransportError as exc:
