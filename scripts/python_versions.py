@@ -60,6 +60,8 @@ FROM_MATRIX_RE: Final = re.compile(r"^\$\{\{\s*matrix\.([\w-]+)\s*\}\}$")
 EXPRESSION: Final = "${{"
 #: Общий шаг пробы предрелизной ветки: его вход `python` — объявление версии.
 NEXT_STEP: Final = "step-python-next.yml"
+#: Вход пробы передачи: вызов с ним проверяет путь вызова шага, а не версию проекта.
+STRIP_OURS: Final = "strip-ours"
 
 
 @dataclass(frozen=True)
@@ -191,6 +193,11 @@ def _called(path: Path, name: str, job: Any, refused: list[Refused]) -> list[Dec
     if not str(job.get("uses") or "").split("@")[0].endswith(f"/{NEXT_STEP}"):
         return []
     given = job.get("with")
+    # ПРОБА ПЕРЕДАЧИ — НЕ ОБЪЯВЛЕНИЕ (#1718). `handover-probe.yml` зовёт шаг
+    # со входом `strip-ours`, чтобы проверить путь вызова; версия в нём —
+    # копия ячейки настоящей пробы, и значок рисовал 3.16 дважды.
+    if isinstance(given, dict) and given.get(STRIP_OURS) is True:
+        return []
     said = str(given.get("python", "")).strip() if isinstance(given, dict) else ""
     if not said:
         refused.append(Refused(path.name, name, f"{NEXT_STEP} позван без входа python"))

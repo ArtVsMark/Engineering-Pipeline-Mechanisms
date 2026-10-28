@@ -251,3 +251,17 @@ def test_a_call_of_the_preview_step_without_a_version_is_refused(tmp_path: Path)
     root = calling_flow(tmp_path, given="      test: pytest\n")
     assert in_workflows(root, preview=True) == []
     assert [one for one in refusals(root) if "без входа python" in one]
+
+
+def test_a_handover_probe_call_declares_no_version(tmp_path: Path) -> None:
+    """Вызов шага пробы со входом `strip-ours` — проба передачи, а не версия (#1718)."""
+    root = calling_flow(tmp_path, given=f"      {module.STRIP_OURS}: true\n      python: '3.16'\n")
+    assert in_workflows(root, preview=True) == []
+    assert refusals(root) == []
+
+
+def test_our_tree_draws_each_preview_version_once() -> None:
+    """Живое дерево: 3.16 объявлена одной пробой, а не ещё и пробой передачи (#1718)."""
+    root = Path(__file__).resolve().parent.parent
+    preview = in_workflows(root, preview=True)
+    assert len(preview) == len({version for _, version in preview}), preview
