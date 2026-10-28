@@ -199,6 +199,36 @@
     "propose-a-rule"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1724,
+   "merged_at": "2026-10-28",
+   "commit": "cd098ebced094207113da2d01179e11b83e611a5",
+   "touched": [
+    "changelog.d/skill-records-at-their-commit.fixed.md",
+    "docs/use/pipeline.md",
+    "scripts/publish_facts.py",
+    "scripts/skill_digest.py",
+    "scripts/skill_record.py",
+    "scripts/skill_signals.py",
+    "tests/test_skill_digest.py",
+    "tests/test_skill_record.py",
+    "tests/test_skill_signals.py"
+   ],
+   "added": [
+    "changelog.d/skill-records-at-their-commit.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
