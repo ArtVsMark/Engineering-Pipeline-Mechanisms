@@ -338,6 +338,57 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1728,
+   "merged_at": "2026-10-28",
+   "commit": "7bd54ee27e001e5d3a982b2e9057a98d29e83bed",
+   "touched": [
+    ".github/workflows/badges.yml",
+    ".rules/portable.json",
+    "changelog.d/wave2-gates-and-ci.fixed.md",
+    "scripts/check_attribution.py",
+    "scripts/check_decisions_edit.py",
+    "scripts/check_pr_meta.py",
+    "scripts/check_reread.py",
+    "scripts/check_workflow_forms.py",
+    "scripts/deps_intercept.py",
+    "scripts/portable_census.py",
+    "scripts/preflight.py",
+    "scripts/python_versions.py",
+    "tests/conftest.py",
+    "tests/test_changerefs.py",
+    "tests/test_decisions_edit.py",
+    "tests/test_deps_intercept.py",
+    "tests/test_doc_paths.py",
+    "tests/test_gates_reject.py",
+    "tests/test_path_keys.py",
+    "tests/test_portable.py",
+    "tests/test_portable_census.py",
+    "tests/test_push_guard.py",
+    "tests/test_python_versions.py",
+    "tests/test_reread.py",
+    "tests/test_squash_body.py",
+    "tests/test_steps_get_their_token.py",
+    "tests/test_steps_install_what_they_import.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/wave2-gates-and-ci.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
