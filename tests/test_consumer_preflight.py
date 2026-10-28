@@ -229,6 +229,25 @@ def test_the_launcher_refuses_with_a_reason(
     assert said in done.stderr, done.stderr
 
 
+@pytest.mark.parametrize(("entry", "code"), [(False, 2), (True, 0)], ids=["без-входа", "со-входом"])
+def test_a_path_table_without_an_entry_is_refused(tmp_path: Path, entry: bool, code: int) -> None:
+    """`paths.py` старого тега без `__main__` — отказ с причиной, а не пустой адрес (`6ae19d9`)."""
+    origin = supplier(tmp_path)
+    repo = origin / "o" / "m.git"
+    body = "print('.rules/bindings.json')\n"
+    if entry:
+        body = f'if __name__ == "__main__":\n    {body}'
+    (repo / "scripts" / "paths.py").write_text(body if entry else "TABLE = {}\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "таблица путей")
+    git(repo, "tag", "-f", "v1.2.3")
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    done = launch(tree, tmp_path, "paths.py", "bindings")
+    assert done.returncode == code, done.stdout + done.stderr
+    if not entry:
+        assert "нет точки входа" in done.stderr, done.stderr
+
+
 def test_the_preflight_loader_goes_through_the_launcher() -> None:
     """Выкачка одна (214): у загрузчика предполётной своей нет, он зовёт запускатель."""
     said = LOADER.read_text(encoding="utf-8")
