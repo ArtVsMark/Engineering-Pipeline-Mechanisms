@@ -14,9 +14,10 @@
 
 ## Роли: обязательные и по контексту
 
-Кем смотреть, говорит таблица ролей взгляда (`bash .claude/mechanisms.sh paths.py review-roles`):
+Кем смотреть, говорит таблица ролей взгляда (`bash .claude/mechanisms.sh paths.py review-roles`,
+по умолчанию `.rules/review-roles.json`):
 обязательные роли идут на каждом изменении, контекстные — по тронутым путям.
-Профили ролей — `bash .claude/mechanisms.sh paths.py roles`.
+Профили ролей — `bash .claude/mechanisms.sh paths.py roles`, по умолчанию `docs/agent/roles.md`.
 
 > **Наполнение проекта:** почему обязательны именно эти роли и что зовёт
 > остальные.
