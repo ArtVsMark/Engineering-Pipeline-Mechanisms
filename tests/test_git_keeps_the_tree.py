@@ -51,10 +51,13 @@ class Force:
 
 
 #: Подкоманда git → как она пишет силу. Буквы с доводом взяты из справки
-#: подкоманды: после них остаток склейки — значение, а не ключи.
+#: подкоманды: после них остаток склейки — значение, а не ключи. `-t` у
+#: `checkout` и `switch` берёт слитное необязательное значение (`-tf` —
+#: `--track=f`, а не сила), как и в хуке `bundle_hint.py` — та же грамматика
+#: ключей git (взгляд на #1713, `1496878`).
 FORCED: Final = {
-    "checkout": Force(frozenset({"--force", "--discard-changes"}), "f", frozenset("bB")),
-    "switch": Force(frozenset({"--force", "--discard-changes"}), "f", frozenset("cC")),
+    "checkout": Force(frozenset({"--force", "--discard-changes"}), "f", frozenset("bBt")),
+    "switch": Force(frozenset({"--force", "--discard-changes"}), "f", frozenset("cCt")),
     "reset": Force(frozenset({"--hard"})),
     "clean": Force(frozenset({"--force"}), "f", frozenset("e")),
 }
@@ -146,6 +149,7 @@ def test_the_gate_has_a_subject() -> None:
         ('run(["git", "clean", "-efoo", "-n"])', False),
         ('run(["git", "reset", "--soft", "HEAD~1"])', False),
         ('run(["git", "push", "--force-with-lease"])', False),
+        ('git(root, "checkout", "-tf", "origin/x")', False),
     ],
     ids=[
         "checkout-force",
@@ -167,6 +171,7 @@ def test_the_gate_has_a_subject() -> None:
         "образец-с-буквой-f",
         "мягкий-reset",
         "толчок",
+        "track-f-не-сила",
     ],
 )
 def test_the_sign_tells_force_from_a_plain_switch(source: str, bad: bool) -> None:
