@@ -50,6 +50,13 @@ CALL_RE = re.compile(
 #: слияния токеном владельца (`drift.OWNER_TOKEN_ENV`) — его и несёт шаг.
 OWN_TOKEN_MODES: Final = {"--save-merge-ways": "MERGE_QUEUE_TOKEN"}
 
+#: Режимы, в которых скрипт к площадке НЕ ходит: «скрипт довод» → причина.
+#: Гейт судил модуль, а не режим, и токен давали шагу, который только читает
+#: чужие данные (взгляд на #1674, `909ee89`, правило 125): правку загнал гейт,
+#: а чинить надо было гейт. В таком режиме токен у шага — отказ, а не долг.
+TOKENLESS_MODES: Final = {
+    "family_gates.py --summary": "карта — из файла сводки; к площадке ходит только `--map`",
+}
 #: Имя, которым механизм просит токен прогона.
 NEEDS_TOKEN: Final = "token_from_env"
 
@@ -115,6 +122,12 @@ def test_a_step_reading_the_platform_gets_a_token(
     """
     declared = set(step.get("env") or {})
     run = str(step.get("run") or "")
+    if any(f"scripts/{mode}" in run for mode in TOKENLESS_MODES if mode.startswith(script)):
+        assert not declared & TOKEN_NAMES, (
+            f"{workflow}, шаг «{name}»: {script} в этом режиме к площадке не ходит, "
+            "а токен шагу дан — чужие данные читаются с правом площадки (125)"
+        )
+        return
     wanted = {own for mode, own in OWN_TOKEN_MODES.items() if mode in run} or TOKEN_NAMES
     assert declared & wanted, (
         f"{workflow}, шаг «{name}»: {script} читает площадку, а токена у шага нет — "
