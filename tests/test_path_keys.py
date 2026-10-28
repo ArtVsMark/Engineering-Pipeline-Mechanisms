@@ -184,3 +184,77 @@ def test_the_code_gate_turns_red_on_a_read_and_keeps_the_lawful() -> None:
         "    return where.parent / paths.BINDINGS.name\n"
     )
     assert code_problems(lawful, names) == []
+
+
+#: Литерал пути умолчания, законный там, где таблицу прочитать нечем, — с причиной.
+LITERAL_EXEMPT: Final = {
+    ("labels-sync.yml", ".github/labels.yml"): (
+        "фильтр `on.push.paths` вычисляется площадкой до любого шага: таблицу путей "
+        "ему прочитать нечем"
+    ),
+}
+
+
+def literal_reads(root: Path) -> list[tuple[str, str]]:
+    """Путь умолчания ключа таблицы буквами там, где его ЧИТАЮТ, а не называют (#1722).
+
+    В скрипте — строка, которая целиком равна пути (константа вроде прежнего
+    `RECORDS = "docs/decisions/"`); в прогоне — путь операндом команды вне
+    `echo` и комментария (прежнее `[ -f .github/attribution-since ]`). Текст
+    сообщений и пояснений не судится: путь в нём называют, а не читают.
+    ГРАНИЦА НАЗВАНА: путь, собранный из частей, обход не видит.
+    """
+    defaults = {path.as_posix() for path in paths.PROJECT.values()}
+    found: list[tuple[str, str]] = []
+    for one in walk(root / paths.SCRIPTS, "*.py"):
+        if one.name in CODE_EXEMPT or one.name == "paths.py":
+            continue
+        for node in ast.walk(ast.parse(one.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value.rstrip("/") in defaults
+            ):
+                found.append((one.name, node.value.rstrip("/")))
+    for one in walk(root / paths.WORKFLOWS, "*.yml"):
+        for line in one.read_text(encoding="utf-8").splitlines():
+            said = line.strip()
+            if said.startswith("#") or "echo " in said:
+                continue
+            for path in defaults:
+                operand = r"(^|[\s\"'(<=:-])" + re.escape(path) + r"(/|[\"'\s)]|$)"
+                if re.search(operand, said):
+                    found.append((one.name, path))
+    return sorted(set(found))
+
+
+def test_no_mechanism_reads_project_data_by_a_literal_path() -> None:
+    """Скрипты и прогоны не читают данные проекта путём умолчания буквами (#1722).
+
+    Мерка 28.10.2026: два чтения мимо таблицы — каталог записей решений в
+    `check_decisions_edit.py` и отметка атрибуции в `step-attribution-history.yml`;
+    переназначение разделом `paths:` у них молча не действовало.
+    """
+    found = literal_reads(ROOT)
+    assert [one for one in found if one not in LITERAL_EXEMPT] == []
+    stale = [key for key in LITERAL_EXEMPT if key not in found]
+    assert not stale, f"исключение без литерала — снять: {stale}"
+
+
+def test_the_literal_gate_reds_on_a_read_and_keeps_a_message(tmp_path: Path) -> None:
+    """Константа пути и операнд прогона краснеют; путь в сообщении — нет."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / "scripts" / "x.py").write_text(
+        'RECORDS = "docs/decisions/"\nSAID = "поправьте .rules/bindings.json"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".github" / "workflows" / "y.yml").write_text(
+        "run: |\n  if [ -f .github/attribution-since ]; then :; fi\n"
+        '  echo "нет .github/authors.txt"\n',
+        encoding="utf-8",
+    )
+    assert literal_reads(tmp_path) == [
+        ("x.py", "docs/decisions"),
+        ("y.yml", ".github/attribution-since"),
+    ]

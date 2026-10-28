@@ -48,12 +48,12 @@ import argparse
 import json
 import re
 import sys
-import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
 import ghrest
+import main_guard
 import paths
 import pipeline_checks as policy
 import yaml
@@ -331,12 +331,12 @@ def guarded(argv: list[str] | None = None) -> int:
     тестов. Тяжёлый `onboard` из шапки вынесен (`expression`), и его отказ —
     уже под этой функцией.
     """
-    try:
-        return main(argv)
-    except Exception:
-        traceback.print_exc()
-        print("сторож запаса не отработал: исключение выше — не находка о запасе", file=sys.stderr)
-        return EXIT_BROKEN
+    # Тело защиты — общее (`main_guard.run`, #1720): здесь только слова сторожа.
+    return main_guard.run(
+        lambda: main(argv),
+        EXIT_BROKEN,
+        "сторож запаса не отработал: исключение выше — не находка о запасе",
+    )
 
 
 if __name__ == "__main__":

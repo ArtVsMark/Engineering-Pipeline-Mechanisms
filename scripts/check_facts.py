@@ -58,6 +58,7 @@ import os
 import pathlib
 import re
 import sys
+import traceback
 from typing import Any
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -840,4 +841,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # ЗАЩИТА ВХОДА — СВОЯ, А НЕ `main_guard.run` (#1720). Модуль едет
+    # одиночкой на страницу выпуска договора фактов и импортирует только
+    # стандартную библиотеку; тело то же: трасса — исход отказа, не находка.
+    try:
+        code = main()
+    except Exception:
+        traceback.print_exc()
+        print("check_facts не отработал: исключение выше — не находка (039)", file=sys.stderr)
+        code = EXIT_BROKEN
+    raise SystemExit(code)

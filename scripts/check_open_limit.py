@@ -60,6 +60,7 @@ import changerefs
 import check_branch_revival
 import ghrest
 import gitcall
+import main_guard
 import paths
 import trunk_log
 
@@ -344,4 +345,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

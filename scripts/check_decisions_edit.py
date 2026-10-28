@@ -40,14 +40,28 @@ import sys
 from typing import Final
 
 import gitcall
+import main_guard
 import paths
+import pipeline_checks as policy
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
 EXIT_BROKEN: Final = 2
 
-#: Где живут записи решений. Каталог один: второй разъехался бы с первым молча.
-RECORDS: Final = "docs/decisions/"
+
+def records() -> str:
+    """Каталог записей решений по таблице путей проекта, с `/` на конце; отказ — `NotRun`.
+
+    НЕ ЛИТЕРАЛОМ (#1722): потребитель переназначает каталог разделом `paths:`,
+    и литерал `docs/decisions/` сверял бы пустое и зеленел (045).
+    """
+    try:
+        folder = policy.project_path("decisions").as_posix().rstrip("/")
+    except paths.BadPaths as exc:
+        raise NotRun(f"каталог записей решений не назван: {exc}") from exc
+    return f"{folder}/"
+
+
 #: Заголовок раздела записи.
 HEADING_RE: Final = re.compile(r"^## (?P<name>.+?)\s*$")
 #: Разделы, которые изменение трогать не вправе. Это состав самого решения
@@ -148,6 +162,7 @@ def touched(base: str) -> list[tuple[str, str]]:
         if field
     ]
     found: list[tuple[str, str]] = []
+    folder = records()
     while fields:
         state = fields.pop(0)[:1]
         if not fields:
@@ -155,7 +170,7 @@ def touched(base: str) -> list[tuple[str, str]]:
         path = fields.pop(0)
         if state == "R" and fields:
             path = fields.pop(0)
-        if path.startswith(RECORDS) and path.endswith(".md"):
+        if path.startswith(folder) and path.endswith(".md"):
             found.append((state, path))
     return found
 
@@ -183,7 +198,7 @@ def frozen(text: str) -> dict[str, str]:
 def without_folder(link: re.Match[str]) -> str:
     """Цель ссылки без каталога, если документ лежит в дереве; иначе — целиком."""
     folder = link.group("folder") or ""
-    if posixpath.normpath(RECORDS + folder).split("/")[0] == "..":
+    if posixpath.normpath(records() + folder).split("/")[0] == "..":
         return link.group(0)
     return f"]({link.group('document')})"
 
@@ -254,4 +269,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

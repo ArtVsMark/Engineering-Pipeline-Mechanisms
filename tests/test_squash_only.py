@@ -19,6 +19,7 @@ request #N» означает, что уплотнения не было. Отм
 
 import re
 import subprocess
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -49,13 +50,13 @@ def first_parents(since: str) -> list[tuple[str, str]]:
     return []
 
 
-def test_no_platform_merge_after_the_boundary() -> None:
+def test_no_platform_merge_after_the_boundary(tmp_path: Path) -> None:
     """После отметки нет ни одного коммита обычного мержа.
 
     Это не вкус оформления: тело мерж-коммита составляет площадка, и трейлеров
     оно не несёт. Атрибуция ломается там, где переписать её уже нечем (123).
     """
-    since = boundary()
+    since = boundary(tmp_path)
     known = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", since], capture_output=True, check=False
     )

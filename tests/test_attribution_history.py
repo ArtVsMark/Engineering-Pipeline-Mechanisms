@@ -32,7 +32,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import needs_history
+from tests.conftest import ROOT, needs_history
 
 #: Общий шаг, который зовёт гейт атрибуции и читает отметку (#1556).
 STEP: Final = Path(".github/workflows/step-attribution-history.yml")
@@ -58,13 +58,13 @@ def gate_step() -> dict[str, Any]:
     raise AssertionError(f"в {STEP} нет шага, подключающего гейт атрибуции")
 
 
-def named_since(tree: Path) -> tuple[int, str]:
+def named_since(tree: Path, runner: Path) -> tuple[int, str]:
     """(код, отметка): шаг «отметка атрибуции» общего шага, исполненный на дереве."""
-    code, since, _ = since_run(tree)
+    code, since, _ = since_run(tree, runner)
     return code, since
 
 
-def since_run(tree: Path) -> tuple[int, str, str]:
+def since_run(tree: Path, runner: Path) -> tuple[int, str, str]:
     """(код, отметка, вывод шага): исполнение шага «отметка атрибуции» на дереве.
 
     ИСПОЛНЯЕТСЯ САМ ШАГ, А НЕ ВТОРОЙ РАЗБОР ФАЙЛА ОТМЕТКИ (090). Отметку
@@ -75,11 +75,23 @@ def since_run(tree: Path) -> tuple[int, str, str]:
     assert script, f"в {STEP} нет шага с id «{SINCE_STEP}» — отметку называть некому"
     out = tree / ".step-output"
     out.write_text("", encoding="utf-8")
+    # ВРЕМЕННЫЙ КАТАЛОГ — СВОЙ, А НЕ ПРОВЕРЯЕМОЕ ДЕРЕВО (взгляд на #1723): шаг
+    # пишет в `RUNNER_TEMP` вывод `paths.py`, и при дереве-корне репозитория
+    # файлы `mark` и `mark.err` оседали в нём и уезжали в коммит. Каталог
+    # приходит от теста — площадка прогона (`tmp_path`, 149).
+    runner.mkdir(parents=True, exist_ok=True)
     try:
         done = subprocess.run(
             ["bash", "-c", script],
             cwd=tree,
-            env={**os.environ, "GITHUB_OUTPUT": str(out)},
+            # Окружение площадки: код конвейера — наше дерево, временный каталог —
+            # свой; путь отметки шаг берёт у `paths.py` (#1722).
+            env={
+                **os.environ,
+                "GITHUB_OUTPUT": str(out),
+                "MECHANISMS": str(ROOT),
+                "RUNNER_TEMP": str(runner),
+            },
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -96,9 +108,9 @@ def since_run(tree: Path) -> tuple[int, str, str]:
     return done.returncode, said.get("since", ""), done.stdout + done.stderr
 
 
-def boundary() -> str:
+def boundary(runner: Path) -> str:
     """Отметка, которую шаг называет на нашем дереве; пусто — вся история."""
-    code, since = named_since(Path("."))
+    code, since = named_since(Path("."), runner)
     assert code == 0, "шаг отметки отказал на нашем дереве"
     return since
 
@@ -163,7 +175,7 @@ def test_without_the_file_the_boundary_is_the_connection(tmp_path: Path) -> None
         "-m",
         "после",
     )
-    assert named_since(tmp_path) == (0, connected)
+    assert named_since(tmp_path, tmp_path / ".runner") == (0, connected)
 
 
 def test_the_file_names_the_boundary_and_an_empty_one_refuses(tmp_path: Path) -> None:
@@ -176,12 +188,12 @@ def test_the_file_names_the_boundary_and_an_empty_one_refuses(tmp_path: Path) ->
     (tmp_path / ".github").mkdir()
     declared = tmp_path / ".github" / "attribution-since"
     declared.write_text("# пояснение\nabc123\n", encoding="utf-8")
-    assert named_since(tmp_path) == (0, "abc123")
+    assert named_since(tmp_path, tmp_path / ".runner") == (0, "abc123")
     # ОТКАЗ НАЗВАН, А НЕ ОБОРВАН (взгляд на #1574, 107): ненулевой код дал бы и
     # `grep` без строк под `pipefail` — сверяется причина в выводе шага.
     for text in ("# одно пояснение\n", ""):
         declared.write_text(text, encoding="utf-8")
-        code, _, said = since_run(tmp_path)
+        code, _, said = since_run(tmp_path, tmp_path / ".runner")
         assert code != 0 and "отметка объявлена, но не названа" in said, repr(text)
 
 
@@ -198,7 +210,7 @@ def revision(name: str) -> str | None:
 
 
 @needs_history
-def test_the_boundary_is_a_commit_not_a_date() -> None:
+def test_the_boundary_is_a_commit_not_a_date(tmp_path: Path) -> None:
     """Отметка обязана разбираться как ревизия — ровно то, чем она станет.
 
     Проверяется НЕ форма строки, а её разрешимость деревом: запрет вида «не
@@ -206,7 +218,7 @@ def test_the_boundary_is_a_commit_not_a_date() -> None:
     разрешительный здесь строится сам собой — git либо находит коммит, либо
     нет (068).
     """
-    since = boundary()
+    since = boundary(tmp_path)
     assert since, "отметка не задана: без неё гейт спрашивает всю историю"
     assert revision(since) is not None, (
         f"отметка «{since}» не разбирается как коммит. У гейта атрибуции `since` — "
@@ -244,7 +256,7 @@ def first_parents_after(since: str, ref: str) -> list[str] | None:
     return [line for line in done.stdout.splitlines() if line.strip()]
 
 
-def test_the_boundary_leaves_a_subject_behind_it() -> None:
+def test_the_boundary_leaves_a_subject_behind_it(tmp_path: Path) -> None:
     """После отметки есть что проверять: пустой диапазон — гейт без предмета.
 
     ГЕЙТ ОБЯЗАН ЛОВИТЬ И НОЛЬ
@@ -261,7 +273,7 @@ def test_the_boundary_leaves_a_subject_behind_it() -> None:
 
     Замер 13.09.2026: после отметки `77a5c72` — 25 первопредков.
     """
-    since = boundary()
+    since = boundary(tmp_path)
     if revision(since) is None:
         pytest.skip("отметка не разрешима — об этом говорит соседняя проверка")
     seen = first_parents_after(since, shared_branch())
@@ -288,14 +300,14 @@ def test_an_empty_range_is_what_the_check_must_refuse() -> None:
     )
 
 
-def test_nothing_after_the_boundary_lacks_attribution() -> None:
+def test_nothing_after_the_boundary_lacks_attribution(tmp_path: Path) -> None:
     """После отметки история общей ветки чиста — иначе прогон красен неотвратимо.
 
     Вечное красное не сигнал, а фон: рядом с ним не заметят настоящего (051).
     Отметка потому и объявляется руками — она отделяет то, что переписать уже
     нечем, от того, за что отвечает механизм.
     """
-    since = boundary()
+    since = boundary(tmp_path)
     if revision(since) is None:
         pytest.skip("отметка не разрешима — об этом говорит соседняя проверка")
     done = subprocess.run(

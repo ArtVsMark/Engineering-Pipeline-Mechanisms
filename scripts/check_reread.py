@@ -28,8 +28,10 @@ import re
 import sys
 from typing import Any, Final
 
+import check_journal
 import gitcall
 import journal
+import main_guard
 import paths
 import pipeline_checks as policy
 import report
@@ -53,14 +55,22 @@ def base_ref() -> str:
     return f"origin/{os.environ.get('GITHUB_BASE_REF') or paths.TRUNK}"
 
 
-def at(ref: str, path: str) -> dict[str, Any]:
-    """Файл ответов на названной ревизии.
+def at(ref: str, path: str) -> dict[str, Any] | None:
+    """Файл ответов на названной ревизии; ``None`` — файла на ней нет.
 
     Отказ чтения — третий исход: без базы сравнивать не с чем, и молчаливое
     «изменений нет» было бы выводом из незнания
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
+    ФАЙЛА НЕТ — ЭТО ОТВЕТ, А НЕ ОТКАЗ (#1722): изменение, которое впервые
+    кладёт ответ каталогу, краснело на каждом заходе. Формы «нет такого пути» —
+    у шага журнала (`check_journal.NO_SUCH_PATH`), а не второй раз здесь.
     """
-    shown = gitcall.output(["show", f"{ref}:{path}"], NotRun)
+    try:
+        shown = gitcall.output(["show", f"{ref}:{path}"], NotRun)
+    except NotRun as exc:
+        if any(said in str(exc) for said in check_journal.NO_SUCH_PATH):
+            return None
+        raise
     try:
         said: dict[str, Any] = json.loads(shown)
     except json.JSONDecodeError as exc:
@@ -119,11 +129,20 @@ def main(argv: list[str] | None = None) -> int:
         # «ДО» — ТОЧКА ВЕТВЛЕНИЯ, А НЕ ВЕРШИНА БАЗЫ (взгляд на #1499, 195; тот же
         # приём, что у гейта поверхности, #1494). База, поправившая ответ после
         # ветвления, делала одиночный подъём номера «с тронутыми ответами».
-        was = at(journal.common_ancestor(args.base or base_ref()), where)
+        # ИСТОРИЯ — ПЕРВОЙ: без неё гейт не отработал, даже когда ответа нет
+        # (третий исход на пустом входе, `tests/test_third_outcome.py`).
+        fork = journal.common_ancestor(args.base or base_ref())
+        if not answer.is_file():
+            print(f"ответа каталогу ({where}) нет — подписи под перечитыванием сверять нечего")
+            return EXIT_OK
+        was = at(fork, where)
         now = json.loads(answer.read_text(encoding="utf-8"))
     except (NotRun, journal.NotRun, OSError, json.JSONDecodeError) as exc:
         print(f"гейт не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
+    if was is None:
+        print(f"ответ каталогу ({where}) появляется этим изменением — прежней подписи нет")
+        return EXIT_OK
 
     said = lonely(was, now)
     if said:
@@ -134,4 +153,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

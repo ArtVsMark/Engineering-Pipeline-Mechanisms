@@ -119,6 +119,7 @@ from pathlib import Path
 from typing import Final
 
 import gitcall
+import main_guard
 import paths
 import report
 
@@ -634,4 +635,4 @@ def verdict(found: list[tuple[str, str, str]], seen: int, judged: int, *, level:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))
