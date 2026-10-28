@@ -56,6 +56,14 @@ BLOCK_START: Final = "<!-- блок сводки: начало -->"
 BLOCK_END: Final = "<!-- блок сводки: конец -->"
 #: Сколько последних недель показывать: ряд, а не вся история (она в записях).
 WEEKS: Final = 8
+#: Неделя записи, чей день не разобран.
+UNKNOWN_WEEK: Final = "?"
+#: Сколько соседей обходит сводка за заход: на столько рассчитана оценка
+#: вызовов площадки в `.rules/schedules.json` (два вызова на соседа). Сосед
+#: за пределом — «не прочитан» поимённо, а не молча (поздний взгляд на #1715).
+FAMILY_AT_MOST: Final = 10
+#: Поле записи с проектом, из чьего файла она прочитана (`mine`).
+REPO: Final = "repo"
 #: Строка дня сборки: сверка «то же состояние» её не читает.
 DATED: Final = "Собрано:"
 
@@ -76,23 +84,36 @@ def week_of(day: str) -> str:
     try:
         year, week, _ = date.fromisoformat(day).isocalendar()
     except TypeError, ValueError:
-        return "?"
+        return UNKNOWN_WEEK
     return f"{year}-W{week:02d}"
 
 
-def tally(records: list[dict[str, Any]]) -> dict[str, dict[str, list[int]]]:
-    """Неделя → навык → [ждали, из них вызван, вызван без ожидания]."""
-    table: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(lambda: [0, 0, 0]))
+def tally(records: list[dict[str, Any]]) -> dict[str, dict[tuple[str, str], list[int]]]:
+    """Неделя → (проект, навык) → [ждали, из них вызван, вызван без ожидания].
+
+    ПРОЕКТ — В КЛЮЧЕ (поздний взгляд на #1715): записи соседей и свои
+    складывались в одну строку навыка, и «по семье» нельзя было прочесть, чей
+    ряд. Проект ставит `gather` по файлу, из которого запись прочитана.
+    """
+    table: dict[str, dict[tuple[str, str], list[int]]] = defaultdict(
+        lambda: defaultdict(lambda: [0, 0, 0])
+    )
     for one in records:
         week = week_of(str(one.get("merged_at") or ""))
+        whose = str(one.get(REPO) or "?")
         wanted = {str(name) for name in one.get("expected") or []}
         said = {str(name) for name in one.get("invoked") or []}
         for name in wanted:
-            table[week][name][0] += 1
-            table[week][name][1] += name in said
+            table[week][(whose, name)][0] += 1
+            table[week][(whose, name)][1] += name in said
         for name in said - wanted:
-            table[week][name][2] += 1
+            table[week][(whose, name)][2] += 1
     return table
+
+
+def mine(repo: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Записи с проектом, из чьего файла они прочитаны: источник — файл, а не запись."""
+    return [{**one, REPO: repo} for one in records]
 
 
 def gather(
@@ -104,16 +125,19 @@ def gather(
     за общий. Сосед без файла — законно: шага записи у него может не быть.
     """
     try:
-        records = records_of(badges_read.by_api(repo, NAME, token))
+        records = mine(repo, records_of(badges_read.by_api(repo, NAME, token)))
     except ghrest.NotFound:
         records = []
     except ghrest.TransportError as exc:
         raise NotRun(f"свои записи не прочитаны: {exc}") from exc
     empty: list[str] = []
     unread: list[str] = []
-    for one in family:
+    for one in family[FAMILY_AT_MOST:]:
+        print(f"::warning::{one}: записи навыков не прочитаны — за пределом обхода семьи")
+        unread.append(one)
+    for one in family[:FAMILY_AT_MOST]:
         try:
-            records += records_of(badges_read.by_api(one, NAME, token))
+            records += mine(one, records_of(badges_read.by_api(one, NAME, token)))
         except ghrest.NotFound:
             empty.append(one)
         except (ghrest.TransportError, NotRun) as exc:
@@ -136,18 +160,22 @@ def block(records: list[dict[str, Any]], empty: list[str], unread: list[str], to
         lines += ["", f"Записей нет у соседей: {', '.join(sorted(empty))}."]
     if unread:
         lines += ["", f"**Не прочитаны:** {', '.join(sorted(unread))} — это незнание, а не ноль."]
-    for week in sorted(table, reverse=True)[:WEEKS]:
+    # Неделя «?» — день не разобран — идёт последней и место в ряду недель не
+    # занимает: при обратной сортировке строкой она вставала выше всех
+    # настоящих недель (поздний взгляд на #1715).
+    weeks = sorted((one for one in table if one != UNKNOWN_WEEK), reverse=True)[:WEEKS]
+    for week in [*weeks, *([UNKNOWN_WEEK] if UNKNOWN_WEEK in table else [])]:
         rows = table[week]
         lines += [
             "",
             f"### Неделя {week}",
             "",
-            "| навык | ждали | из них вызван | вызван без ожидания |",
-            "|---|---|---|---|",
+            "| проект | навык | ждали | из них вызван | вызван без ожидания |",
+            "|---|---|---|---|---|",
         ]
         lines += [
-            f"| `{name}` | {said[0]} | {said[1]} | {said[2]} |"
-            for name, said in sorted(rows.items())
+            f"| {whose} | `{name}` | {said[0]} | {said[1]} | {said[2]} |"
+            for (whose, name), said in sorted(rows.items())
         ]
     if not table:
         lines += ["", "Записей ещё нет: ряд начнётся с первого слитого изменения."]
