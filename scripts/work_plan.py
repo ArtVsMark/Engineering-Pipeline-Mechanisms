@@ -440,13 +440,16 @@ def zero_fixes(repo: str, token: str, red: list[str]) -> tuple[list[str], list[s
             except agent_pr.NotRun as exc:
                 # НЕ СПРОШЕНО — НЕ «ЗЕЛЕНО» (039): строка остаётся с причиной.
                 main_rows.append(f"**#{number}** — чинит «{step}»; краснота не спрошена: {exc}")
+        # САМОССЫЛКА — НЕ ПАРА, с обеих сторон объявления (взгляд на #1729,
+        # 195): `check_open_limit.is_fix` её отсекает, и план отвечает на тот же
+        # вопрос так же — «#N держит #N» нет, и #N остаётся в разделе 2.
         for held in changerefs.fixes_red_in(body):
-            if held in reds:
+            if held in reds and held != number:
                 pairs[(number, held)] = None
         waits = changerefs.held_in(body)
         if number in reds and waits:
             for fix in ISSUE_RE.findall(waits):
-                if int(fix) in numbers:
+                if int(fix) in numbers and int(fix) != number:
                     pairs[(int(fix), number)] = None
     rows = [f"**#{fix}** — держит #{held}" for fix, held in pairs]
     return main_rows, rows, {held for _, held in pairs}

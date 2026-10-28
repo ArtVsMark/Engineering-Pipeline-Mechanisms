@@ -1799,3 +1799,14 @@ def test_the_plan_rebuilds_after_the_registry_sweep_on_main_only() -> None:
     assert plan_runs_on(condition, "workflow_run", "ci", "pull_request"), "ci изменения отсечён"
     assert plan_runs_on(condition, "workflow_run", "drift", "schedule")
     assert plan_runs_on(condition, "workflow_dispatch"), "ручная кнопка отсечена (104)"
+
+
+def test_a_fix_naming_itself_is_not_a_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Самоссылка с любой стороны — не пара 0б, и #N остаётся в разделе 2 (взгляд на #1729)."""
+    pulls = [
+        {"number": 50, "body": f"{module.changerefs.FIXES_RED_KEY} #50"},
+        {"number": 51, "body": f"{module.changerefs.WAITS_KEY} #51"},
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(pulls))
+    _, rows, held = module.zero_fixes("o/r", "t", ["#50 — работа", "#51 — работа"])
+    assert rows == [] and held == set()
