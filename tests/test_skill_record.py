@@ -86,6 +86,31 @@ def test_publish_lays_the_record_on_top_of_the_branch(
     assert module.publish(record, tmp_path / "w2") is False
 
 
+def test_a_relative_workdir_with_a_foreign_root_lands_in_one_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--root` ≠ cwd и относительный `--workdir` — запись в ветку `root`, а не мимо (`c065808`)."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    work = tmp_path / "work"
+    git = repo(work)
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "начало"], check=True)
+    subprocess.run([*git, "remote", "add", "origin", str(remote)], check=True)
+    elsewhere = tmp_path / "в-стороне"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    record = {"pr": 9, "merged_at": "2026-10-28"}
+    assert module.publish(record, Path("w"), root=work) is True
+    shown = subprocess.run(
+        ["git", "-C", str(remote), "show", f"badges:{module.RECORDS}"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    ).stdout
+    assert json.loads(shown)["records"] == [record]
+
+
 def test_main_prints_the_record_without_a_workdir(run_script: RunScript) -> None:
     """Без `--workdir` — сухой заход: запись печатается, ветка не трогается; исход 0."""
     run = run_script("skill_record.py", "--commit", "HEAD", "--root", str(ROOT))

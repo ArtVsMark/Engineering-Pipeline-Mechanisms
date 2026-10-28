@@ -41,7 +41,11 @@ def test_a_good_record_is_read_and_no_section_means_no_records() -> None:
     [
         ([], "отображение"),
         ({"version": 1, "extra": 1}, "незнакомые ключи"),
-        ({"version": 2, "records": []}, "ждётся 1"),
+        ({"version": 2, "records": []}, "ждётся целое 1"),
+        # Тип версии раздела — как у полей записи (`6a76fe1`, `08b80d3`).
+        ({"version": True, "records": []}, "ждётся целое 1"),
+        ({"version": 1.0, "records": []}, "ждётся целое 1"),
+        ({"version": "1", "records": []}, "ждётся целое 1"),
         ({"version": 1, "records": {}}, "список"),
         ({"version": 1, "records": ["x"]}, "запись 1"),
         ({"version": 1, "records": [{**good(), "who": 1}]}, "незнакомые поля"),

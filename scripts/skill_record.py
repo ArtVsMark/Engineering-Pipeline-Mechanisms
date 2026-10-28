@@ -185,6 +185,11 @@ def publish(
     last = ""
     if deadline is None:
         deadline = clock() + BUDGET
+    # ОДНО МЕСТО ДЛЯ GIT И ДЛЯ ЗАПИСИ (взгляд на #1724, `c065808`): `git
+    # worktree add` считает относительный путь от `root`, а запись и `git -C` —
+    # от текущего каталога, и при `--root` ≠ cwd они расходились бы: дерево под
+    # `root`, а запись и толчок — во внешний репозиторий.
+    workdir = workdir.resolve()
     for attempt in range(TRIES):
         if deadline - clock() < ATTEMPT_WORST:
             raise NotRun(
