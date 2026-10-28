@@ -283,8 +283,7 @@ def test_a_rework_row_takes_its_reason_from_the_neighbours_record() -> None:
     said = {"queues": {"rework": rows, "spread": [], "propose": []}, "held": {}}
     body = module.render_issue(said, reasons)
     first, second = [line for line in body.splitlines() if line.startswith("- 00")]
-    joiner = module.feedback_registry.WORD_JOINER
-    assert "причина: доработка" in first and f"`нужен вход <{joiner}путь>` (`o/n#4`)" in first
+    assert "причина: доработка" in first and "`нужен вход <путь>` (`o/n#4`)" in first
     assert second.endswith("причины в канале нет")
     assert "причин" not in module.render_issue(said)
     assert module.reason_of(rows[0], None) == "", "канал не дан — хвоста нет"
