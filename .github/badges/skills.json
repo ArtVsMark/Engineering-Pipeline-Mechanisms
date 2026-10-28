@@ -1,0 +1,33 @@
+{
+ "schema": 1,
+ "records": [
+  {
+   "pr": 1719,
+   "merged_at": "2026-10-28",
+   "commit": "7978d089c451ee8d0f2eb64f766434b422636092",
+   "touched": [
+    "changelog.d/badges-keep-skills-and-one-preview.internal.md",
+    "changelog.d/skill-records-step.contract.md",
+    "scripts/build_facts.py",
+    "scripts/python_versions.py",
+    "tests/test_facts.py",
+    "tests/test_python_versions.py"
+   ],
+   "added": [
+    "changelog.d/badges-keep-skills-and-one-preview.internal.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "a-task-before-the-work",
+    "bundle-the-work"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
+  }
+ ]
+}
