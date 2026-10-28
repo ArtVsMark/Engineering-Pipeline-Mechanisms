@@ -800,11 +800,10 @@
       "status": "active",
       "mechanism": "gate",
       "where": ".github/workflows/ci.yml — джоб attribution зовёт scripts/check_attribution.py, перенесённый из каталога с источником в шапке (ArtVsMark/Engineering-Pipeline-Mechanisms#1670), а не написанный здесь заново; packages/transport/ghrest.py — общий транспорт вместо пяти копий, и tests/test_ghrest.py краснеет на появлении шестой",
-      "skill": ".claude/skills/answer-a-rule",
       "analysed": "2026-10-25",
       "origin": "ArtVsMark/Engineering-Incidents-Playbook:scripts/check_attribution.py@4e8bc3e88bda89c47530e98449cba53f9d3f8c61",
       "origin_kind": "adapted",
-      "why": "Гейт — копия check_attribution.py каталога на 4e8bc3e (origin), а не ссылка: снятие оригинала у каталога и расхождение двух копий здесь ничем не меряется — механизма слежки за адаптированными копиями нет, `.rules/vendor-watch.json` следит только за файлами действий (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1676). Держится перечитыванием ответа на каждую выгрузку каталога навыком answer-a-rule: правило, сменившее предмет у каталога, приходит выгрузкой, и ответ перечитывается вместе с origin."
+      "why": "Гейт — копия check_attribution.py каталога на 4e8bc3e (origin), а не ссылка: снятие оригинала у каталога и расхождение двух копий здесь ничем не меряется — механизма слежки за адаптированными копиями нет, `.rules/vendor-watch.json` следит только за файлами действий (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1676). Расхождение копий не держится ничем — пробел назван (046), а не приписан навыку: answer-a-rule зовут на новое правило и на правку ответа, а не на каждую выгрузку каталога (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1731). Вход в работу — слежка за адаптированными копиями по origin."
     },
     "091": {
       "status": "active",
