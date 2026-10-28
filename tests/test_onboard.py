@@ -2827,6 +2827,10 @@ def test_the_mechanism_rules_kit_carries_every_rule_of_our_census() -> None:
     assert sorted(kit["rules"]) == sorted(ours["rules"])
     assert all(places == {} for places in kit["rules"].values()), "в заготовке наши места"
     assert kit["места"] == {}
+    # «Суждение» — тоже правила о механизмах, общие и потребителю: без сверки
+    # его потеря в заготовке не краснела (взгляд на #1647, `e208272`). Текст у
+    # заготовки свой — без наших мест, — сверяются правила.
+    assert sorted(kit["суждение"]) == sorted(ours["суждение"])
 
 
 def test_a_step_about_a_change_is_not_called_on_the_trunk_push() -> None:
