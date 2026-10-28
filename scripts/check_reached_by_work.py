@@ -72,6 +72,7 @@ from pathlib import Path
 from typing import Final
 
 import check_new_is_tested as neighbour
+import main_guard
 import paths
 
 #: Отказ гейта. Имя объявлено СВОИМ, а не взято у соседа: исходы у них разные
@@ -203,4 +204,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

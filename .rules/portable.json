@@ -721,6 +721,9 @@
     "scripts/check_invisible.py": {
       "answer": "as-is"
     },
+    "scripts/main_guard.py": {
+      "answer": "as-is"
+    },
     "scripts/check_workflow_forms.py": {
       "answer": "configured",
       "where": [

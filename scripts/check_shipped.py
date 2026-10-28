@@ -43,6 +43,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import main_guard
 import paths
 import pipeline_checks as policy
 import report
@@ -279,4 +280,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

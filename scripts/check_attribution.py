@@ -76,6 +76,7 @@ from pathlib import Path
 from typing import Final
 
 import gitcall
+import main_guard
 import paths
 import pipeline_checks
 import report
@@ -598,4 +599,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main_guard.run(main, EXIT_NOT_RUN))

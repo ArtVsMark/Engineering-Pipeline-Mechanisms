@@ -42,6 +42,7 @@ from typing import Final
 
 import catalogue
 import gitcall
+import main_guard
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -318,4 +319,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))
