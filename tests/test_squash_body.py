@@ -222,6 +222,8 @@ def test_the_tail_block_is_read_alike_by_the_body_and_the_attribution_gate() -> 
         f"Тема\n\nRod: x\n{соавтор}": True,
         f"Тема\n\nЗакрывает пункт: x\n{соавтор}": True,
         f"Тема\n\nЧинит красное: #5\n{соавтор}": True,
+        # Регистр — как у `changerefs`, читающего те же ключи (взгляд на #1728).
+        f"Тема\n\nчинит красное: #5\n{соавтор}": True,
         f"Тема\n\nНапример так: x\n{соавтор}": False,
         f"Тема\n\n1st: x\n{соавтор}": False,
         f"Тема\n\n{соавтор}\nи пара слов": False,

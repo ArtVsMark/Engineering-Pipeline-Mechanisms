@@ -116,7 +116,11 @@ OWN_KEYS: Final = tuple(
     and str(getattr(changerefs, name)).endswith(":")
     and " " in str(getattr(changerefs, name))
 )
-TRAILER_LINE = re.compile(rf"^(?:{'|'.join(map(re.escape, OWN_KEYS))}|[^\W\d_][\w-]*):\s+\S")
+#: Без учёта регистра, как `changerefs` читает те же ключи (взгляд на #1728):
+#: строку `чинит красное: #5` счёт принял бы ключом, а хвост — прозой (195).
+TRAILER_LINE = re.compile(
+    rf"^(?:{'|'.join(map(re.escape, OWN_KEYS))}|[^\W\d_][\w-]*):\s+\S", re.IGNORECASE
+)
 
 
 def tail_lines(body: str) -> list[str]:
