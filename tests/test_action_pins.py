@@ -89,6 +89,37 @@ def test_the_lawful_is_not_refused(
     assert done.code == pins.EXIT_OK, done.out + done.err
 
 
+FLOAT = "      - uses: actions/checkout@v7\n"
+
+
+def test_a_floating_major_beside_its_release_is_lawful(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """`@v7` при `# v7.0.1` в базе — не ниже: плавающий тег указывает на последний выпуск ветки."""
+    repo = change(
+        tmp_path, {"a.yml": run_file(UP)}, {"a.yml": run_file(UP), "b.yml": run_file(FLOAT)}
+    )
+    done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
+    assert done.code == pins.EXIT_OK, done.out + done.err
+
+
+def test_another_old_line_beside_an_old_drift_is_refused(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """В базе обе версии, изменение копирует старую строку ещё раз — отказ (взгляд на #1734).
+
+    Граница с «прежним расхождением»: то, что уже стоит, остаётся дрейфу, а
+    НОВАЯ строка с прежней версией — работа этого изменения.
+    """
+    repo = change(
+        tmp_path,
+        {"a.yml": run_file(OLD, UP)},
+        {"a.yml": run_file(OLD, UP), "b.yml": run_file(OLD)},
+    )
+    done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
+    assert done.code == pins.EXIT_FOUND, done.out + done.err
+
+
 def test_a_hash_without_a_mark_is_named_not_judged(run_script: RunScript, tmp_path: Path) -> None:
     """Хеш без пометки порядка не несёт: строка названа предупреждением, а не пропущена молча."""
     repo = change(
@@ -106,11 +137,35 @@ def test_an_unknown_base_is_not_run(run_script: RunScript, tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
+    ("mine", "other", "expect"),
+    [
+        ("v7", "v7.1.0", False),
+        ("v7.1.0", "v7", False),
+        ("v7.0.0", "v7.1.0", True),
+        ("v4", "v7", True),
+        ("v10", "v7.1.0", False),
+    ],
+    ids=[
+        "плавающий-мажор",
+        "точный-при-плавающем",
+        "ниже-минора",
+        "ниже-мажора",
+        "десять-выше-семи",
+    ],
+)
+def test_lower_compares_only_the_named_numbers(mine: str, other: str, expect: bool) -> None:
+    """`v7` не ниже `v7.1.0`: плавающий тег — последний выпуск ветки (взгляд на #1734)."""
+    said, theirs = pins.rank(mine), pins.rank(other)
+    assert said is not None and theirs is not None
+    assert pins.lower(said, theirs) is expect
+
+
+@pytest.mark.parametrize(
     ("said", "expect"),
     [
-        ("v4", (4, 0, 0)),
+        ("v4", (4,)),
         ("v7.0.1", (7, 0, 1)),
-        ("5", (5, 0, 0)),
+        ("5", (5,)),
         ("3d3c42e5", None),
         ("main", None),
     ],

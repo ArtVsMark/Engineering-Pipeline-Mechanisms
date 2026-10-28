@@ -17,6 +17,15 @@
 `v7.0.1`, начиная с #31, и #1674 с `setup-python` `v7.0.0` при `v7.1.0`.
 Строк без порядка — ноль.
 
+ЗАМЕР НА ДЕРЕВЬЯХ СЕМЬИ ТЕМ ЖЕ ПРИЁМОМ (взгляд на #1734, правило 107): шаг
+общий, а наша история прибита хешами, и ложное красное на плавающих тегах она
+не показала бы. Выкачки 28.10.2026 — каталог (a0874b9, 185 изменений с
+прогонами), ArtVsMark (0f268a1, 108), Usage-Token (285c44e, 34),
+Glossary-Python (51e74fa, 60), грейдер (3b97998, 128): 515 изменений, названо
+два — Glossary-Python #12 и грейдер #40, оба `actions/checkout@v4` при `v5`
+рядом, то есть тот же вид; ложных нет, строк без порядка нет. Плавающие теги
+там есть, и замер шёл уже по сравнению общей длиной (`lower`).
+
 ПРЕДМЕТ — ПРИРОСТ, А НЕ ДЕРЕВО. Судится только вхождение `uses:`, которое
 изменение ДОБАВИЛО: строк с этим действием и этой версией в диффе прибыло
 больше, чем ушло. Переставленная или переписанная вокруг строка — не прирост,
@@ -83,12 +92,24 @@ def base_ref() -> str:
 
 
 def rank(said: str) -> tuple[int, ...] | None:
-    """Порядок версии для сравнения; хеш без пометки — `None`, порядка у него нет."""
+    """Числа версии как есть, без дополнения; хеш без пометки — `None`, порядка у него нет."""
     found = RANK_RE.fullmatch(said)
     if not found:
         return None
-    parts = [int(one) for one in found[1].split(".")]
-    return tuple(parts + [0] * (3 - len(parts)))
+    return tuple(int(one) for one in found[1].split("."))
+
+
+def lower(mine: tuple[int, ...], other: tuple[int, ...]) -> bool:
+    """Строго ли `mine` ниже `other` — по общей длине, а не дополнением нулями.
+
+    ПЛАВАЮЩИЙ ТЕГ — НЕ НОЛЬ (взгляд на #1734). `v7` указывает на последний
+    выпуск седьмой ветки, то есть не ниже `v7.1.0`; дополнение нулями делало
+    его `7.0.0` и краснело на законном. Сравниваются только названные числа:
+    `v7` против `v7.1.0` — равны, `v7.0.0` против `v7.1.0` и `v4` против
+    `v7` — ниже.
+    """
+    size = min(len(mine), len(other))
+    return mine[:size] < other[:size]
 
 
 def pins_in(lines: list[str], own: tuple[str, ...]) -> Counter[Pin]:
@@ -117,23 +138,24 @@ def added(diff: str, own: tuple[str, ...]) -> Counter[Pin]:
 
 
 def findings(base_pins: Counter[Pin], grown: Counter[Pin]) -> tuple[list[str], list[str]]:
-    """Отказы и строки без порядка: новая версия ниже старшей в базе — отказ."""
+    """Отказы и строки без порядка: новая версия ниже хоть одной в базе — отказ."""
     problems: list[str] = []
     unranked: list[str] = []
     for (repo, said), count in sorted(grown.items()):
-        known = [rank(version) for (name, version) in base_pins if name == repo]
-        ranked = [one for one in known if one is not None]
+        ranked = [one for (name, version) in base_pins if name == repo and (one := rank(version))]
         mine = rank(said)
         if not ranked:
             continue
         if mine is None:
             unranked.append(f"{repo}@{said} — версия не читается: хеш без пометки `# vX.Y.Z`")
             continue
-        top = max(ranked)
-        if mine < top:
-            newest = next(
-                version for (name, version) in base_pins if name == repo and rank(version) == top
-            )
+        above = [
+            version
+            for (name, version) in sorted(base_pins)
+            if name == repo and (theirs := rank(version)) is not None and lower(mine, theirs)
+        ]
+        if above:
+            newest = max(above, key=lambda version: rank(version) or ())
             problems.append(
                 f"{repo}@{said} добавлено {count} раз(а), а в базе уже {newest} — "
                 f"напишите строку с {newest}"
