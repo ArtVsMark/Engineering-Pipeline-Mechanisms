@@ -570,6 +570,37 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1734,
+   "merged_at": "2026-10-28",
+   "commit": "8f366196b89cc3df4603a1d928f50ded404ae0e6",
+   "touched": [
+    ".github/workflows/step-journal.yml",
+    ".rules/portable.json",
+    "changelog.d/new-line-old-action-pin.added.md",
+    "scripts/check_action_pins.py",
+    "scripts/drift.py",
+    "tests/test_action_pins.py"
+   ],
+   "added": [
+    "changelog.d/new-line-old-action-pin.added.md",
+    "scripts/check_action_pins.py",
+    "tests/test_action_pins.py"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "build-a-gate",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "build-a-gate",
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
