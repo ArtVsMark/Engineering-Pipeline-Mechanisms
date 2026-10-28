@@ -110,22 +110,34 @@ def reason(done: subprocess.CompletedProcess[str]) -> str:
     return f"код {done.returncode}: {said}" if said else f"код {done.returncode}"
 
 
-def checkout(workdir: Path) -> None:
-    """Рабочее дерево ветки `badges` в `workdir`: поверх неё или сиротой, если её нет."""
-    fetched = git("fetch", "--quiet", "origin", BRANCH)
+def checkout(workdir: Path, repo: Path | None = None) -> None:
+    """Рабочее дерево ветки `badges` в `workdir`: поверх неё или сиротой, если её нет.
+
+    `repo` — репозиторий, чья ветка; не дан — текущий каталог.
+    """
+    fetched = git("fetch", "--quiet", "origin", BRANCH, cwd=repo)
     if fetched.returncode == 0:
-        added = git("worktree", "add", "--quiet", "--detach", str(workdir), "FETCH_HEAD")
+        added = git("worktree", "add", "--quiet", "--detach", str(workdir), "FETCH_HEAD", cwd=repo)
     else:
         # ОТКАЗ `fetch` — НЕ ПРИГОВОР: ветки может не быть вовсе, и это решает
         # `ls-remote`. Но если ветка есть и не прочитана, причина `fetch` и
         # есть ответ «почему», и терять её нельзя (взгляд на #1249).
-        remote = git("ls-remote", "--exit-code", "--heads", "origin", BRANCH)
+        remote = git("ls-remote", "--exit-code", "--heads", "origin", BRANCH, cwd=repo)
         if remote.returncode != NO_SUCH_BRANCH:
             raise NotPublished(
                 f"ветка {BRANCH} не прочитана (fetch {reason(fetched)}; "
                 f"ls-remote {reason(remote)}) — публиковать поверх нечего, и затирать её нельзя"
             )
-        added = git("worktree", "add", "--quiet", "--orphan", "-b", f"{BRANCH}-first", str(workdir))
+        added = git(
+            "worktree",
+            "add",
+            "--quiet",
+            "--orphan",
+            "-b",
+            f"{BRANCH}-first",
+            str(workdir),
+            cwd=repo,
+        )
     if added.returncode != 0:
         raise NotPublished(f"рабочее дерево ветки не создано: {reason(added)}")
 
