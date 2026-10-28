@@ -17,7 +17,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, git, load_script
+from tests.conftest import FAKE_VERSION, ROOT, RunScript, badges_shown, git, load_script, walk
 
 facts = load_script("build_facts.py")
 
@@ -1457,6 +1457,51 @@ def test_the_badges_branch_keeps_only_what_is_published() -> None:
     flow = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
     assert 'build_facts.py --prune "$pub/.github/badges"' in flow, "публикация не чистит каталог"
     assert "git add -A .github/badges" in flow, "удаление не записывается в коммит публикации"
+
+
+#: Имена в каталоге `badges`, которые наша уборка снимает законно, — с причиной.
+NOT_ON_OUR_BRANCH: Final = {
+    "family.svg": "рисует действие потребителя `family-badge`; наш прогон значков его не публикует",
+    "python.svg": "рисует действие потребителя `python-badge`; единый значок снят у нас с #1422",
+}
+#: Формы, которыми писатель называет файл каталога `badges`: константой пути,
+#: строкой с константой каталога и путём буквами в прогоне или действии.
+BADGES_NAMED: Final = (
+    re.compile(r'BADGES_DIR\s*/\s*"([\w.-]+)"'),
+    re.compile(r"\{BADGES_DIR\}/([\w.-]+)"),
+    re.compile(r"\.github/badges/([\w.-]+\.(?:json|svg|md))"),
+)
+
+
+def test_every_badges_writer_survives_the_pruning() -> None:
+    """Всякий файл `badges`, названный писателем, — в перечне ветки или снят с причиной (#1694).
+
+    Перечень `branch_files` держал изданное сборкой, а запись навыков пишет
+    другой шаг — и уборка значков стёрла её следующим же заходом. Класс, а не
+    имя (взгляд на #1719, 195): обходятся все скрипты, прогоны и действия.
+    ГРАНИЦА НАЗВАНА: имя, собранное во время работы, а не буквами, обход не видит.
+    """
+    module = load_script("build_facts.py")
+    named: dict[str, set[str]] = {}
+    sources = [
+        *walk(ROOT / "scripts", "*.py"),
+        *walk(ROOT / ".github" / "workflows", "*.yml"),
+        *walk(ROOT / ".github" / "actions", "**/*.yml"),
+    ]
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        for form in BADGES_NAMED:
+            for found in form.finditer(text):
+                named.setdefault(found[1], set()).add(path.name)
+    assert "skills.json" in named, "обход не видит писателей — гейт доказывал бы только себя (075)"
+    lost = {
+        name: sorted(where)
+        for name, where in named.items()
+        if name not in module.branch_files() and name not in NOT_ON_OUR_BRANCH
+    }
+    assert lost == {}, f"уборка значков сотрёт файлы писателей: {lost}"
+    stale = sorted(set(NOT_ON_OUR_BRANCH) - set(named))
+    assert not stale, f"исключение без писателя — снять: {stale}"
 
 
 def test_pruning_removes_files_and_folders_but_keeps_the_list(tmp_path: Path) -> None:

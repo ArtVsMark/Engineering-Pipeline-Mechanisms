@@ -62,6 +62,8 @@ EXPRESSION: Final = "${{"
 NEXT_STEP: Final = "step-python-next.yml"
 #: Вход пробы передачи: вызов с ним проверяет путь вызова шага, а не версию проекта.
 STRIP_OURS: Final = "strip-ours"
+#: Значения входа `strip-ours`, при которых вызов — не проба передачи.
+NOT_A_PROBE: Final = frozenset({"false", "", "none"})
 
 
 @dataclass(frozen=True)
@@ -195,8 +197,15 @@ def _called(path: Path, name: str, job: Any, refused: list[Refused]) -> list[Dec
     given = job.get("with")
     # ПРОБА ПЕРЕДАЧИ — НЕ ОБЪЯВЛЕНИЕ (#1718). `handover-probe.yml` зовёт шаг
     # со входом `strip-ours`, чтобы проверить путь вызова; версия в нём —
-    # копия ячейки настоящей пробы, и значок рисовал 3.16 дважды.
-    if isinstance(given, dict) and given.get(STRIP_OURS) is True:
+    # копия ячейки настоящей пробы, и значок рисовал 3.16 дважды. Вход судится
+    # в любой записи, а не литералом `true` (взгляд на #1719): строка
+    # `'true'` и выражение `${{ … }}` — тоже проба; не проба только явное
+    # «нет» — `false` литералом или строкой и пустое значение.
+    if (
+        isinstance(given, dict)
+        and STRIP_OURS in given
+        and str(given[STRIP_OURS]).strip().casefold() not in NOT_A_PROBE
+    ):
         return []
     said = str(given.get("python", "")).strip() if isinstance(given, dict) else ""
     if not said:

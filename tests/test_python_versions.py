@@ -253,15 +253,28 @@ def test_a_call_of_the_preview_step_without_a_version_is_refused(tmp_path: Path)
     assert [one for one in refusals(root) if "без входа python" in one]
 
 
-def test_a_handover_probe_call_declares_no_version(tmp_path: Path) -> None:
-    """Вызов шага пробы со входом `strip-ours` — проба передачи, а не версия (#1718)."""
-    root = calling_flow(tmp_path, given=f"      {module.STRIP_OURS}: true\n      python: '3.16'\n")
-    assert in_workflows(root, preview=True) == []
-    assert refusals(root) == []
+@pytest.mark.parametrize("said", ["true", "'true'", "${{ inputs.strip }}"])
+def test_a_handover_probe_call_declares_no_version(tmp_path: Path, said: str) -> None:
+    """Вызов шага пробы со входом `strip-ours` в любой записи — проба передачи (#1718)."""
+    given = f"      {module.STRIP_OURS}: {said}\n      python: '3.16'\n"
+    assert in_workflows(calling_flow(tmp_path, given=given), preview=True) == []
 
 
-def test_our_tree_draws_each_preview_version_once() -> None:
-    """Живое дерево: 3.16 объявлена одной пробой, а не ещё и пробой передачи (#1718)."""
+@pytest.mark.parametrize("said", ["false", "'false'"])
+def test_an_explicit_no_probe_still_declares(tmp_path: Path, said: str) -> None:
+    """Явное `strip-ours: false` — обычный вызов: версия объявлена (взгляд на #1719)."""
+    given = f"      {module.STRIP_OURS}: {said}\n      python: '3.16'\n"
+    root = calling_flow(tmp_path, given=given)
+    assert in_workflows(root, preview=True) == [("python-next.yml", (3, 16))]
+
+
+def test_our_handover_probe_declares_no_version() -> None:
+    """Живое дерево: проба передачи среди объявлений не стоит (#1718).
+
+    Сверяется именно она, а не единственность версии: законная вторая проба
+    той же версии — другая ОС, другой вызывающий — значку не помеха (взгляд на #1719).
+    """
     root = Path(__file__).resolve().parent.parent
-    preview = in_workflows(root, preview=True)
-    assert len(preview) == len({version for _, version in preview}), preview
+    probe = module.paths.HANDOVER_PROBE.name
+    assert (root / module.paths.HANDOVER_PROBE).is_file(), "пробы передачи нет — сверять нечего"
+    assert probe not in {flow_ for flow_, _ in in_workflows(root, preview=True)}
