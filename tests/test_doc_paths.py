@@ -23,9 +23,10 @@
 - журнал (`CHANGELOG.md`, фрагменты `changelog.d/`) — тоже история; живое
   описание формы фрагментов, `changelog.d/README.md`, судится как документ;
 - судятся пути под девятью корнями дерева (`PATH_RE`) с расширением из
-  перечня: корневые файлы (`AGENTS.md`, `pyproject.toml`) и прочие корни образец
-  не видит — у корня свой короткий набор, и по виду слово с точкой в кавычках
-  неотличимо от имени без пути;
+  перечня — и весь инлайн-код, и путь внутри команды или со строкой
+  (`INNER_PATH_RE`, взгляд на #1681). Корневые файлы (`AGENTS.md`,
+  `pyproject.toml`) и прочие корни образец не видит — у корня свой короткий
+  набор, и по виду слово с точкой в кавычках неотличимо от имени без пути;
 - пути в комментариях кода гейт не читает — у кода свой сосед,
   `tests/test_live_references.py`, и он судит адреса функций, а не файлов;
 - смысл пути — тот ли это файл, о котором говорит фраза, — машине не виден (057).
@@ -43,6 +44,16 @@ from tests.test_doc_links import documents
 PATH_RE: Final = re.compile(
     r"`(?P<path>(?:scripts|tests|docs|\.github|\.rules|\.claude|kit|packages|export)"
     r"/[\w./-]+?\.(?:py|yml|yaml|md|json|sh|toml|txt|svg))(?:::[\w.]+)?`"
+)
+#: Инлайн-код целиком — команда, путь со строкой, путь в тексте вызова.
+CODE_RE: Final = re.compile(r"`(?P<code>[^`\n]+)`")
+#: Путь ВНУТРИ инлайн-кода: в команде (`python scripts/preflight.py --push`),
+#: с номером строки (`путь:12`). Прежде судился только путь, занявший весь
+#: инлайн-код, и соседний случай не был назван (взгляд на #1681, `947a685`).
+#: Мерка 28.10.2026: внутри команд 40 путей, мёртвых — ни одного.
+INNER_PATH_RE: Final = re.compile(
+    r"(?<![\w/.-])(?P<path>(?:scripts|tests|docs|\.github|\.rules|\.claude|kit|packages|export)"
+    r"/[\w./-]+?\.(?:py|yml|yaml|md|json|sh|toml|txt|svg))(?::\d+)?(?![\w/-])"
 )
 #: Документы-история: старое имя в них законно (см. шапку).
 HISTORY: Final = ("docs/decisions/", "changelog.d/", "CHANGELOG.md")
@@ -62,12 +73,18 @@ ELSEWHERE: Final[dict[str, str]] = {
 
 def dead_paths(doc: Path, text: str, root: Path = ROOT) -> list[str]:
     """Пути документа, которых нет ни в дереве, ни в заготовке, ни в `ELSEWHERE`."""
+    named: list[tuple[int, str]] = [
+        (found.start(), found["path"]) for found in PATH_RE.finditer(text)
+    ]
+    for code in CODE_RE.finditer(text):
+        if PATH_RE.fullmatch(code.group(0)):
+            continue
+        named += [(code.start(), inner["path"]) for inner in INNER_PATH_RE.finditer(code["code"])]
     dead = []
-    for found in PATH_RE.finditer(text):
-        path = found.group("path")
+    for start, path in sorted(named):
         if (root / path).exists() or (root / KIT / path).exists() or path in ELSEWHERE:
             continue
-        line = text[: found.start()].count("\n") + 1
+        line = text[:start].count("\n") + 1
         dead.append(f"{doc.relative_to(root).as_posix()}:{line}: `{path}`")
     return dead
 
@@ -116,6 +133,9 @@ def test_a_missing_path_is_named_and_a_present_one_is_not(tmp_path: Path) -> Non
     doc = tmp_path / "doc.md"
     text = "Зовёт `scripts/есть.py::main`,\nа прежде звал `scripts/нет.py`.\n"
     assert dead_paths(doc, text, tmp_path) == ["doc.md:2: `scripts/нет.py`"]
+    # Путь внутри команды и со строкой — тоже путь (`947a685`).
+    inside = "Запуск `python scripts/нет.py --x`, место `scripts/есть.py:12`.\n"
+    assert dead_paths(doc, inside, tmp_path) == ["doc.md:1: `scripts/нет.py`"]
 
 
 def test_a_kit_path_and_a_declared_one_resolve(tmp_path: Path) -> None:
