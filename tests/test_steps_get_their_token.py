@@ -50,6 +50,13 @@ CALL_RE = re.compile(
 #: слияния токеном владельца (`drift.OWNER_TOKEN_ENV`) — его и несёт шаг.
 OWN_TOKEN_MODES: Final = {"--save-merge-ways": "MERGE_QUEUE_TOKEN"}
 
+#: Режимы, в которых скрипт к площадке НЕ ходит: «скрипт довод» → причина.
+#: Гейт судил модуль, а не режим, и токен давали шагу, который только читает
+#: чужие данные (взгляд на #1674, `909ee89`, правило 125): правку загнал гейт,
+#: а чинить надо было гейт. В таком режиме токен у шага — отказ, а не долг.
+TOKENLESS_MODES: Final = {
+    "family_gates.py --summary": "карта — из файла сводки; к площадке ходит только `--map`",
+}
 #: Имя, которым механизм просит токен прогона.
 NEEDS_TOKEN: Final = "token_from_env"
 
@@ -100,6 +107,14 @@ def test_the_gate_found_its_subject() -> None:
     assert calls(), "ни один шаг прогона не запускает такой скрипт — предмет не найден"
 
 
+def tokenless(script: str, run: str) -> bool:
+    """Все ли вызовы `script` в `run` — режимы без площадки (та же мерка, что в гейте)."""
+    modes = [mode for mode in TOKENLESS_MODES if mode.startswith(f"{script} ")]
+    return bool(modes) and run.count(f"scripts/{script}") == sum(
+        run.count(f"scripts/{mode}") for mode in modes
+    )
+
+
 @pytest.mark.parametrize(
     ("workflow", "name", "script", "step"),
     calls(),
@@ -115,6 +130,14 @@ def test_a_step_reading_the_platform_gets_a_token(
     """
     declared = set(step.get("env") or {})
     run = str(step.get("run") or "")
+    # ПО КАЖДОМУ ВЫЗОВУ, А НЕ ПО ТЕКСТУ ШАГА (взгляд на #1728): шаг, зовущий
+    # тот же скрипт и без площадки, и с ней, безтокенным не считается.
+    if tokenless(script, run):
+        assert not declared & TOKEN_NAMES, (
+            f"{workflow}, шаг «{name}»: {script} в этом режиме к площадке не ходит, "
+            "а токен шагу дан — чужие данные читаются с правом площадки (125)"
+        )
+        return
     wanted = {own for mode, own in OWN_TOKEN_MODES.items() if mode in run} or TOKEN_NAMES
     assert declared & wanted, (
         f"{workflow}, шаг «{name}»: {script} читает площадку, а токена у шага нет — "
@@ -125,3 +148,12 @@ def test_a_step_reading_the_platform_gets_a_token(
 def test_the_own_token_mode_names_the_scripts_variable() -> None:
     """Имя токена режима — то, что скрипт читает, а не вписанное рукой (005)."""
     assert OWN_TOKEN_MODES["--save-merge-ways"] == load_script("drift.py").OWNER_TOKEN_ENV
+
+
+def test_a_step_with_both_modes_still_needs_a_token() -> None:
+    """Шаг, зовущий и `--summary`, и `--map`, — не безтокенный (взгляд на #1728)."""
+    both = (
+        "python scripts/family_gates.py --summary a --out b\npython scripts/family_gates.py --map b"
+    )
+    assert not tokenless("family_gates.py", both)
+    assert tokenless("family_gates.py", "python scripts/family_gates.py --summary a --out b")

@@ -278,3 +278,15 @@ def test_our_handover_probe_declares_no_version() -> None:
     probe = module.paths.HANDOVER_PROBE.name
     assert (root / module.paths.HANDOVER_PROBE).is_file(), "пробы передачи нет — сверять нечего"
     assert probe not in {flow_ for flow_, _ in in_workflows(root, preview=True)}
+
+
+def test_an_expression_probe_is_named_not_dropped(tmp_path: Path) -> None:
+    """`strip-ours` выражением — отсев с записью в отказы, а не тихая пропажа (`b215d3b`)."""
+    given = f"      {module.STRIP_OURS}: ${{{{ inputs.strip }}}}\n      python: '3.16'\n"
+    root = calling_flow(tmp_path, given=given)
+    assert in_workflows(root, preview=True) == []
+    assert [one for one in refusals(root) if "выражением" in one], refusals(root)
+    literal = calling_flow(
+        tmp_path / "л", given=f"      {module.STRIP_OURS}: true\n      python: '3.16'\n"
+    )
+    assert refusals(literal) == [], "литерал — наша проба, её отсев тих"

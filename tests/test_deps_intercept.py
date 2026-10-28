@@ -1152,3 +1152,16 @@ def test_the_watch_file_is_read_where_the_table_puts_it(tmp_path: Path) -> None:
     (tmp_path / ".pipeline.yml").write_text("paths:\n  vendor-watch: /w.json\n", encoding="utf-8")
     with pytest.raises(module.NotRun, match="вне дерева"):
         module.watches(tmp_path, "o/a")
+
+
+def test_the_vendor_path_is_quoted_by_segment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Путь — по звеньям, `ref` — целиком: `#` и пробел не рвут адрес (`25dd0f2`)."""
+    asked: list[str] = []
+
+    def request(_method: str, path: str, _token: str) -> dict[str, str]:
+        asked.append(path)
+        return {"encoding": "base64", "content": ""}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    module.vendor_text("o/r", "dist/a #b.js", "v1?x", "t")
+    assert asked == ["repos/o/r/contents/dist/a%20%23b.js?ref=v1%3Fx"]

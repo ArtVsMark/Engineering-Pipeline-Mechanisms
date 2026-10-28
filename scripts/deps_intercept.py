@@ -280,9 +280,12 @@ def vendor_text(dep: str, path: str, ref: str, token: str) -> str:
 
     Ответ без текста — файл больше предела площадки, каталог, не той формы —
     это «не прочитано», а не пустой файл: пустота совпала бы с чем угодно (039).
+    Путь экранируется по звеньям, `ref` — целиком: `#`, `?` или пробел в них
+    давали ложный «не отработал» вместо чтения (взгляд на #1693, `25dd0f2`).
     """
+    where = "/".join(ghrest.quote(one) for one in path.split("/"))
     try:
-        said = ghrest.request("GET", f"repos/{dep}/contents/{path}?ref={ref}", token)
+        said = ghrest.request("GET", f"repos/{dep}/contents/{where}?ref={ghrest.quote(ref)}", token)
     except ghrest.NotFound as exc:
         raise Refused(f"{dep}: файла {path} на {ref[:7]} у поставщика нет") from exc
     except ghrest.TransportError as exc:

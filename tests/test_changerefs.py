@@ -1126,7 +1126,13 @@ def test_the_candidate_queues_are_the_queues_of_the_map() -> None:
 
 
 def test_skills_are_read_from_the_marker_and_not_from_an_example() -> None:
-    """«Навык:» — имена через запятую, кавычки сняты; пример в коде — не вызов (#1694)."""
+    """«Навык:» — имена через запятую, кавычки сняты; пример в коде — не вызов (#1694).
+
+    ДВА ДОВОДА, И КАЖДЫЙ — СВОИМ СЛУЧАЕМ (взгляд на #1701, `b6bc74b`). Пример
+    посреди строки не вызов потому, что ключ обязан начинать строку (`^` в
+    `SKILL_RE`), — маска инлайн-кода здесь ни при чём; пример в блоке кода
+    отсекает маска, и это второй случай ниже.
+    """
     text = "Навык: build-a-gate, `close-a-finding`\nпишут так: `Навык: answer-a-rule`\n"
     assert changerefs.skills_in_all([text, "Навык: build-a-gate"]) == [
         "build-a-gate",

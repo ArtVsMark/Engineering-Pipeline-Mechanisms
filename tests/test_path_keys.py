@@ -128,7 +128,18 @@ def twins() -> dict[str, str]:
 
 
 def code_problems(source: str, names: dict[str, str]) -> list[str]:
-    """Употребления двойника мимо таблицы: не умолчание модуля, не сообщение, не `.name`."""
+    """Употребления двойника мимо таблицы: не умолчание модуля, не сообщение, не `.name`.
+
+    ГРАНИЦА НАЗВАНА (057, взгляд на #1653 `518a3ca`): уровень модуля разрешён
+    целиком, и за именем, которому там присвоен двойник, гейт не следит —
+    `ANSWER = paths.BINDINGS`, а затем `(root / ANSWER).read_text()` в функции
+    прошли бы мимо таблицы. Мерка 28.10.2026 по `scripts/*.py`: таких
+    присваиваний шесть — `automerge.RULES_ANSWER`, `family_check.ANSWER`,
+    `findings.ANSWER_FILE`, `project_badge.ANSWER`, `onboard.DATA_KITTED` и
+    `onboard.KIT_REFUSED`, — и ни одно не читает файл: подпись сообщения,
+    умолчание подписи, перечень заготовки. Слежка за именами через функции —
+    отдельный разбор потока, и пути от реального входа к нему нет.
+    """
     tree = ast.parse(source)
     parent: dict[ast.AST, ast.AST] = {}
     for node in ast.walk(tree):
