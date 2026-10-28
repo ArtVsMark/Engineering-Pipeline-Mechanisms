@@ -65,6 +65,7 @@ from typing import Any, Final
 import ci_complete
 import findings
 import ghrest
+import main_guard
 import pipeline_checks as policy
 import report
 import window
@@ -526,4 +527,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

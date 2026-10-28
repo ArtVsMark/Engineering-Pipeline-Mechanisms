@@ -50,6 +50,7 @@ from typing import Any, Final
 import catalogue
 import feedback_form
 import ghrest
+import main_guard
 import onboard
 import paths
 import pipeline_checks as policy
@@ -513,4 +514,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

@@ -62,6 +62,7 @@ from typing import Final
 import ghrest
 import gitcall
 import journal
+import main_guard
 import paths
 import pipeline_checks
 import report
@@ -731,4 +732,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

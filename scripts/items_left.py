@@ -64,6 +64,7 @@ import findings
 import ghrest
 import gitcall
 import items
+import main_guard
 import report
 
 #: Путь внутри дерева, названный прозой пункта. Расширение обязательно: без
@@ -479,4 +480,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

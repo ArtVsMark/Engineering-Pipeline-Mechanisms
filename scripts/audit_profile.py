@@ -45,6 +45,7 @@ from typing import Any, Final
 
 import catalogue
 import finding_kinds
+import main_guard
 import paths
 import pipeline_checks as policy
 import report
@@ -276,4 +277,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover — точка входа процессом
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

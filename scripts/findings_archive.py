@@ -69,6 +69,7 @@ import finding_chains
 import finding_kinds
 import findings as registry
 import ghrest
+import main_guard
 import review_findings
 import trunk_log
 
@@ -561,4 +562,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

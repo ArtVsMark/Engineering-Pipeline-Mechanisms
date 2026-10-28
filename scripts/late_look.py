@@ -34,6 +34,7 @@ from typing import Final
 
 import agent_run
 import ghrest
+import main_guard
 import report
 import unlooked
 
@@ -162,4 +163,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

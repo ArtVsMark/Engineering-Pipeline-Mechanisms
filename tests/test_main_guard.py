@@ -1,7 +1,7 @@
 """Вход механизма: трасса — исход отказа, а не код 1 «нашёл» (#1720).
 
 Обе половины: обёртка отдаёт исход `main` и превращает исключение в отказ с
-трассой; гейт обходит все скрипты и краснеет на механизме с исходом 1, чей
+трассой; гейт обходит все скрипты и краснеет на механизме, чей
 вход идёт мимо обёртки.
 """
 
@@ -46,21 +46,11 @@ def test_a_system_exit_is_not_swallowed() -> None:
         module.run(leave, 2)
 
 
-def finds_with_one(tree: ast.Module) -> bool:
-    """Объявлен ли на уровне модуля исход `EXIT_*` с кодом 1 — «нашёл»."""
-    for node in tree.body:
-        target = node.targets[0] if isinstance(node, ast.Assign) else None
-        if isinstance(node, ast.AnnAssign):
-            target = node.target
-        value = getattr(node, "value", None)
-        if (
-            isinstance(target, ast.Name)
-            and target.id.startswith("EXIT_")
-            and isinstance(value, ast.Constant)
-            and value.value == 1
-        ):
-            return True
-    return False
+def has_entry(tree: ast.Module) -> bool:
+    """Есть ли у модуля вход `__main__` — то, что исполняет шаг или окно."""
+    return any(
+        isinstance(node, ast.If) and "__main__" in ast.unparse(node.test) for node in tree.body
+    )
 
 
 def enters_through_the_guard(tree: ast.Module) -> bool:
@@ -104,14 +94,14 @@ def guards_itself(tree: ast.Module) -> bool:
 
 
 def unguarded(root: Path, alone: frozenset[str] = frozenset()) -> list[str]:
-    """Механизмы с исходом 1, чей вход идёт мимо `main_guard.run`.
+    """Механизмы, чей вход идёт мимо `main_guard.run`.
 
     Модуль-одиночка (`alone`) нашего не импортирует: его вход защищается сам.
     """
     found = []
     for path in walk(root / "scripts", "*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        if not finds_with_one(tree):
+        if not has_entry(tree):
             continue
         guarded = guards_itself(tree) if path.name in alone else enters_through_the_guard(tree)
         if not guarded:
@@ -119,20 +109,25 @@ def unguarded(root: Path, alone: frozenset[str] = frozenset()) -> list[str]:
     return sorted(found)
 
 
-def test_every_mechanism_with_a_finding_enters_through_the_guard() -> None:
-    """Всякий механизм с исходом 1 входит через `main_guard.run` (#1720).
+def test_every_mechanism_enters_through_the_guard() -> None:
+    """Всякий вход `__main__` в `scripts/` идёт через `main_guard.run` (#1720, #1725).
 
-    Мерка 28.10.2026: таких механизмов 36, вход под защитой был у одного.
-    ГРАНИЦА НАЗВАНА: исход, объявленный не константой `EXIT_*` модуля, обход не видит.
+    СТРОГОЕ ПРАВИЛО ВМЕСТО ФОРМ (210). Прежняя редакция судила только механизмы
+    «с исходом 1» и узнавала их по форме: константа `EXIT_*` (#1720), затем
+    число в `main` (#1723) — и взгляд на #1725 назвал следующие, которых обход
+    не видел: `return selftest()`, `sys.exit(1)`, `1 if … else 0`. Угадывать
+    исход по тексту больше не нужно: под обёрткой вход каждого механизма, и
+    непойманное исключение — исход отказа у всех. Мерка 28.10.2026: входов 90,
+    мимо обёртки шло 53.
     """
     scripts = walk(ROOT / "scripts", "*.py")
-    counted = [p for p in scripts if finds_with_one(ast.parse(p.read_text(encoding="utf-8")))]
-    assert len(counted) > 30, "механизмов с исходом 1 не найдено — гейт доказывал бы только себя"
+    entries = [p for p in scripts if has_entry(ast.parse(p.read_text(encoding="utf-8")))]
+    assert len(entries) > 80, "входов не найдено — гейт доказывал бы только себя"
     assert unguarded(ROOT, frozenset(STANDS_ALONE)) == []
 
 
 def test_the_gate_reds_on_a_bare_entry(tmp_path: Path) -> None:
-    """Голый `raise SystemExit(main())` у механизма с исходом 1 — отказ гейта."""
+    """Голый `raise SystemExit(main())` — отказ гейта."""
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "x.py").write_text(
         "EXIT_FOUND = 1\ndef main() -> int:\n    return 0\n"
@@ -151,3 +146,20 @@ def test_a_standing_alone_module_must_guard_itself(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert unguarded(tmp_path, frozenset({"x.py"})) == ["x.py"]
+
+
+def test_an_entry_without_a_finding_outcome_is_judged_too(tmp_path: Path) -> None:
+    """Исход 1 угадывать не надо: голый вход судится и у `main`, берущего код у другой функции."""
+    (tmp_path / "scripts").mkdir()
+    for name, body in {
+        "x.py": "def selftest() -> int:\n    return 1\ndef main() -> int:\n    return selftest()\n",
+        "y.py": "import sys\ndef main() -> int:\n    sys.exit(1)\n",
+        "z.py": "def main() -> int:\n    return 0\n",
+    }.items():
+        (tmp_path / "scripts" / name).write_text(
+            body + 'if __name__ == "__main__":\n    raise SystemExit(main())\n', encoding="utf-8"
+        )
+    (tmp_path / "scripts" / "lib.py").write_text(
+        "def helper() -> int:\n    return 1\n", encoding="utf-8"
+    )
+    assert unguarded(tmp_path) == ["x.py", "y.py", "z.py"]

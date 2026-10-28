@@ -56,6 +56,7 @@ import drift
 import family_contract
 import family_uptake
 import ghrest
+import main_guard
 import paths
 import pipeline_checks
 import python_badge
@@ -993,4 +994,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))

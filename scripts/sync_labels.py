@@ -26,6 +26,7 @@ from typing import Any, Final
 
 import ghrest
 import labels
+import main_guard
 import report
 
 EXIT_CLEAN: Final = 0
@@ -119,4 +120,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_guard.run(main, EXIT_BROKEN))
