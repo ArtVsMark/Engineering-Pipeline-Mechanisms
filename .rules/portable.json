@@ -630,10 +630,7 @@
       ]
     },
     "scripts/shipped_form.py": {
-      "answer": "configured",
-      "where": [
-        "README.md"
-      ]
+      "answer": "as-is"
     },
     "scripts/text_width.py": {
       "answer": "as-is"
