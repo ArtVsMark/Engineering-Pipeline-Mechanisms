@@ -5,7 +5,8 @@
 «не ждали никогда» (045).
 """
 
-from pathlib import PurePosixPath
+import subprocess
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -85,3 +86,35 @@ def test_a_data_signal_follows_the_projects_own_paths() -> None:
     one = module.signals_of("навык", text, moved)
     assert one.match(["answers/ours.json"], [], "")
     assert not one.match([module.paths.BINDINGS.as_posix()], [], "")
+
+
+def skilled_repo(root: Path, head: str) -> list[str]:
+    """Репозиторий с одним навыком, чья шапка — `head`; отдаёт приставку вызова git."""
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(root)]
+    (root / ".claude" / "skills" / "x").mkdir(parents=True)
+    (root / ".claude" / "skills" / "x" / "SKILL.md").write_text(head, encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "навык"], check=True)
+    return git
+
+
+def test_signals_are_read_at_the_commit_not_the_tree(tmp_path: Path) -> None:
+    """Признаки — шапки навыков НА КОММИТЕ: правка дерева после него их не меняет (#1715)."""
+    git = skilled_repo(tmp_path, '---\nexpected:\n  touched: ["a.py"]\n---\n')
+    (tmp_path / ".claude" / "skills" / "x" / "SKILL.md").write_text(
+        '---\nexpected:\n  touched: ["b.py"]\n---\n', encoding="utf-8"
+    )
+    said = module.signals_at("HEAD", tmp_path)
+    assert said["x"].touched == ("a.py",)
+    subprocess.run([*git, "commit", "-q", "-am", "сегодня"], check=True)
+    assert module.signals_at("HEAD~1", tmp_path)["x"].touched == ("a.py",)
+
+
+def test_a_commit_before_any_signal_says_so_and_a_bad_one_refuses(tmp_path: Path) -> None:
+    """Без ключа на коммите — `NoSignals`; неверный коммит — `BadSignals`, а не пусто."""
+    skilled_repo(tmp_path, "---\nname: x\n---\n")
+    with pytest.raises(module.NoSignals):
+        module.signals_at("HEAD", tmp_path)
+    with pytest.raises(module.BadSignals, match="ls-tree"):
+        module.signals_at("нет-такого", tmp_path)

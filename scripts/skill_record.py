@@ -29,15 +29,19 @@
 выборки, а не перезапись чужого.
 
 ПРОШЛОЕ ЗАДНИМ ЧИСЛОМ НЕ РАЗМЕЧАЕТСЯ: до строки `Навык:` (#1701) `invoked`
-неизвестен, а не пуст, и такие изменения не записываются по кнопке.
+неизвестен, а не пуст, и такие изменения не записываются — ни по слиянию, ни
+по кнопке (`named_skills_yet`). Граница — первая строка `Навык:` в истории
+САМОГО проекта, а не наш коммит: механизм отдаётся потребителю, и в его
+истории нашего коммита нет (поздний взгляд на #1715).
 
 СПЕРВА СПРОСИЛИ СЕМЬЮ (162): у каталога есть журнал вызовов навыков окна, а
 записи на слитое изменение с ожиданием по признакам нет ни у кого из семьи —
 строим своё. Форма хранения взята у нашего же архива находок.
 
 Исходы (правило 039): ``0`` запись дописана, уже есть или записывать нечего
-(коммит — не уплотнение изменения) · ``2`` не отработал — git, признаки
-навыков или ветка `badges` отказали.
+(коммит — не уплотнение изменения или строки `Навык:` в истории ещё не было)
+· ``2`` не отработал — git, признаки навыков, таблица путей или ветка
+`badges` отказали.
 """
 
 import argparse
@@ -85,6 +89,20 @@ class NotRun(RuntimeError):
 def git(*args: str) -> str:
     """Ответ git; отказ — `NotRun` с причиной."""
     return gitcall.output(args, NotRun)
+
+
+def named_skills_yet(commit: str) -> bool:
+    """Была ли строка `Навык:` в теле коммита или его предков; нет — `invoked` неизвестен.
+
+    Пустой `invoked` до первой такой строки выглядел бы «не вызван», а это
+    «не сказано»: строки ещё не было в договоре проекта (045).
+    """
+    found = gitcall.output(
+        ["log", "-1", "--format=%H", "--grep=^Навык:", commit],
+        NotRun,
+        timeout=skill_signals.READ,
+    )
+    return bool(found.strip())
 
 
 def record_of(commit: str, table: dict[str, skill_signals.Signals]) -> dict[str, Any] | None:
@@ -144,16 +162,22 @@ def merged(store: Any, record: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def publish(
-    record: dict[str, Any], workdir: Path, clock: Callable[[], float] = time.monotonic
+    record: dict[str, Any],
+    workdir: Path,
+    clock: Callable[[], float] = time.monotonic,
+    deadline: float | None = None,
 ) -> bool:
     """Дописывает запись поверх ветки `badges`; ``False`` — запись уже была.
 
     Ветку сдвинула публикация фактов между выборкой и толчком — повтор с новой
     выборки, до `TRIES` раз и пока худшая попытка укладывается в `BUDGET`;
-    потом — отказ с причиной, а не `--force`.
+    потом — отказ с причиной, а не `--force`. `deadline` — конец бюджета всего
+    захода по `clock` (`main` отсчитывает его от входа, 100); не дан — от начала
+    публикации.
     """
     last = ""
-    deadline = clock() + BUDGET
+    if deadline is None:
+        deadline = clock() + BUDGET
     for attempt in range(TRIES):
         if deadline - clock() < ATTEMPT_WORST:
             raise NotRun(
@@ -204,8 +228,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="дерево с навыками")
     parser.add_argument("--workdir", type=Path, help="каталог для дерева ветки badges")
     args = parser.parse_args(argv)
+    # БЮДЖЕТ — ОТ ВХОДА, А НЕ ОТ ПУБЛИКАЦИИ (100): чтение признаков на коммите
+    # идёт до неё, и предел джоба держит сумму, а не одну публикацию.
+    deadline = time.monotonic() + BUDGET
     try:
-        table = skill_signals.signals(args.root)
+        if not named_skills_yet(args.commit):
+            print(
+                f"{args.commit}: строки «Навык:» в истории ещё не было — "
+                "вызванные навыки неизвестны, записывать нечего"
+            )
+            return EXIT_OK
+        try:
+            table = skill_signals.signals_at(args.commit, args.root)
+        except skill_signals.NoSignals as exc:
+            print(
+                f"{args.commit}: признаков навыков на нём ещё не было ({exc}) — записывать нечего"
+            )
+            return EXIT_OK
         record = record_of(args.commit, table)
         if record is None:
             print(f"{args.commit}: не уплотнение изменения — записывать нечего")
@@ -213,11 +252,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(record, ensure_ascii=False))
         if args.workdir is None:
             return EXIT_OK
-        if publish(record, args.workdir):
+        if publish(record, args.workdir, deadline=deadline):
             print(f"запись изменения #{record['pr']} дописана в {RECORDS}")
         else:
             print(f"запись изменения #{record['pr']} уже есть — второй не будет")
-    except (NotRun, skill_signals.BadSignals, OSError) as exc:
+    except (NotRun, skill_signals.BadSignals, paths.BadPaths, OSError) as exc:
         print(f"запись навыков не собрана: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     return EXIT_OK
