@@ -680,6 +680,9 @@
     "scripts/changerefs.py": {
       "answer": "as-is"
     },
+    "scripts/check_action_pins.py": {
+      "answer": "as-is"
+    },
     "scripts/check_agent_silenced.py": {
       "answer": "as-is"
     },
