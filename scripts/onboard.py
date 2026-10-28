@@ -1106,7 +1106,8 @@ def skill_kit(text: str, repo: str) -> str:
         target = Path(found["target"]).parts
         ups = len(list(itertools.takewhile(lambda part: part == "..", target)))
         rest = "/".join(target[ups:]) + (found["anchor"] or "")
-        # Выше корня дерева — адрес площадки (`../../../../issues/767`).
+        # Выше корня дерева — адрес площадки (`../../../../../issues/767`: подъём
+        # навыка к площадке — пять звеньев, гейт ссылок, #1692).
         if ups > SKILL_DEPTH:
             return f"](https://github.com/{repo}/{rest})"
         base = SKILLS_KITTED[0].parent.parts[: SKILL_DEPTH - ups]

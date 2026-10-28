@@ -2705,7 +2705,7 @@ def test_version_of_compares_numbers_not_strings() -> None:
             "[`gaps`](../../../docs/dev/gaps.md)",
             "[`gaps`](https://github.com/o/r/blob/main/docs/dev/gaps.md)",
         ),
-        ("[#767](../../../../issues/767)", "[o/r#767](https://github.com/o/r/issues/767)"),
+        ("[#767](../../../../../issues/767)", "[o/r#767](https://github.com/o/r/issues/767)"),
         (
             "[`build-a-gate`](../build-a-gate/SKILL.md)",
             "[`build-a-gate`](../build-a-gate/SKILL.md)",
@@ -2841,10 +2841,15 @@ def test_our_ci_and_the_kit_share_one_table_of_steps_about_a_change() -> None:
     ours = yaml.safe_load(
         (ROOT / ".github" / "workflows" / module.PIPELINE_FLOW).read_text("utf-8")
     )
-    said = {
-        name
+    # Отбор — по УПОМИНАНИЮ события, а не по равенству условия (взгляд на
+    # #1669, `f9fa66d`): шаг с иной записью — `== 'pull_request'` или с `&&` —
+    # прежде выпадал и из таблицы, и из сверки, и тест оставался зелёным.
+    conditioned = {
+        name: str(job.get("if"))
         for name, job in ours["jobs"].items()
         if str(job.get("uses") or "").startswith(module.LOCAL_CALL + module.STEP_PREFIX)
-        and job.get("if") == module.ON_CHANGE_ONLY
+        and "github.event_name" in str(job.get("if") or "")
     }
-    assert said == module.ABOUT_A_CHANGE
+    assert set(conditioned) == module.ABOUT_A_CHANGE
+    odd = {name: said for name, said in conditioned.items() if said != module.ON_CHANGE_ONLY}
+    assert not odd, f"условие шага об изменении записано иначе, чем у заготовки: {odd}"
