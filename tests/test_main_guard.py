@@ -119,6 +119,13 @@ def test_every_mechanism_enters_through_the_guard() -> None:
     исход по тексту больше не нужно: под обёрткой вход каждого механизма, и
     непойманное исключение — исход отказа у всех. Мерка 28.10.2026: входов 90,
     мимо обёртки шло 53.
+
+    ГРАНИЦА НАЗВАНА (228): код отказа, отданный обёртке, гейт не судит —
+    `main_guard.run(main, EXIT_FOUND)` прошёл бы зелёным (поздний взгляд на
+    #1723). Кодом это не чинится: место на четвёртом круге, а пути от
+    реального входа нет — мерка 28.10.2026, `grep -h -A2 "main_guard.run("
+    scripts/*.py`: из 89 вызовов 87 отдают `EXIT_BROKEN`, один `EXIT_NOT_RUN`,
+    один число 2; одиночка `check_facts.py` — тоже `EXIT_BROKEN`.
     """
     scripts = walk(ROOT / "scripts", "*.py")
     entries = [p for p in scripts if has_entry(ast.parse(p.read_text(encoding="utf-8")))]
