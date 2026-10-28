@@ -2,15 +2,22 @@
 
 РЕШЕНИЕ ВЛАДЕЛЬЦА 25.10.2026. Навык и отдаваемый документ называют данные
 проекта ключом таблицы путей и пояснением словами, что это за файл; адрес
-приходит командой `paths.py <ключ>` во время вызова. Путь умолчания в тексте
-не пишется: у потребителя, переназначившего его разделом `paths:`, текст
-повёл бы окно к файлу, которого у него нет.
+приходит командой `paths.py <ключ>` во время вызова. Голый путь умолчания в
+тексте не пишется: у потребителя, переназначившего его разделом `paths:`,
+текст повёл бы окно к файлу, которого у него нет.
+
+ПУТЬ РЯДОМ С КЛЮЧОМ — ЗАКОНЕН (решение владельца 28.10.2026, #639; находки
+`e57de54`, `fd0378c`). Читатель, которому запускатель закрыт, — внешний взгляд
+с закрытым списком команд — адреса по одной команде не узнаёт. Поэтому
+сразу за командой ключа в той же фразе может стоять его умолчание формой
+`BESIDE`: «`… paths.py <ключ>`, по умолчанию `<путь>`». Путь, не равный
+умолчанию этого ключа, краснеет: рядом с ключом — только его собственный.
 
 ДВЕ ПОЛОВИНЫ ГЕЙТА.
 
 * **Текст.** Предмет — навыки, которые заход кладёт потребителю
   (`onboard.SKILLS_KITTED`), и тексты заготовок `kit/**/*.md`. Краснеет путь
-  умолчания любого ключа `paths.PROJECT` (путь внутрь каталога — ссылка на
+  умолчания любого ключа `paths.PROJECT` не рядом со своим ключом (путь внутрь каталога — ссылка на
   документ поставщика, а не данные проекта, и не судится), неизвестный ключ
   в команде и команда без пояснения словами перед ней. Форма команды у
   навыка — `python scripts/paths.py`: подстановка при кладке делает из неё
@@ -47,6 +54,8 @@ DEFAULTS: Final = {
 #: Команда адреса в навыке и в заготовке `kit/`.
 SKILL_CALL: Final = re.compile(r"python scripts/paths\.py ([\w-]+)")
 KIT_CALL: Final = re.compile(r"bash \.claude/mechanisms\.sh paths\.py ([\w-]+)")
+#: Умолчание сразу за командой ключа, в той же фразе: «`…`, по умолчанию `путь`».
+BESIDE: Final = r"`,\s+по умолчанию\s+`([^`\n]+)`"
 #: Пояснение — слово кириллицей в пределах окна перед командой, в том же абзаце.
 EXPLAINED: Final = re.compile(r"[а-яё]{3,}", re.IGNORECASE)
 WINDOW: Final = 80
@@ -66,10 +75,20 @@ def text_subjects() -> list[tuple[Path, re.Pattern[str], re.Pattern[str]]]:
 
 def text_problems(text: str, call: re.Pattern[str], foreign: re.Pattern[str]) -> list[str]:
     """Нарушения формы в одном тексте: голый путь, чужая форма, неизвестный ключ, без слов."""
-    found = [
+    found: list[str] = []
+    bare = text
+    for beside in re.finditer(call.pattern + BESIDE, text):
+        key, said = beside[1], beside[2]
+        if key not in paths.PROJECT or said != paths.PROJECT[key].as_posix():
+            found.append(f"рядом с ключом «{key}» не его умолчание: {said}")
+            continue
+        # Путь рядом со своим ключом из суда голого пути вынимается — длина
+        # та же, чтобы окно пояснения перед командой считалось по месту.
+        bare = bare[: beside.start(2)] + " " * len(said) + bare[beside.end(2) :]
+    found += [
         f"путь умолчания ключа «{key}»: {pattern.pattern.split('(?')[0]}"
         for key, pattern in DEFAULTS.items()
-        if pattern.search(text)
+        if pattern.search(bare)
     ]
     found += [f"команда чужой формы: {one[0]}" for one in foreign.finditer(text)]
     for said in call.finditer(text):
@@ -100,12 +119,40 @@ def test_the_text_names_project_data_by_key_with_words() -> None:
         ("ответ каталогу (`python scripts/paths.py bindingz`)", "ключа «bindingz» в таблице нет"),
         ("`python scripts/paths.py bindings`", "без пояснения"),
         ("ответ (`bash .claude/mechanisms.sh paths.py bindings`)", "чужой формы"),
+        (
+            "ответ (`python scripts/paths.py bindings`, по умолчанию `.rules/roles.json`)",
+            "рядом с ключом «bindings» не его умолчание",
+        ),
+        (
+            "ответ (`python scripts/paths.py roles`, по умолчанию `.rules/bindings.json`)",
+            "путь умолчания ключа «bindings»",
+        ),
     ],
-    ids=["голый-путь", "неизвестный-ключ", "без-слов", "форма-запускателя-в-навыке"],
+    ids=[
+        "голый-путь",
+        "неизвестный-ключ",
+        "без-слов",
+        "форма-запускателя-в-навыке",
+        "рядом-чужой-путь",
+        "рядом-путь-другого-ключа",
+    ],
 )
 def test_the_text_gate_turns_red_on_each_form(text: str, said: str) -> None:
     """Каждая половина текста краснеет на своём нарушении — проверка откатом формы."""
     assert any(said in one for one in text_problems(text, SKILL_CALL, KIT_CALL))
+
+
+def test_the_default_beside_its_own_key_is_lawful() -> None:
+    """Умолчание сразу за командой своего ключа — законно; то же отдельно — нет (`e57de54`)."""
+    beside = (
+        "таблица ролей (`python scripts/paths.py bindings`, по умолчанию `.rules/bindings.json`)"
+    )
+    assert text_problems(beside, SKILL_CALL, KIT_CALL) == []
+    apart = beside + "; правят `.rules/bindings.json` руками"
+    assert any(
+        "путь умолчания ключа «bindings»" in one
+        for one in text_problems(apart, SKILL_CALL, KIT_CALL)
+    )
 
 
 def test_a_path_inside_a_directory_key_is_a_document_not_data() -> None:
