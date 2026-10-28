@@ -67,6 +67,19 @@ PROPOSALS_URL: Final = f"{RAW}/main/.rules/proposals.json"
 SHOWCASE_URL: Final = f"{RAW}/main/.rules/showcase.json"
 
 
+def is_catalogue(repo: str) -> bool:
+    """Имя `владелец/репозиторий` — сам каталог; сравнение без учёта регистра.
+
+    ОДИН ПРЕДИКАТ НА ВСЕХ СПРАШИВАЮЩИХ (взгляд на #1646, `42106cc`): прежде
+    `check_foreign_why` сравнивал через `.lower()`, а `debt.catalogue_tree` —
+    через `casefold()`, и третий спрашивающий завёл бы третью. ГРАНИЦА —
+    ТОЧНОЕ ИМЯ: форк или переименованный каталог каталогом не считается, и
+    гейт судит его как обычно — ошибка в сторону громкости (051). Пустое имя —
+    не каталог.
+    """
+    return bool(repo) and repo.casefold() == REPO.casefold()
+
+
 class Silent(RuntimeError):
     """Каталог не ответил.
 

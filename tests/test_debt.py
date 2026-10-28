@@ -1529,3 +1529,18 @@ def test_the_red_set_lives_in_one_place() -> None:
         and canon in literal_sets(ast.parse(path.read_text(encoding="utf-8")))
     ]
     assert copies == []
+
+
+@pytest.mark.parametrize(
+    ("name", "said"),
+    [
+        ("ArtVsMark/Engineering-Incidents-Playbook", True),
+        ("artvsmark/engineering-incidents-playbook", True),
+        ("fork/Engineering-Incidents-Playbook", False),
+        ("", False),
+    ],
+)
+def test_one_catalogue_predicate(name: str, said: bool) -> None:
+    """«Дерево — сам каталог» — один предикат у долга и у гейта чужого «почему» (`42106cc`)."""
+    assert debt.catalogue.is_catalogue(name) is said
+    assert debt.catalogue_tree(name) is said

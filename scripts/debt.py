@@ -795,7 +795,7 @@ def catalogue_tree(repo: str) -> bool:
     называет их отсутствие. Опознание по содержимому отдало бы «неприменимо»
     любому дереву, сложенному похоже, — ошибка в сторону тишины (051).
     """
-    return repo.casefold() == catalogue.REPO.casefold()
+    return catalogue.is_catalogue(repo)
 
 
 def main(argv: list[str] | None = None) -> int:
