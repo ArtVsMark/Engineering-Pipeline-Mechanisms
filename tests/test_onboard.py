@@ -1295,6 +1295,14 @@ def test_a_declared_role_without_a_profile_still_sleeps(tmp_path: Path) -> None:
     assert "спит" in said and "нет профиля" in said and "не объявлена" not in said, said
 
 
+def test_an_unreadable_profile_map_sleeps_and_does_not_fall(tmp_path: Path) -> None:
+    """Карта профилей не в UTF-8 — названная спячка, а не падение захода (`534ecc4`)."""
+    module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
+    (tmp_path / module.paths.ROLES).write_bytes(b"\xff\xfe broken")
+    said = module.dormant_areas_note(tmp_path)
+    assert "спит" in said and "нет профиля" in said, said
+
+
 def test_the_dormant_note_reads_the_consumers_path_table(tmp_path: Path) -> None:
     """Потребитель переназначил таблицу ролей — спячку судят по ЕГО адресу (#1630)."""
     module.lay(tmp_path, module.data_kit(ROOT, "o/r"), "o/r")
@@ -2556,6 +2564,16 @@ def test_a_broken_record_is_not_run(tmp_path: Path) -> None:
     assert module.laid_of(tmp_path) == {}
 
 
+def test_a_broken_record_refuses_before_the_first_file(tmp_path: Path) -> None:
+    """Битый перечень — отказ ДО первого файла, а не после хуков (взгляд на #1651, `41c6027`)."""
+    (tmp_path / module.paths.KIT_LAID).parent.mkdir(parents=True)
+    (tmp_path / module.paths.KIT_LAID).write_text("{", encoding="utf-8")
+    hook = module.paths.HOOKS / "push_guard.py"
+    with pytest.raises(module.NotRun):
+        module.lay(tmp_path, {hook: "#!/bin/sh\n"}, "o/r")
+    assert not (tmp_path / hook).exists(), "хук лёг до отказа"
+
+
 # --- навыки окна копией (#1552) ---------------------------------------------
 
 
@@ -2687,7 +2705,7 @@ def test_version_of_compares_numbers_not_strings() -> None:
             "[`gaps`](../../../docs/dev/gaps.md)",
             "[`gaps`](https://github.com/o/r/blob/main/docs/dev/gaps.md)",
         ),
-        ("[#767](../../../../issues/767)", "[o/r#767](https://github.com/o/r/issues/767)"),
+        ("[#767](../../../../../issues/767)", "[o/r#767](https://github.com/o/r/issues/767)"),
         (
             "[`build-a-gate`](../build-a-gate/SKILL.md)",
             "[`build-a-gate`](../build-a-gate/SKILL.md)",
@@ -2809,6 +2827,10 @@ def test_the_mechanism_rules_kit_carries_every_rule_of_our_census() -> None:
     assert sorted(kit["rules"]) == sorted(ours["rules"])
     assert all(places == {} for places in kit["rules"].values()), "в заготовке наши места"
     assert kit["места"] == {}
+    # «Суждение» — тоже правила о механизмах, общие и потребителю: без сверки
+    # его потеря в заготовке не краснела (взгляд на #1647, `e208272`). Текст у
+    # заготовки свой — без наших мест, — сверяются правила.
+    assert sorted(kit["суждение"]) == sorted(ours["суждение"])
 
 
 def test_a_step_about_a_change_is_not_called_on_the_trunk_push() -> None:
@@ -2823,10 +2845,15 @@ def test_our_ci_and_the_kit_share_one_table_of_steps_about_a_change() -> None:
     ours = yaml.safe_load(
         (ROOT / ".github" / "workflows" / module.PIPELINE_FLOW).read_text("utf-8")
     )
-    said = {
-        name
+    # Отбор — по УПОМИНАНИЮ события, а не по равенству условия (взгляд на
+    # #1669, `f9fa66d`): шаг с иной записью — `== 'pull_request'` или с `&&` —
+    # прежде выпадал и из таблицы, и из сверки, и тест оставался зелёным.
+    conditioned = {
+        name: str(job.get("if"))
         for name, job in ours["jobs"].items()
         if str(job.get("uses") or "").startswith(module.LOCAL_CALL + module.STEP_PREFIX)
-        and job.get("if") == module.ON_CHANGE_ONLY
+        and "github.event_name" in str(job.get("if") or "")
     }
-    assert said == module.ABOUT_A_CHANGE
+    assert set(conditioned) == module.ABOUT_A_CHANGE
+    odd = {name: said for name, said in conditioned.items() if said != module.ON_CHANGE_ONLY}
+    assert not odd, f"условие шага об изменении записано иначе, чем у заготовки: {odd}"
