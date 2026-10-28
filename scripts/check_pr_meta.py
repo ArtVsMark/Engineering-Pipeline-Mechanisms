@@ -110,7 +110,9 @@ def skill_problems(landing: str, known: frozenset[str]) -> list[str]:
     """Строки «Навык:», чьё имя не навык этого дерева (#1694).
 
     Опечатка в имени дала бы счёту вызов навыка, которого нет, а настоящий
-    остался бы невызванным — счёт врал бы в обе стороны (045).
+    остался бы невызванным — счёт врал бы в обе стороны (045). Навыков в
+    дереве нет вовсе — каждое имя «не навык этого дерева»: перечень пуст, а
+    не неизвестен (`11e7c27`).
     """
     return [
         f"«{changerefs.SKILL_KEY} {name}» — навыка «{name}» нет в `{paths.SKILLS.as_posix()}`"
@@ -277,8 +279,13 @@ def text_problems(
             problems.append(f"в заголовке «{heading}» {STRAY_CLOSING}")
     if messages and finding_kinds.table_path("finding-kinds").is_file():
         problems += kind_problems(landing, finding_kinds.read())
-    if messages and (known := known_skills()):
-        problems += skill_problems(landing, known)
+    # НАВЫКОВ НЕТ — СУДИТЬ НЕ С ЧЕМ, И ЭТО ГОВОРИТСЯ (взгляд на #1701,
+    # `11e7c27`, 045). Пустой перечень пропускал любое имя: у потребителя без
+    # `.claude/skills/` счёт семьи получил бы вызовы несуществующих навыков.
+    # Строки «Навык:» без навыков в дереве — отказ с причиной, а без строк
+    # судить нечего, и молчание законно.
+    if messages:
+        problems += skill_problems(landing, known_skills())
     said = "\n".join([body, landing, coming.body if coming else ""])
     for line in dict.fromkeys(changerefs.stray_closing_words(said)):
         problems.append(f"в строке «{line}» {STRAY_CLOSING}")

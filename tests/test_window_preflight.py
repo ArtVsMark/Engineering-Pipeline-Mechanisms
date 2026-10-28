@@ -1584,3 +1584,33 @@ def test_without_the_base_the_contract_gate_is_the_third_outcome(tmp_path: Path)
     assert "не отработал" in said
     # Своя часть сообщения, а не текст git: его язык зависит от среды прогона.
     assert "git merge-base origin/main HEAD" in said, said
+
+
+def test_the_step_timeout_is_twice_the_test_job_limit() -> None:
+    """Предел проверки окна — не меньше двух пределов `test-matrix` (взгляд на #1698, `e4c4f83`).
+
+    «Вдвое» держал только комментарий (005), и он уже раз устарел: предел
+    джоба подняли руками. Теперь число читается из `ci.yml`.
+    """
+    import yaml
+
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
+    limit = int(flow["jobs"]["test-matrix"]["timeout-minutes"])
+    assert 2 * limit * 60 <= preflight.STEP_TIMEOUT, (
+        f"STEP_TIMEOUT {preflight.STEP_TIMEOUT} с меньше двух пределов test-matrix ({limit} мин)"
+    )
+
+
+def test_the_coverage_job_outlasts_the_matrix() -> None:
+    """Набор под покрытием (`badges.yml`, `inputs`) дольше матрицы — и предел у него больше.
+
+    При равных пределах на медленном раннере покрытие упиралось бы в край
+    первым и красило `main` отменой (взгляд на #1698, `568f827`).
+    """
+    import yaml
+
+    flows = ROOT / ".github" / "workflows"
+    ci = yaml.safe_load((flows / "ci.yml").read_text(encoding="utf-8"))
+    badges = yaml.safe_load((flows / "badges.yml").read_text(encoding="utf-8"))
+    matrix = int(ci["jobs"]["test-matrix"]["timeout-minutes"])
+    assert int(badges["jobs"]["inputs"]["timeout-minutes"]) > matrix

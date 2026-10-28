@@ -61,9 +61,15 @@ def called_before_yaml(job: dict[str, Any]) -> list[str]:
     """Скрипты, которые строки `run:` джоба зовут РАНЬШЕ установки `pyyaml`, — по порядку.
 
     Джоб без `pip install` вовсе не судится: ему ставит окружение, а не он.
+    Комментарий оболочки установкой не считается: строка `# pip install
+    pyyaml` до вызова снимала бы проверку со всего ниже (взгляд на #1691,
+    `e2fb022`) — судится команда, а не слова в строке.
     """
     lines = [
-        line for step in job.get("steps") or [] for line in str(step.get("run") or "").splitlines()
+        command
+        for step in job.get("steps") or []
+        for line in str(step.get("run") or "").splitlines()
+        if (command := re.split(r"(?:^|\s)#", line, maxsplit=1)[0]).strip()
     ]
     if not any("pip install" in line for line in lines):
         return []
@@ -165,3 +171,13 @@ def test_a_job_installs_yaml_for_the_scripts_it_runs(flow: str, job: str, script
         f"{flow} · {job}: зовёт scripts/{script}.py, а `pyyaml` не ставит — "
         "скрипт падает на импорте, и шаг выходит отказом"
     )
+
+
+def test_a_comment_is_not_an_install() -> None:
+    """Комментарий со словами установки границу не ставит (`e2fb022`)."""
+    job = {
+        "steps": [
+            {"run": "# pip install pyyaml — ниже\npython scripts/x.py\npip install pyyaml"},
+        ]
+    }
+    assert called_before_yaml(job) == ["x"]

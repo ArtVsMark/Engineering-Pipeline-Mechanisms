@@ -4,6 +4,7 @@ import ast
 import importlib.util
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -416,11 +417,15 @@ def python_shim(where: Path, name: str = "python") -> Path:
     `pyvenv.cfg` рядом со ссылкой, не узнаёт венв окна и стартует базовым, без
     его пакетов: `import report` падал в окне и проходил на раннере, где венва
     нет (замер 26.10.2026, четыре случая `test_the_tail_stands_on_its_tag…`).
-    Один помощник на набор: второй шим ссылкой разошёлся бы с ним молча (214).
+    Один помощник на набор: второй шим ссылкой разошёлся бы с ним молча (214);
+    держит это гейт `tests/test_push_guard.py::test_no_test_links_the_interpreter`
+    (взгляд на #1706, `16c2c31`). Путь интерпретатора экранируется для `sh`:
+    `$`, обратная кавычка или `"` в нём иначе позвали бы другой путь молча
+    (`6c79704`).
     """
     where.mkdir(parents=True, exist_ok=True)
     shim = where / name
-    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    shim.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8")
     shim.chmod(0o755)
     return shim
 

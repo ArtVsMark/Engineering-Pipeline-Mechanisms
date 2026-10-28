@@ -265,3 +265,19 @@ def test_without_folder_drops_the_folder_only_inside_the_tree() -> None:
     assert inside is not None and outside is not None
     assert edit.without_folder(inside) == "](x.md)"
     assert edit.without_folder(outside) == "](../../../a/x.md)"
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "[#7](.././../issues/7)",
+        "[#7](./../../issues/7)",
+        "[#7](<../../issues/7>)",
+        '[#7](../../issues/7 "подпись")',
+    ],
+    ids=["./ внутри", "./ в начале", "угловые скобки", "подпись"],
+)
+def test_every_form_the_link_gate_reads_drops_its_rise(said: str) -> None:
+    """Подъём снимается у всех форм, которые разбирает гейт ссылок (`7dec509`, `39f732e`, 210)."""
+    flat = edit.without_rise(said)
+    assert f"{edit.PLATFORM_MARK}/issues/7" in flat and "./" not in flat, flat

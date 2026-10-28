@@ -193,3 +193,14 @@ def test_no_answer_at_all_has_nothing_to_sign(run_script: RunScript, tmp_path: P
     done = run_script("check_reread.py", "--base", "main", cwd=root)
     assert done.code == module.EXIT_OK, done.text
     assert "сверять нечего" in done.text
+
+
+def test_a_deleted_answer_is_named_not_passed_silently(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Снятый изменением ответ каталогу назван, а не принят за «проект без ответа» (`44c8507`)."""
+    root = repo_with(tmp_path, answers("1.6"))
+    (root / ".rules" / "bindings.json").unlink()
+    done = run_script("check_reread.py", "--base", "main", cwd=root)
+    assert done.code == module.EXIT_OK, done.text
+    assert "удалён этим изменением" in done.text, done.text

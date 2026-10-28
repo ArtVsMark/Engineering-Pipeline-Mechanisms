@@ -132,10 +132,22 @@ def main(argv: list[str] | None = None) -> int:
         # ИСТОРИЯ — ПЕРВОЙ: без неё гейт не отработал, даже когда ответа нет
         # (третий исход на пустом входе, `tests/test_third_outcome.py`).
         fork = journal.common_ancestor(args.base or base_ref())
+        was = at(fork, where)
         if not answer.is_file():
+            # УДАЛЁННЫЙ ОТВЕТ — НЕ «ПРОЕКТ БЕЗ ОТВЕТА» (взгляд на #1723,
+            # `44c8507`, 045). Прежде база не читалась, и изменение, снявшее
+            # ответ каталогу, проходило так же молча, как проект, у которого
+            # ответа не было никогда. Подписи сверять по-прежнему нечего, и
+            # предмет гейта — честность подписи, а не право снять ответ:
+            # удаление названо громко, но не отвергнуто (051).
+            if was is not None:
+                print(
+                    f"::warning::ответ каталогу ({where}) удалён этим изменением — "
+                    "подписи сверять нечего, но снятие ответа должно быть намеренным"
+                )
+                return EXIT_OK
             print(f"ответа каталогу ({where}) нет — подписи под перечитыванием сверять нечего")
             return EXIT_OK
-        was = at(fork, where)
         now = json.loads(answer.read_text(encoding="utf-8"))
     except (NotRun, journal.NotRun, OSError, json.JSONDecodeError) as exc:
         print(f"гейт не отработал: {report.cut(str(exc))}", file=sys.stderr)

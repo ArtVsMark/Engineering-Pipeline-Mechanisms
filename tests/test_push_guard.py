@@ -14,6 +14,7 @@
 больше, чем пропусков.
 """
 
+import ast
 import importlib.util
 import json
 import os
@@ -26,7 +27,7 @@ from pathlib import Path
 import pytest
 import report
 
-from tests.conftest import ROOT, load_script, python_shim
+from tests.conftest import ROOT, load_script, python_shim, walk
 
 HOOK = ROOT / ".claude" / "hooks" / "push_guard.py"
 #: То, что зовёт окно: обёртка выбирает интерпретатор планки (#1058). Набор
@@ -1343,3 +1344,35 @@ def test_a_nested_parse_refusal_names_its_cause(segment: list[str], cause: str) 
     """Вложенный отказ разбора называет причину, как верхний уровень (195, `1b66011`)."""
     found, blind = module.unwrap(segment, module.DEPTH)
     assert not found and cause in blind, blind
+
+
+def links_the_interpreter(tree: ast.Module) -> bool:
+    """Зовёт ли модуль `….symlink_to(…sys.executable…)` — шим интерпретатора ссылкой."""
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "symlink_to"
+        and "executable" in ast.unparse(node)
+        for node in ast.walk(tree)
+    )
+
+
+def test_no_test_links_the_interpreter() -> None:
+    """Шим интерпретатора — только `conftest.python_shim`, ссылкой — никогда (#1705, `16c2c31`).
+
+    Запущенный через ссылку Python не узнаёт венв окна; две находки по этому
+    месту (c3dea21, 3e8e9ae) — повод для гейта, а не для прозы (210).
+    """
+    linking = [
+        path.name
+        for path in walk(ROOT / "tests", "*.py")
+        if links_the_interpreter(ast.parse(path.read_text(encoding="utf-8")))
+    ]
+    assert linking == []
+
+
+def test_the_link_gate_sees_a_link(tmp_path: Path) -> None:
+    """Обратная половина: ссылка на интерпретатор узнаётся."""
+    said = "import sys\nfrom pathlib import Path\nPath('p').symlink_to(sys.executable)\n"
+    assert links_the_interpreter(ast.parse(said))
+    assert not links_the_interpreter(ast.parse("Path('p').symlink_to('x')\n"))
