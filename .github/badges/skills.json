@@ -475,6 +475,42 @@
     "retell-from-the-source"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1731,
+   "merged_at": "2026-10-28",
+   "commit": "42387b9ec36fd1b114434037c34f2322b5b4a4d5",
+   "touched": [
+    ".claude/skills/close-a-finding/SKILL.md",
+    ".github/workflows/main-red.yml",
+    ".rules/bindings.json",
+    ".rules/vendor-watch.json",
+    "changelog.d/attribution-gate-moves-in.contract.md",
+    "changelog.d/bundle-hint-hook.added.md",
+    "changelog.d/deps-actions-setup-python-v7.1.0.changed.md",
+    "changelog.d/setup-python-7-1.changed.md",
+    "changelog.d/test-matrix-deadline.changed.md",
+    "changelog.d/test-matrix-deadline.internal.md",
+    "docs/decisions/014-a-flake-must-be-visible-before-it-is-rerun.md",
+    "docs/use/pipeline.md"
+   ],
+   "added": [
+    "changelog.d/test-matrix-deadline.changed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "answer-a-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source"
+   ],
+   "invoked": [
+    "answer-a-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
