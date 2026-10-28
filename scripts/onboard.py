@@ -896,6 +896,12 @@ def lay(root: Path, files: dict[Path, str], repo: str) -> None:
     целые файлы тем же `signed_all`. Файл проекта (`of_the_project`) не
     подписывается: строка поставщика в нём объявила бы его чужим.
     """
+    kitted = {path: blob_of(text) for path, text in files.items() if path in LAID_KINDS}
+    # ПЕРЕЧЕНЬ ЧИТАЕТСЯ ДО ЗАПИСИ (взгляд на #1651, `41c6027`): битый
+    # `.claude/kit-laid.json` прежде обнаруживался после того, как хуки и навыки
+    # уже легли, — файлы лежали, перечень не записан, заход кончался отказом.
+    # Теперь отказ случается до первого файла, и дерево остаётся прежним.
+    laid = laid_of(root) if kitted else {}
     for path, text in signed_all(files, repo).items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_text(text, encoding="utf-8")
@@ -903,9 +909,8 @@ def lay(root: Path, files: dict[Path, str], repo: str) -> None:
         # без права на исполнение хук не запустился бы (#1554).
         if text.startswith(SHEBANG):
             (root / path).chmod(0o755)
-    kitted = {path: blob_of(text) for path, text in files.items() if path in LAID_KINDS}
     if kitted:
-        write_laid(root, {**laid_of(root), **kitted}, repo)
+        write_laid(root, {**laid, **kitted}, repo)
 
 
 #: Пояснение в самом перечне: файл лежит у потребителя, и читает его человек.
@@ -1520,7 +1525,13 @@ def dormant_areas_note(consumer: Path) -> str:
         declared = review_map.declares_role(review_map.table_shape(roles))
     except OSError, ValueError, review_map.NotRun:
         declared = False
-    profiled = review_map.CATALOGUE_ROLE in findings.roles(consumer / profiles)
+    # НЕЧИТАЕМАЯ КАРТА ПРОФИЛЕЙ — «ПРОФИЛЯ НЕТ», как нечитаемая таблица ролей
+    # строкой выше (взгляд на #1696, `534ecc4`): прежде `roles.md` не в UTF-8
+    # ронял заход уже после того, как он положил файлы, вместо названной спячки.
+    try:
+        profiled = review_map.CATALOGUE_ROLE in findings.roles(consumer / profiles)
+    except OSError, ValueError:
+        profiled = False
     if declared and profiled:
         return ""
     missing = " и ".join(
