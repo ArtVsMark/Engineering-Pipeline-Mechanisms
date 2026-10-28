@@ -12,6 +12,8 @@
 сразу за командой ключа в той же фразе может стоять его умолчание формой
 `BESIDE`: «`… paths.py <ключ>`, по умолчанию `<путь>`». Путь, не равный
 умолчанию этого ключа, краснеет: рядом с ключом — только его собственный.
+Разрешение — только у заготовки `kit/` (взгляд на #1732): навык читает окно,
+у которого запускатель есть, и там путь рядом с ключом судится как голый.
 
 ДВЕ ПОЛОВИНЫ ГЕЙТА.
 
@@ -55,7 +57,10 @@ DEFAULTS: Final = {
 SKILL_CALL: Final = re.compile(r"python scripts/paths\.py ([\w-]+)")
 KIT_CALL: Final = re.compile(r"bash \.claude/mechanisms\.sh paths\.py ([\w-]+)")
 #: Умолчание сразу за командой ключа, в той же фразе: «`…`, по умолчанию `путь`».
-BESIDE: Final = r"`,\s+по умолчанию\s+`([^`\n]+)`"
+#: Пробел или ОДИН перенос строки, но не пустая строка: абзацем ниже — уже не
+#: «рядом» (взгляд на #1732).
+GAP: Final = r"[ \t]*\n?[ \t]*"
+BESIDE: Final = rf"`,{GAP}по умолчанию{GAP}`([^`\n]+)`"
 #: Пояснение — слово кириллицей в пределах окна перед командой, в том же абзаце.
 EXPLAINED: Final = re.compile(r"[а-яё]{3,}", re.IGNORECASE)
 WINDOW: Final = 80
@@ -77,9 +82,15 @@ def text_problems(text: str, call: re.Pattern[str], foreign: re.Pattern[str]) ->
     """Нарушения формы в одном тексте: голый путь, чужая форма, неизвестный ключ, без слов."""
     found: list[str] = []
     bare = text
-    for beside in re.finditer(call.pattern + BESIDE, text):
+    # ТОЛЬКО У ЗАГОТОВКИ `kit/` (взгляд на #1732): решение принято ради
+    # внешнего взгляда, которому запускатель закрыт. Навык читает окно, а у
+    # окна запускатель есть, — там умолчание снова повело бы потребителя с
+    # `paths:` к чужому пути, и путь рядом с ключом судится как голый.
+    besides = re.finditer(call.pattern + BESIDE, text) if call is KIT_CALL else iter(())
+    for beside in besides:
         key, said = beside[1], beside[2]
-        if key not in paths.PROJECT or said != paths.PROJECT[key].as_posix():
+        # Ключ-каталог пишут и со слешем: `docs/decisions/` — тот же путь.
+        if key not in paths.PROJECT or said.rstrip("/") != paths.PROJECT[key].as_posix():
             found.append(f"рядом с ключом «{key}» не его умолчание: {said}")
             continue
         # Путь рядом со своим ключом из суда голого пути вынимается — длина
@@ -120,11 +131,7 @@ def test_the_text_names_project_data_by_key_with_words() -> None:
         ("`python scripts/paths.py bindings`", "без пояснения"),
         ("ответ (`bash .claude/mechanisms.sh paths.py bindings`)", "чужой формы"),
         (
-            "ответ (`python scripts/paths.py bindings`, по умолчанию `.rules/roles.json`)",
-            "рядом с ключом «bindings» не его умолчание",
-        ),
-        (
-            "ответ (`python scripts/paths.py roles`, по умолчанию `.rules/bindings.json`)",
+            "ответ (`python scripts/paths.py bindings`, по умолчанию `.rules/bindings.json`)",
             "путь умолчания ключа «bindings»",
         ),
     ],
@@ -133,8 +140,7 @@ def test_the_text_names_project_data_by_key_with_words() -> None:
         "неизвестный-ключ",
         "без-слов",
         "форма-запускателя-в-навыке",
-        "рядом-чужой-путь",
-        "рядом-путь-другого-ключа",
+        "рядом-в-навыке",
     ],
 )
 def test_the_text_gate_turns_red_on_each_form(text: str, said: str) -> None:
@@ -142,17 +148,50 @@ def test_the_text_gate_turns_red_on_each_form(text: str, said: str) -> None:
     assert any(said in one for one in text_problems(text, SKILL_CALL, KIT_CALL))
 
 
-def test_the_default_beside_its_own_key_is_lawful() -> None:
-    """Умолчание сразу за командой своего ключа — законно; то же отдельно — нет (`e57de54`)."""
-    beside = (
-        "таблица ролей (`python scripts/paths.py bindings`, по умолчанию `.rules/bindings.json`)"
-    )
-    assert text_problems(beside, SKILL_CALL, KIT_CALL) == []
-    apart = beside + "; правят `.rules/bindings.json` руками"
-    assert any(
-        "путь умолчания ключа «bindings»" in one
-        for one in text_problems(apart, SKILL_CALL, KIT_CALL)
-    )
+#: Команда заготовки `kit/` — только у неё умолчание рядом с ключом законно.
+KIT = "`bash .claude/mechanisms.sh paths.py {}`"
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        (f"ответ ({KIT.format('bindings')}, по умолчанию `.rules/roles.json`)", "не его умолчание"),
+        (
+            f"ответ ({KIT.format('roles')}, по умолчанию `.rules/bindings.json`)",
+            "путь умолчания ключа «bindings»",
+        ),
+        (
+            f"ответ ({KIT.format('bindings')},\n\nпо умолчанию `.rules/bindings.json`)",
+            "путь умолчания ключа «bindings»",
+        ),
+    ],
+    ids=["рядом-чужой-путь", "рядом-путь-другого-ключа", "через-абзац"],
+)
+def test_the_default_beside_a_key_turns_red_when_it_is_not_beside_its_own(
+    text: str, said: str
+) -> None:
+    """Рядом — только своё умолчание и только в той же фразе (`e57de54`, взгляд на #1732)."""
+    assert any(said in one for one in text_problems(text, KIT_CALL, SKILL_CALL))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"таблица ролей ({KIT.format('bindings')}, по умолчанию `.rules/bindings.json`)",
+        f"таблица ролей ({KIT.format('bindings')},\nпо умолчанию `.rules/bindings.json`)",
+        f"записи решений ({KIT.format('decisions')}, по умолчанию `docs/decisions/`)",
+    ],
+    ids=["в-строке", "через-перенос", "каталог-со-слешем"],
+)
+def test_the_default_beside_its_own_key_is_lawful(text: str) -> None:
+    """Умолчание сразу за командой своего ключа в заготовке `kit/` — законно."""
+    assert text_problems(text, KIT_CALL, SKILL_CALL) == []
+
+
+def test_the_default_apart_from_its_key_is_still_bare() -> None:
+    """То же умолчание отдельно от команды — голый путь."""
+    apart = f"роли ({KIT.format('bindings')}); правят `.rules/bindings.json` руками"
+    assert any("«bindings»" in one for one in text_problems(apart, KIT_CALL, SKILL_CALL))
 
 
 def test_a_path_inside_a_directory_key_is_a_document_not_data() -> None:
