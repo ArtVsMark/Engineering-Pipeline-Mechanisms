@@ -1750,3 +1750,15 @@ def test_rules_half_on_the_catalogue_tree_is_inapplicable(monkeypatch: pytest.Mo
     monkeypatch.setattr(module.debt, "rules_debt", lambda _: None)
     said = module.rules_part(module.debt.catalogue.REPO, "t")
     assert said == module.Source(note=module.debt.CATALOGUE_TREE)
+
+
+def test_a_drifted_contract_survives_on_the_catalogue_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """На дереве каталога разошедшийся контракт — строка плана, как и долг у `debt` (`359ffe9`)."""
+    monkeypatch.setattr(module.debt, "closed_issues", lambda *_: [])
+    monkeypatch.setattr(module.debt, "inbox_body", lambda *_: ("", "", ""))
+    monkeypatch.setattr(module.debt, "rules_debt", lambda _: None)
+    monkeypatch.setattr(module.debt, "contract_note", lambda _: "v3 → v4")
+    said = module.rules_part(module.debt.catalogue.REPO, "t")
+    assert said.rows == ["контракт разошёлся: v3 → v4"]
+    assert said.note == module.debt.CATALOGUE_TREE
+    assert module.debt.rules_left(None, "v3 → v4", inapplicable=True), "два ответа разошлись"

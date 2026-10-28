@@ -456,8 +456,14 @@ def rules_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None
     except ghrest.TransportError as exc:
         return Source(unread=f"«входящие» каталога не прочитаны: {exc}")
     numbers = debt.rules_debt(inbox)
+    note = debt.contract_note(inbox)
     if numbers is None and debt.catalogue_tree(repo):
-        return Source(note=debt.CATALOGUE_TREE)
+        # ОДИН ОТВЕТ С ШАГОМ ДОЛГА (взгляд на #1669): на дереве каталога чисел
+        # нет по построению, но разошедшийся контракт `debt.rules_left`
+        # считает долгом и здесь — план не теряет его строку.
+        return Source(
+            rows=[f"контракт разошёлся: {note}"] if note else [], note=debt.CATALOGUE_TREE
+        )
     if numbers is None:
         return Source(unread="числа каталога не найдены во «входящих»")
     tasks, queue, unheld = numbers
@@ -466,7 +472,6 @@ def rules_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None
         rows.append(f"правил без ответа: **{queue}**")
     if unheld:
         rows.append(f"правил «действует, но не держится ничем»: **{unheld}**")
-    note = debt.contract_note(inbox)
     if note:
         rows.append(f"контракт разошёлся: {note}")
     said = debt.inbox_age(seen, inbox_note)
