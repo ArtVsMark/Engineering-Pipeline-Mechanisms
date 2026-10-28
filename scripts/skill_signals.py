@@ -163,8 +163,9 @@ def signals_at(commit: str, root: Path = Path()) -> dict[str, Signals]:
 
     ЭПОХА ЗАПИСИ — ЕЁ КОММИТА (поздний взгляд на #1715). Кнопка пишет старое
     изменение, и сегодняшние `SKILL.md` смешали бы его ожидание с нынешним.
-    Список навыков, их шапки и раздел `paths:` ответа берутся у коммита; навык
-    без ключа признаков на нём — `NoSignals`: признаков тогда ещё не было.
+    Список навыков, их шапки и раздел `paths:` ответа берутся у коммита. Ключа
+    нет ни у одного навыка — `NoSignals`: признаков тогда ещё не было; нет у
+    части — `BadSignals` с их именами: новый навык забыли разметить.
     """
     folder = paths.SKILLS.as_posix()
     # Фильтр пути, а не `коммит:каталог`: нет каталога навыков — пусто, а
@@ -191,6 +192,7 @@ def signals_at(commit: str, root: Path = Path()) -> dict[str, Signals]:
     except paths.BadPaths as exc:
         raise BadSignals(f"таблица путей на {commit} не разобрана: {exc}") from exc
     found: dict[str, Signals] = {}
+    unmarked: list[str] = []
     for name in sorted(PurePosixPath(one).name for one in listed.split("\0") if one):
         try:
             text = gitcall.output(
@@ -203,5 +205,15 @@ def signals_at(commit: str, root: Path = Path()) -> dict[str, Signals]:
             if any(said in str(exc) for said in check_journal.NO_SUCH_PATH):
                 continue
             raise
-        found[name] = signals_of(name, text, table)
+        try:
+            found[name] = signals_of(name, text, table)
+        except NoSignals:
+            unmarked.append(name)
+    # НИ У КОГО — «ЕЩЁ НЕ БЫЛО», У ЧАСТИ — ЗАБЫЛИ (взгляд на #1724). Старый
+    # коммит не знает ключа вовсе; новый навык без ключа рядом с размеченными —
+    # пропуск разметки, и молча гасить из-за него все записи нельзя (045).
+    if unmarked and not found:
+        raise NoSignals(f"ключа {KEY} нет ни у одного навыка на {commit}")
+    if unmarked:
+        raise BadSignals(f"на {commit} без ключа {KEY}: {', '.join(unmarked)}")
     return found

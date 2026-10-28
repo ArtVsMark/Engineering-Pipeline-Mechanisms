@@ -118,3 +118,15 @@ def test_a_commit_before_any_signal_says_so_and_a_bad_one_refuses(tmp_path: Path
         module.signals_at("HEAD", tmp_path)
     with pytest.raises(module.BadSignals, match="ls-tree"):
         module.signals_at("нет-такого", tmp_path)
+
+
+def test_a_skill_left_unmarked_beside_marked_ones_is_named(tmp_path: Path) -> None:
+    """Ключ есть у одних навыков и нет у другого — отказ с его именем, а не «ещё не было»."""
+    git = skilled_repo(tmp_path, '---\nexpected:\n  touched: ["a.py"]\n---\n')
+    (tmp_path / ".claude" / "skills" / "y").mkdir()
+    (tmp_path / ".claude" / "skills" / "y" / "SKILL.md").write_text("---\nname: y\n---\n", "utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "новый навык"], check=True)
+    with pytest.raises(module.BadSignals, match="без ключа expected: y") as caught:
+        module.signals_at("HEAD", tmp_path)
+    assert not isinstance(caught.value, module.NoSignals)

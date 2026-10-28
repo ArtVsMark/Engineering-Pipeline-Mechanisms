@@ -132,16 +132,17 @@ def test_before_the_first_skill_line_nothing_is_recorded(
     """
     git = repo(tmp_path)
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "гейт (#12)\n\nтело"], check=True)
-    monkeypatch.chdir(tmp_path)
-    assert module.named_skills_yet("HEAD") is False
-    assert module.main(["--commit", "HEAD", "--root", str(ROOT)]) == module.EXIT_OK
+    # Текущий каталог — чужая история: всё читается из `--root` (взгляд на #1724).
+    monkeypatch.chdir(ROOT)
+    assert module.named_skills_yet("HEAD", tmp_path) is False
+    assert module.main(["--commit", "HEAD", "--root", str(tmp_path)]) == module.EXIT_OK
     assert "строки «Навык:» в истории ещё не было" in capsys.readouterr().out
     subprocess.run(
         [*git, "commit", "-q", "--allow-empty", "-m", "ещё (#13)\n\nНавык: build-a-gate"],
         check=True,
     )
     subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "после (#14)"], check=True)
-    assert module.named_skills_yet("HEAD") is True, "граница — предки, а не только сам коммит"
+    assert module.named_skills_yet("HEAD", tmp_path), "граница — предки, а не только сам коммит"
 
 
 def test_a_broken_path_table_is_the_third_outcome(
