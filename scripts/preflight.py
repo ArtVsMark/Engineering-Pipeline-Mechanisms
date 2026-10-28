@@ -63,7 +63,8 @@ MECHANISMS: Final = "MECHANISMS"
 #: Предел одной проверки дерева: самый долгий шаг — полный набор тестов. Предел
 #: его джоба у площадки — `timeout-minutes` в `ci.yml`; здесь вдвое
 #: шире: машина окна медленнее раннера, а предел нужен от зависания, а не от
-#: медленного прогона.
+#: медленного прогона. «Вдвое» держит
+#: `tests/test_window_preflight.py::test_the_step_timeout_is_twice_the_test_job_limit`.
 STEP_TIMEOUT: Final = 30 * 60
 #: Предел сборки окружения шага типов: `venv` и `pip install` по сети.
 BUILD_TIMEOUT: Final = 10 * 60
