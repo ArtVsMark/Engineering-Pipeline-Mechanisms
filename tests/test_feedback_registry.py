@@ -106,7 +106,7 @@ def test_the_body_queues_the_unjudged_and_keeps_its_days_readable() -> None:
     queue, rest = body.split("## С вердиктом", 1)
     assert "`o/a:false-refusal/waits`" in queue and "замечено 01.10.2026" in queue
     assert "`o/a:false-refusal/done`" in rest and "rejected: зелёное законно" in rest
-    assert "o/b — раздел feedback: битый" in rest and "o/c — клон не прочитан" in rest
+    assert "`o/b` — раздел feedback: `битый`" in rest and "`o/c` — клон не прочитан" in rest
     # Сирота — только у прочитанного соседа: у o/b записей не видно, а не нет.
     assert "`o/a:false-refusal/removed`" in rest and "o/b:false-pass/hidden" not in rest
     assert module.seen_in(body) == seen
@@ -245,7 +245,7 @@ def test_a_neighbours_text_cannot_forge_a_marker_a_days_block_or_a_heading() -> 
     assert module.seen_in(body) == {"o/a:false-refusal/x": TODAY}
     assert sum(line.startswith("## Без вердикта") for line in body.splitlines()) == 1
     assert sum(line.startswith(module.DATED) for line in body.splitlines()) == 1
-    assert module.quoted("a\n  b <c>") == "a b &lt;c&gt;"
+    assert module.quoted("a\n  b <c>") == f"`a b <{module.WORD_JOINER}c>`"
 
 
 def test_a_record_without_a_verdict_past_the_deadline_is_marked() -> None:
@@ -295,9 +295,30 @@ def test_main_advises_on_every_overdue_record_and_still_exits_zero(
 
 
 def test_a_neighbours_text_neither_mentions_nor_links() -> None:
-    """`@имя` и `#N` в замере соседа не уведомляют и не ссылаются (`1fb9d21`, `9356cb3`)."""
-    said = module.quoted("позвал @кто-то по #12")
-    assert "@кто" not in said and "#12" not in said
-    assert said.replace(module.WORD_JOINER, "") == "позвал @кто-то по #12", "читается тем же"
-    # След у самого соседа и почта — не наши задачи и не упоминания.
-    assert module.quoted("след o/n#4, почта a@b.c") == "след o/n#4, почта a@b.c"
+    """Ни одна форма упоминания и ссылки не выходит из кода строки (`1fb9d21`, `9356cb3`, #1730)."""
+    forms = (
+        "позвал @кто-то по #12, GH-12 и третий/репо#1, "
+        "https://github.com/o/r/issues/12 и [тут](www.github.com/o/r/pull/3)"
+    )
+    said = module.quoted(forms)
+    assert said == f"`{forms}`", "весь текст — один код строки, читается тем же"
+
+
+@pytest.mark.parametrize(
+    ("text", "expect"),
+    [
+        ("a `b` c", "``a `b` c``"),
+        ("`край", "`` `край ``"),
+        ("x ``y`` z`", "``` x ``y`` z` ```"),
+        ("", ""),
+    ],
+)
+def test_backticks_inside_do_not_close_the_code(text: str, expect: str) -> None:
+    """Ограждение длиннее серии кавычек внутри, кавычка у края — через пробел."""
+    assert module.quoted(text) == expect
+
+
+def test_a_neighbours_text_carries_no_marker() -> None:
+    """Метка живой задачи из чужого текста не складывается подстрокой."""
+    said = module.quoted(module.findings.MARKER)
+    assert module.findings.MARKER not in said and "<!--" not in said
