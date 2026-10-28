@@ -142,7 +142,10 @@ def collected(uptake: Any) -> Collected:
             repo = str(block["repo"])
             if block.get("broken"):
                 broken[repo] = str(block["broken"])
-            rows += [Row(repo, feedback_form.Record(**one)) for one in block.get("records", [])]
+            records = [feedback_form.Record(**one) for one in block.get("records", [])]
+            # Запись другому поставщику — не наша очередь: её адресат назван
+            # полем `supplier`, и вердикт по ней пишет он, а не мы (`fe6bb5a`).
+            rows += [Row(repo, one) for one in records if one.ours()]
         except (KeyError, TypeError, AttributeError) as exc:
             raise NotRun(f"запись обхода не той формы: {exc!r}") from exc
     unread = tuple((uptake.get("projects") or {}).get("unread_repos") or ())

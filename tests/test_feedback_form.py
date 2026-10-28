@@ -57,6 +57,8 @@ def test_a_good_record_is_read_and_no_section_means_no_records() -> None:
         ({"version": 1, "records": [{**good(), "version": "1.11"}]}, "vX.Y.Z"),
         ({"version": 1, "records": [{**good(), "version": 1.11}]}, "в кавычки"),
         ({"version": 1, "records": [good(), good()]}, "дважды"),
+        ({"version": 1, "records": [{**good(), "supplier": "каталог"}]}, "supplier"),
+        ({"version": 1, "records": [{**good(), "supplier": 1}]}, "supplier"),
     ],
 )
 def test_every_broken_form_is_refused_with_its_place(section: Any, said: str) -> None:
@@ -151,6 +153,22 @@ def test_we_are_the_first_consumer_of_our_own_channel() -> None:
     """Наш ответ несёт записи о механизмах каталога той же формы, что у соседа (п. 8 #1665)."""
     records, why = policy.feedback_said((ROOT / ".pipeline.yml").read_text(encoding="utf-8"))
     assert why == "" and records, "раздел feedback: нашего ответа пуст или не разобран"
+    # Механизмы наших записей — каталога, а не наши (`fe6bb5a`): без поля
+    # хук `skill_log.py`, который есть у обоих, читался бы нашим.
+    assert not any(one.ours() for one in records), "запись нашего ответа адресована нам же"
+
+
+def test_the_supplier_defaults_to_us_and_is_kept_when_named() -> None:
+    """Без поля — запись нам; с полем — его поставщику, регистр адреса не важен."""
+    [ours] = module.form_of({"version": 1, "records": [good()]})
+    assert ours.supplier == module.SUPPLIER and ours.ours()
+    named = {**good(), "supplier": "ArtVsMark/Engineering-Incidents-Playbook"}
+    [theirs] = module.form_of({"version": 1, "records": [named]})
+    assert theirs.supplier == named["supplier"] and not theirs.ours()
+    [loud] = module.form_of(
+        {"version": 1, "records": [{**good(), "supplier": module.SUPPLIER.upper()}]}
+    )
+    assert loud.ours()
 
 
 def test_the_kit_answer_carries_the_section_as_a_comment() -> None:

@@ -63,7 +63,7 @@ EXIT_UNREAD: Final = 3
 #: Наш адрес в чужом прогоне. Ищется ВЫЗОВ, а не упоминание: имя проекта
 #: встречается и в прозе комментариев, и это не подключение (166). Регистр
 #: имени площадка не различает, и сравнение с ним везде без регистра.
-OURS: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+OURS: Final = feedback_form.SUPPLIER
 CALL_RE: Final = re.compile(
     r"uses:\s*(?i:"
     + re.escape(OURS)
