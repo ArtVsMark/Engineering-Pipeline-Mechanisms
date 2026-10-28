@@ -389,6 +389,49 @@
     "retell-from-the-source"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1729,
+   "merged_at": "2026-10-28",
+   "commit": "b609c7968d8ed128961ee70673452ae743c44e05",
+   "touched": [
+    ".claude/skills/bundle-the-work/SKILL.md",
+    "changelog.d/wave2-plan-and-debt.fixed.md",
+    "scripts/agent_pr.py",
+    "scripts/catalogue.py",
+    "scripts/check_foreign_why.py",
+    "scripts/check_open_limit.py",
+    "scripts/ci_complete.py",
+    "scripts/debt.py",
+    "scripts/gitcall.py",
+    "scripts/main_red.py",
+    "scripts/pipeline_checks.py",
+    "scripts/runs_series.py",
+    "scripts/schedules_seen.py",
+    "scripts/work_plan.py",
+    "tests/test_agent_pr_consent.py",
+    "tests/test_agent_silenced.py",
+    "tests/test_debt.py",
+    "tests/test_main_guard.py",
+    "tests/test_open_limit.py",
+    "tests/test_work_plan.py"
+   ],
+   "added": [
+    "changelog.d/wave2-plan-and-debt.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
