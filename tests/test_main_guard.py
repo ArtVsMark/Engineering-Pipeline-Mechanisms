@@ -46,8 +46,31 @@ def test_a_system_exit_is_not_swallowed() -> None:
         module.run(leave, 2)
 
 
+def returns_one(tree: ast.Module) -> bool:
+    """Отдаёт ли `main` модуля целую 1 буквой — исход без константы.
+
+    Поздний взгляд на #1723: `facts_release.py` объявляет «выпускать нельзя»
+    числом 1 в `main`, и обход по константам `EXIT_*` его не видел. `True` —
+    не единица исхода, хотя в Python равен ей: судится тип `int`.
+    """
+    return any(
+        isinstance(node, ast.FunctionDef)
+        and node.name == "main"
+        and any(
+            isinstance(ret, ast.Return)
+            and isinstance(ret.value, ast.Constant)
+            and type(ret.value.value) is int
+            and ret.value.value == 1
+            for ret in ast.walk(node)
+        )
+        for node in tree.body
+    )
+
+
 def finds_with_one(tree: ast.Module) -> bool:
-    """Объявлен ли на уровне модуля исход `EXIT_*` с кодом 1 — «нашёл»."""
+    """Объявлен ли исход 1 — «нашёл»: константой `EXIT_*` модуля или числом в `main`."""
+    if returns_one(tree):
+        return True
     for node in tree.body:
         target = node.targets[0] if isinstance(node, ast.Assign) else None
         if isinstance(node, ast.AnnAssign):
@@ -123,7 +146,8 @@ def test_every_mechanism_with_a_finding_enters_through_the_guard() -> None:
     """Всякий механизм с исходом 1 входит через `main_guard.run` (#1720).
 
     Мерка 28.10.2026: таких механизмов 36, вход под защитой был у одного.
-    ГРАНИЦА НАЗВАНА: исход, объявленный не константой `EXIT_*` модуля, обход не видит.
+    ГРАНИЦА НАЗВАНА: единицу, которую `main` берёт у другой функции (`return
+    selftest()`), обход не видит — он смотрит константы `EXIT_*` и числа в `main`.
     """
     scripts = walk(ROOT / "scripts", "*.py")
     counted = [p for p in scripts if finds_with_one(ast.parse(p.read_text(encoding="utf-8")))]
@@ -151,3 +175,19 @@ def test_a_standing_alone_module_must_guard_itself(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert unguarded(tmp_path, frozenset({"x.py"})) == ["x.py"]
+
+
+def test_a_literal_one_in_main_is_a_finding_outcome(tmp_path: Path) -> None:
+    """`main`, отдающий 1 числом, — механизм с исходом 1; `return True` — нет (#1723)."""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "x.py").write_text(
+        "def main() -> int:\n    return 1\n"
+        'if __name__ == "__main__":\n    raise SystemExit(main())\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "scripts" / "y.py").write_text(
+        "def main() -> bool:\n    return True\n"
+        'if __name__ == "__main__":\n    raise SystemExit(main())\n',
+        encoding="utf-8",
+    )
+    assert unguarded(tmp_path) == ["x.py"]
