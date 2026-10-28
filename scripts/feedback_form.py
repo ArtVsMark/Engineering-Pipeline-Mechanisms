@@ -98,8 +98,11 @@ def form_of(section: Any) -> list[Record]:
         raise NotRun(
             f"раздел {SECTION}: незнакомые ключи {', '.join(unknown)} — читаются version и records"
         )
-    if section.get("version") != VERSION:
-        raise NotRun(f"раздел {SECTION}: version {section.get('version')!r} — ждётся {VERSION}")
+    # ТИП СУДИТСЯ, КАК У ПОЛЕЙ ЗАПИСИ (взгляд на #1702, `6a76fe1`): `True == 1`
+    # и `1.0 == 1` в Python, и `version: true` проходил сверку равенством.
+    said = section.get("version")
+    if type(said) is not int or said != VERSION:
+        raise NotRun(f"раздел {SECTION}: version {said!r} — ждётся целое {VERSION}")
     raw = section.get("records", [])
     if not isinstance(raw, list):
         raise NotRun(f"раздел {SECTION}: records — список записей")
