@@ -103,8 +103,11 @@ jobs:
       || contains(fromJSON('["push", "workflow_dispatch", "schedule"]'), github.event.workflow_run.event)
     runs-on: ubuntu-26.04
     # Полный набор под покрытием — дольше, чем в `test-matrix`, и предел у него
-    # не меньше её: 10 минут медленный раннер уже не выдержал (#1698).
-    timeout-minutes: 15
+    # БОЛЬШЕ её, а не равен (взгляд на #1698, `568f827`): при равных пределах
+    # на том же медленном раннере покрытие упиралось бы в край раньше матрицы
+    # и красило `main` отменой. Держит
+    # `tests/test_window_preflight.py::test_the_coverage_job_outlasts_the_matrix`.
+    timeout-minutes: 20
     steps:
       # ВСЯ ИСТОРИЯ И ТЕГИ: версия проекта СЧИТАЕТСЯ по ним. Мелкий клон даёт
       # правдоподобное число, которое ложь, — тегов не видно, и MAJOR.MINOR
