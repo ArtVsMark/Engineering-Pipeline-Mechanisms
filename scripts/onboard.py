@@ -2208,6 +2208,7 @@ FEEDBACK_SAMPLE: Final = """
 #       kind: <false-refusal | false-pass | not-run | partial | rework | bypass>
 #       measured: <что видно и сколько раз>
 #       trace: <владелец/репозиторий#N — ваша задача>
+#       supplier: <владелец/репозиторий — только если механизм не этого поставщика>
 """
 
 

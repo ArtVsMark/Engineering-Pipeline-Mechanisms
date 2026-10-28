@@ -599,9 +599,14 @@ beyond_the_change:
 # ЧТО МЕХАНИЗМЫ КАТАЛОГА СДЕЛАЛИ У НАС НЕ ТАК — НАШИ ЗАПИСИ ПОСТАВЩИКУ (п. 8
 # #1665). Мы — первый потребитель своего же канала: раздел той же формы, что
 # пишет любой сосед (договор — `docs/use/pipeline.md`, раздел `feedback:`), и
-# судит его тот же шаг `pipeline`. Адресат записей — каталог: свой обход семьи
-# наше дерево не читает (`family_uptake` исключает поставщика), собрать их —
-# дело обхода каталога. Заполняется навыком `tell-the-supplier`.
+# судит его тот же шаг `pipeline`. Адресат каждой записи назван полем
+# `supplier` — здесь это каталог, а не мы (решение владельца 28.10.2026, #639).
+# ЧИТАТЕЛЯ У КАТАЛОГА НЕТ — пробел назван, а не спрятан (045, взгляд на #1714):
+# наш обход семьи наше дерево не читает (`family_uptake` исключает
+# поставщика), а обхода семьи у каталога нет. Запись — факт нашего ответа,
+# который каталог прочтёт, когда заведёт читателя; донести её до каталога
+# сегодня — задачей в его трекере, по следу `trace`. Заполняется навыком
+# `tell-the-supplier`.
 feedback:
   version: 1
   records:
@@ -611,3 +616,11 @@ feedback:
       kind: rework
       measured: "незаписанный вызов навыка выходит кодом 0 — отказ записи площадка человеку не показывает; переписан к себе с кодом 1 и причиной, поле в поле с формой строки каталога"
       trace: ArtVsMark/Engineering-Pipeline-Mechanisms#1449
+      supplier: ArtVsMark/Engineering-Incidents-Playbook
+    - slug: rules-inbox-hand-edit
+      mechanism: scripts/onboard_consumer.py
+      version: v2.1.0
+      kind: rework
+      measured: "rules-inbox.yml собран генератором и «руками не правится целиком», а `persist-credentials: false` у checkout проставлен рукой — пересборка файла или подъём тега действия снимут правку молча"
+      trace: ArtVsMark/Engineering-Pipeline-Mechanisms#1650
+      supplier: ArtVsMark/Engineering-Incidents-Playbook

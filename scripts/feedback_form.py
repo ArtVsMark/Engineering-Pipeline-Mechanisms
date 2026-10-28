@@ -41,6 +41,16 @@ KINDS: Final = {
 }
 #: Поля записи: все обязательны.
 FIELDS: Final = ("slug", "mechanism", "version", "kind", "measured", "trace")
+#: ПОСТАВЩИК ЗАПИСИ — НЕОБЯЗАТЕЛЬНОЕ ПОЛЕ, УМОЛЧАНИЕ — МЫ (решение владельца
+#: 28.10.2026, #639; взгляд на #1714, `fe6bb5a`). Механизм называется путём, а
+#: пути у двух поставщиков совпадают: `.claude/hooks/skill_log.py` есть и у
+#: каталога, и у нас. Без поля запись о хуке каталога читалась бы записью о
+#: нашем — и `names_path` у `family_gates.reason_of` отнёс бы её к нему.
+SUPPLIER_FIELD: Final = "supplier"
+#: Мы — поставщик по умолчанию: один адрес на всех читателей (214).
+SUPPLIER: Final = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+#: Поставщик — `владелец/репозиторий`.
+SUPPLIER_RE: Final = re.compile(r"[\w.-]+/[\w.-]+")
 #: Слаг записи: ключ вердикта `потребитель:вид/слаг`, поэтому без пробелов.
 SLUG_RE: Final = re.compile(r"[a-z0-9][a-z0-9-]*")
 #: Механизм — имя нашего общего шага (`step-journal`), путь скрипта
@@ -81,6 +91,11 @@ class Record:
     kind: str
     measured: str
     trace: str
+    supplier: str = SUPPLIER
+
+    def ours(self) -> bool:
+        """Нам ли адресована запись: реестр и перепись семьи читают только свои."""
+        return self.supplier.casefold() == SUPPLIER.casefold()
 
 
 def form_of(section: Any) -> list[Record]:
@@ -120,9 +135,12 @@ def record_of(one: Any, index: int) -> Record:
     where = f"раздел {SECTION}, запись {index}"
     if not isinstance(one, dict):
         raise NotRun(f"{where}: ожидалось отображение")
-    unknown = sorted(str(key) for key in set(one) - set(FIELDS))
+    unknown = sorted(str(key) for key in set(one) - {*FIELDS, SUPPLIER_FIELD})
     if unknown:
         raise NotRun(f"{where}: незнакомые поля {', '.join(unknown)}")
+    supplier = one.get(SUPPLIER_FIELD, SUPPLIER)
+    if not isinstance(supplier, str) or not SUPPLIER_RE.fullmatch(supplier.strip()):
+        raise NotRun(f"{where}: supplier {supplier!r} — `владелец/репозиторий` поставщика")
     said: dict[str, str] = {}
     for field in FIELDS:
         value = one.get(field)
@@ -145,14 +163,14 @@ def record_of(one: Any, index: int) -> Record:
         )
     # Тег выпуска судит один признак — `version.is_release_tag` (214).
     if not version.is_release_tag(said["version"]):
-        raise NotRun(f"{where}: version «{said['version']}» — тег нашего выпуска, `vX.Y.Z`")
+        raise NotRun(f"{where}: version «{said['version']}» — тег выпуска поставщика, `vX.Y.Z`")
     if said["kind"] not in KINDS:
         raise NotRun(f"{where}: вид «{said['kind']}» — один из {', '.join(KINDS)}")
     if not TRACE_RE.fullmatch(said["trace"]):
         raise NotRun(
             f"{where}: trace «{said['trace']}» — `владелец/репозиторий#N` или адрес https://"
         )
-    return Record(**said)
+    return Record(**said, supplier=supplier.strip())
 
 
 #: ВЕРДИКТ — НАШ, И ЛЕЖИТ У НАС (п. 4 #1665). Сосед пишет запись в своём
