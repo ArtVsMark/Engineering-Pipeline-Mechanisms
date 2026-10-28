@@ -87,9 +87,23 @@ def at(ref: str, root: Path) -> Census:
 
 
 def previous_tag(tag: str, root: Path) -> str | None:
-    """Выпуск, предшествующий `tag` в его истории; первого выпуска — `None`."""
+    """Выпуск, предшествующий `tag` в его истории; первого выпуска — `None`.
+
+    ПРЕЖНИЙ — СТРОГО ДО КОММИТА `tag`, А НЕ «ДРУГОЕ ИМЯ» (взгляд на #1660,
+    `e784e1f`). При `--tag HEAD` и теге на голове отсев `one != tag` оставлял
+    этот тег, и перепись сравнивалась сама с собой: разница везде 0 без
+    сравнения по сути. `--no-contains` отсекает теги на самом коммите и после.
+    """
     out = gitcall.output(
-        ["tag", "--merged", tag, "--list", project_version.RELEASE_TAG_GLOB],
+        [
+            "tag",
+            "--merged",
+            tag,
+            "--no-contains",
+            tag,
+            "--list",
+            project_version.RELEASE_TAG_GLOB,
+        ],
         NotRun,
         cwd=str(root),
     )
@@ -104,8 +118,14 @@ def scale_of(census: Census) -> Counter[str]:
     return Counter(str(one.get("answer") or "") for one in census.answers.values())
 
 
-def section(now: Census, before: Census | None, since: str | None) -> list[str]:
-    """Раздел заметок выпуска: счёт с разницей, `ours` по причинам, сдвиги и не прогнанное."""
+def section(
+    now: Census, before: Census | None, since: str | None, unsaid: str | None = None
+) -> list[str]:
+    """Раздел заметок выпуска: счёт с разницей, `ours` по причинам, сдвиги и не прогнанное.
+
+    `unsaid` — прошлый выпуск, у которого переписи нет: сравнения нет, и это
+    говорится, а не выглядит первым выпуском (взгляд на #1660, `f00240f`).
+    """
     counted = scale_of(now)
     was = scale_of(before) if before is not None else Counter()
     lines = ["### Перепись отдачи", ""]
@@ -113,6 +133,8 @@ def section(now: Census, before: Census | None, since: str | None) -> list[str]:
         f"Ответов в переписи: **{len(now.answers)}**"
         + (f" (на `{since}` — {len(before.answers)})." if before is not None else ".")
     )
+    if before is None and unsaid:
+        lines += ["", f"Сравнения нет: у прошлого выпуска `{unsaid}` переписи нет."]
     lines += ["", "| ответ | сейчас | разница |", "|---|---|---|"]
     for answer in SCALE:
         # БЕЗ ПРОШЛОГО ТЕГА СРАВНЕНИЯ НЕТ: «+0» читалось бы «не сдвинулось».
@@ -174,10 +196,11 @@ def for_release(tag: str, root: Path) -> list[str]:
     if not present(tag, root):
         return []
     since = previous_tag(tag, root)
+    unsaid = None
     if since is not None and not present(since, root):
-        since = None
+        since, unsaid = None, since
     before = at(since, root) if since else None
-    return section(at(tag, root), before, since)
+    return section(at(tag, root), before, since, unsaid)
 
 
 def main(argv: list[str] | None = None) -> int:
