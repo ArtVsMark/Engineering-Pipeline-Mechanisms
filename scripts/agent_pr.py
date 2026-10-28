@@ -573,10 +573,12 @@ def red_on_trunk(repo: str, token: str, name: str, base: str) -> bool:
     # разводит незавершённое и зомби-запись, — и второе понимание одного
     # состояния разошлось бы с первым молча (022, 090). Нашёл внешний взгляд
     # находкой `5203526`.
+    # КРАСНОЕ — ТО ЖЕ, ЧТО У ПРЕДЕЛА ТРЁХ И ОЧЕРЕДИ (`ci_complete.REAL_RED`,
+    # взгляд на #1661 `6c42e7b`). «Не `success`» считало красным и `neutral` со
+    # `stale`, а соседний `check_open_limit.live_red` в том же вердикте раздела
+    # 0 — нет: у красного было два определения.
     return any(
-        not ci_complete.pending(one)
-        and ci_complete.has_verdict(one)
-        and one.get("conclusion") not in ("success", None)
+        not ci_complete.pending(one) and one.get("conclusion") in ci_complete.REAL_RED
         for one in ci_complete.worst_per_name(runs)
     )
 

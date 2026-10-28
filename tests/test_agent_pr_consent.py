@@ -526,6 +526,17 @@ def test_the_trunk_is_read_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
     assert module.red_on_trunk("o/r", "токен", "ci-complete", "main") is False
 
 
+@pytest.mark.parametrize("conclusion", ["neutral", "stale", "cancelled", "skipped"])
+def test_the_trunk_red_is_the_queue_red(monkeypatch: pytest.MonkeyPatch, conclusion: str) -> None:
+    """Красное общей ветки — `ci_complete.REAL_RED`, как у предела трёх (взгляд на #1661, `6c42e7b`).
+
+    «Не `success`» считало красным `neutral` и `stale`, а `live_red` в том же
+    вердикте раздела 0 — нет.
+    """
+    trunk(monkeypatch, [{"name": "ci-complete", "status": "completed", "conclusion": conclusion}])
+    assert module.red_on_trunk("o/r", "токен", "ci-complete", "main") is False
+
+
 def test_a_headless_trunk_is_a_refusal_not_an_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """Голова не прочитана — третий исход, а не «шаг зелен».
 

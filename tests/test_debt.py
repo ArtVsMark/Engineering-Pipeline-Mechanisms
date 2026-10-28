@@ -1514,18 +1514,18 @@ def literal_sets(tree: ast.Module) -> list[frozenset[str]]:
 
 
 def test_the_red_set_lives_in_one_place() -> None:
-    """Красное — одно на всех: набор `runs_series.REAL_RED` буквами не повторён (взгляд на #1691).
+    """Красное — одно на всех: набор `ci_complete.REAL_RED` буквами не повторён (взгляд на #1691).
 
     Копии в `main_red.py` и `schedules_seen.py` жили без гейта равенства и
     разошлись бы молча. Судится РАВЕНСТВО набору, а не сходство: у
     `python_badge.FAILED` (с `startup_failure`) и `headroom.TIMED` вопрос
     другой, и они законны.
     """
-    canon = load_script("runs_series.py").REAL_RED
+    canon = load_script("ci_complete.py").REAL_RED
     copies = [
         path.name
         for path in walk(ROOT / "scripts", "*.py")
-        if path.name != "runs_series.py"
+        if path.name != "ci_complete.py"
         and canon in literal_sets(ast.parse(path.read_text(encoding="utf-8")))
     ]
     assert copies == []
