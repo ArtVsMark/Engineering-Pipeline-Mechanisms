@@ -528,7 +528,7 @@ def test_the_trunk_is_read_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.parametrize("conclusion", ["neutral", "stale", "cancelled", "skipped"])
 def test_the_trunk_red_is_the_queue_red(monkeypatch: pytest.MonkeyPatch, conclusion: str) -> None:
-    """Красное общей ветки — `ci_complete.REAL_RED`, как у предела трёх (взгляд на #1661, `6c42e7b`).
+    """Красное общей ветки — `ci_complete.REAL_RED`, как у предела трёх (`6c42e7b`).
 
     «Не `success`» считало красным `neutral` и `stale`, а `live_red` в том же
     вердикте раздела 0 — нет.
