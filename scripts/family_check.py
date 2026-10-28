@@ -374,7 +374,27 @@ def family_links(root: Path, summary: dict[str, Any], own: str) -> list[Link]:
             Link("family", catalogue.REPO, "bindings", None, None, str(ANSWER), "unknown", str(exc))
         )
         answer_at = None
-    if answer_at is not None and isinstance(answer := _json(root / answer_at), dict):
+    # НЕТ ФАЙЛА — СВЯЗИ НЕ ВЗЯТО, НЕ ЧИТАЕТСЯ — НЕИЗВЕСТНО (#1722). Без
+    # ответа каталогу проект связь с ним ещё не взял: сверять нечего, и это
+    # законно. Битый файл или не объект — другое: связь объявлена, а прочитать
+    # её нечем, и молча выпасть из сверки она не вправе (045).
+    answer: Any = None
+    if answer_at is not None and (root / answer_at).is_file():
+        answer = _json(root / answer_at)
+        if not isinstance(answer, dict):
+            links.append(
+                Link(
+                    "family",
+                    catalogue.REPO,
+                    "bindings",
+                    None,
+                    None,
+                    str(answer_at),
+                    "unknown",
+                    "ответ каталогу не прочитан: не JSON-объект",
+                )
+            )
+    if isinstance(answer, dict) and answer_at is not None:
         links.append(
             compare(
                 "family",

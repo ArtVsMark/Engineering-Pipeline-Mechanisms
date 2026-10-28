@@ -32,7 +32,7 @@ from typing import Any, Final
 import pytest
 import yaml
 
-from tests.conftest import needs_history
+from tests.conftest import ROOT, needs_history
 
 #: Общий шаг, который зовёт гейт атрибуции и читает отметку (#1556).
 STEP: Final = Path(".github/workflows/step-attribution-history.yml")
@@ -79,7 +79,14 @@ def since_run(tree: Path) -> tuple[int, str, str]:
         done = subprocess.run(
             ["bash", "-c", script],
             cwd=tree,
-            env={**os.environ, "GITHUB_OUTPUT": str(out)},
+            # Окружение площадки: код конвейера — наше дерево, временный каталог —
+            # дерево проверки; путь отметки шаг берёт у `paths.py` (#1722).
+            env={
+                **os.environ,
+                "GITHUB_OUTPUT": str(out),
+                "MECHANISMS": str(ROOT),
+                "RUNNER_TEMP": str(tree),
+            },
             capture_output=True,
             text=True,
             encoding="utf-8",

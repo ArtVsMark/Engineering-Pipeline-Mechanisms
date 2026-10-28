@@ -167,3 +167,29 @@ def test_a_base_that_moved_after_the_fork_does_not_lend_its_work(
     )
     done = run_script("check_reread.py", "--base", "main", cwd=root)
     assert done.code == module.EXIT_REJECTED, done.text
+
+
+def test_an_answer_that_first_appears_is_not_a_refusal(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Ответ каталогу кладётся впервые — на базе его нет, и это ответ, а не отказ (#1722)."""
+    root = repo_with(tmp_path, answers("1.6"))
+    subprocess.run(["git", "rm", "-q", ".rules/bindings.json"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "без ответа"], cwd=root, check=True)
+    subprocess.run(["git", "checkout", "-q", "-b", "work"], cwd=root, check=True)
+    (root / ".rules").mkdir(exist_ok=True)
+    (root / ".rules" / "bindings.json").write_text(
+        json.dumps(answers("1.7"), ensure_ascii=False), encoding="utf-8"
+    )
+    done = run_script("check_reread.py", "--base", "main", cwd=root)
+    assert done.code == module.EXIT_OK, done.text
+    assert "появляется этим изменением" in done.text
+
+
+def test_no_answer_at_all_has_nothing_to_sign(run_script: RunScript, tmp_path: Path) -> None:
+    """Ответа каталогу нет вовсе — подписи сверять нечего, и это сказано (#1722)."""
+    root = repo_with(tmp_path, answers("1.6"))
+    (root / ".rules" / "bindings.json").unlink()
+    done = run_script("check_reread.py", "--base", "main", cwd=root)
+    assert done.code == module.EXIT_OK, done.text
+    assert "сверять нечего" in done.text

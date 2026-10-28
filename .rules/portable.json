@@ -704,7 +704,10 @@
       "why": "@contract"
     },
     "scripts/check_decisions_edit.py": {
-      "answer": "as-is"
+      "answer": "configured",
+      "where": [
+        "docs/decisions"
+      ]
     },
     "scripts/check_derived_refs.py": {
       "answer": "as-is"

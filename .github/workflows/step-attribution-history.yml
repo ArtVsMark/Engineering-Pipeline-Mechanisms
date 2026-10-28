@@ -148,18 +148,30 @@ jobs:
         id: since
         run: |
           set -euo pipefail
-          if [ -f .github/attribution-since ]; then
+          # ПУТЬ ОТМЕТКИ — ИЗ ТАБЛИЦЫ ПУТЕЙ, А НЕ БУКВАМИ (#1722): потребитель
+          # переназначает его разделом `paths:`, и литерал молча смотрел бы мимо.
+          rc=0
+          python $MECHANISMS/scripts/paths.py attribution-since >"${RUNNER_TEMP}/mark" 2>"${RUNNER_TEMP}/mark.err" || rc=$?
+          case "$rc" in
+            0) ;;
+            *)
+              echo "::error::путь отметки атрибуции не получен (код $rc) — $(tr '\n' ' ' <"${RUNNER_TEMP}/mark.err")"
+              exit 1
+              ;;
+          esac
+          mark="$(cat "${RUNNER_TEMP}/mark")"
+          if [ -f "$mark" ]; then
             # `|| true`: `grep` без единой строки выходит кодом 1, и под
             # `pipefail` шаг оборвался бы раньше названного отказа (взгляд на #1574).
-            since="$( { grep -v '^[[:space:]]*#' .github/attribution-since || true; } | tr -d '[:space:]')"
+            since="$( { grep -v '^[[:space:]]*#' "$mark" || true; } | tr -d '[:space:]')"
             if [ -z "$since" ]; then
-              echo "::error::.github/attribution-since без коммита — отметка объявлена, но не названа (045)"
+              echo "::error::${mark} без коммита — отметка объявлена, но не названа (045)"
               exit 1
             fi
           else
             since="$(git log --diff-filter=A --format=%H -- .pipeline.yml | tail -n 1)"
             if [ -z "$since" ]; then
-              echo "::notice::ни .github/attribution-since, ни коммита с .pipeline.yml — спрашивается вся история"
+              echo "::notice::ни ${mark}, ни коммита с .pipeline.yml — спрашивается вся история"
             fi
           fi
           echo "since=$since" >>"$GITHUB_OUTPUT"

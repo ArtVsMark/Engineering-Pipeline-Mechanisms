@@ -434,13 +434,18 @@ def test_ext_by_own_facts(tmp_path: Path, facts: object, state: str, behind: int
 
 @pytest.mark.parametrize("path", [".rules/bindings.json", ".github/badges/facts.json"])
 def test_a_tree_file_not_an_object_does_not_break(tmp_path: Path, path: str) -> None:
-    """Ответ и факты не той формы — сверять нечего, а не исключение."""
+    """Ответ и факты не той формы — не исключение; ответ каталогу — назван (#1722).
+
+    Факты не той формы сверять нечего. Ответ каталогу не той формы — связь
+    объявлена и не прочитана: «unknown» с причиной, а не выпадение молча.
+    """
     root = tree(tmp_path)
     (root / path).parent.mkdir(parents=True, exist_ok=True)
     (root / path).write_text("[1]", encoding="utf-8")
     said = summary(publisher(CATALOGUE, bindings="1.9", export="1.9"))
     links = fc.analyse(root, said, "o/p")["segments"]["family"]["links"]
-    assert not [one for one in links if one["where"] == path]
+    named = [one["state"] for one in links if one["where"] == path]
+    assert named == (["unknown"] if path == ".rules/bindings.json" else [])
 
 
 def test_a_tree_value_not_a_string_is_grey_not_a_trace(tmp_path: Path) -> None:
@@ -837,3 +842,13 @@ def test_the_answer_is_read_where_the_table_puts_it(tmp_path: Path) -> None:
     (root / ".pipeline.yml").write_text("paths:\n  bindings: /abs.json\n", encoding="utf-8")
     [broken] = [one for one in fc.family_links(root, said, "o/p") if one.what == "bindings"]
     assert (broken.what, broken.state) == ("bindings", "unknown") and "вне дерева" in broken.why
+
+
+@pytest.mark.parametrize("text", ["{битый", "[1, 2]"])
+def test_an_unreadable_answer_is_named_not_dropped(tmp_path: Path, text: str) -> None:
+    """Ответ каталогу есть, но не читается — связь «unknown» с причиной, а не тишина (#1722)."""
+    root = tree(tmp_path, answer={"schema": "1.8"})
+    (root / ".rules" / "bindings.json").write_text(text, encoding="utf-8")
+    links = fc.family_links(root, summary(publisher(CATALOGUE, bindings="1.9")), "o/p")
+    assert [(one.what, one.state) for one in links] == [("bindings", "unknown")]
+    assert "не прочитан" in links[0].why
