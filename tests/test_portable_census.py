@@ -109,6 +109,17 @@ def test_no_census_on_the_tag_means_no_section(tmp_path: Path) -> None:
     assert census.for_release("v1.0.0", root) == []
     said = "\n".join(census.for_release("v1.1.0", root))
     assert "Ответов в переписи: **1**." in said and "Сменили шкалу" not in said
+    # Прошлый тег без переписи — названо, а не похоже на первый выпуск (`f00240f`).
+    assert "у прошлого выпуска `v1.0.0` переписи нет" in said
+    (tmp_path / "п").mkdir()
+    first = "\n".join(census.for_release("v1.1.0", repo(tmp_path / "п", [("v1.1.0", answers())])))
+    assert "Сравнения нет" not in first
+
+
+def test_a_tag_on_the_head_is_not_its_own_previous(tmp_path: Path) -> None:
+    """`--tag HEAD` с тегом на голове — прошлый выпуск ниже, а не он сам (`e784e1f`)."""
+    root = repo(tmp_path, [("v1.0.0", answers(a="ours")), ("v1.1.0", answers(a="as-is"))])
+    assert census.previous_tag("HEAD", root) == "v1.0.0"
 
 
 def test_the_release_page_carries_the_section_or_its_refusal(

@@ -206,6 +206,14 @@ def _called(path: Path, name: str, job: Any, refused: list[Refused]) -> list[Dec
         and STRIP_OURS in given
         and str(given[STRIP_OURS]).strip().casefold() not in NOT_A_PROBE
     ):
+        # ВЫРАЖЕНИЕ — НЕ ЗНАНИЕ, А ДОГАДКА, И ОНА НАЗЫВАЕТСЯ (взгляд на #1719,
+        # `b215d3b`). Значение `${{ … }}` разбор не вычисляет: у потребителя
+        # такой вызов мог быть настоящей пробой, и версия пропадала со значка
+        # без следа. Литерал «да» — наша проба, и её отсев законно тих.
+        if "${{" in str(given[STRIP_OURS]):
+            refused.append(
+                Refused(path.name, name, f"`{STRIP_OURS}` выражением — проба или нет, не узнать")
+            )
         return []
     said = str(given.get("python", "")).strip() if isinstance(given, dict) else ""
     if not said:

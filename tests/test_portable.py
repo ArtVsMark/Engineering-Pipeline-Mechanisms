@@ -646,6 +646,13 @@ NOT_FILLING: Final[dict[str, str]] = {
     "changelog.d/released": "журнал самого проекта: выпущенные фрагменты",
     ".github/badges": "выход скрипта, а не вход",
 }
+#: Скрипт упоминает путь наполнения, но файла не читает — закрытый перечень с
+#: причиной у каждого (068). Предикат `filling_read_by` считает чтением любое
+#: `paths.X`, и умолчание в датаклассе давало `shipped_form.py` наполнение
+#: README.md, которого он не открывает (взгляд на #1646, `75d7ffa`, `3952e00`).
+NOT_READ: Final[dict[str, str]] = {
+    "shipped_form.py": "`paths.ENTRANCE` — умолчание формы раздела `shipped:`; файл читает зовущий",
+}
 #: Где лежит наполнение проекта: настройки, договор и своды.
 FILLING_ROOTS: Final = (".rules/", "docs/", "AGENTS.md", "CLAUDE.md", "README.md")
 
@@ -686,7 +693,7 @@ def test_a_configured_answer_names_every_filling_it_reads() -> None:
     # общем низе — одной строкой `packages/transport` на весь пакет.
     for path in sorted(walk(ROOT / "scripts", "*.py")):
         answer = answers.get(f"scripts/{path.name}", {})
-        if answer.get("answer") not in ("configured", "as-is"):
+        if answer.get("answer") not in ("configured", "as-is") or path.name in NOT_READ:
             continue
         missing = filling_read_by(path.read_text(encoding="utf-8"), constants) - set(
             answer.get("where", [])
@@ -1180,3 +1187,14 @@ def test_the_supplier_mark_takes_only_the_suppliers_tree() -> None:
     assert supplier_named("`](https://github.com/Me/Project/blob/main/x.py) поставщика", own)
     assert not supplier_named("`](https://github.com/Other/Tree/blob/main/x.py)", own)
     assert not supplier_named("` голое имя", own)
+
+
+def test_every_not_read_entry_still_mentions_filling() -> None:
+    """Перечень «упомянуто, не прочитано» не переживает упоминание: снятое — снимается (154)."""
+    constants = path_constants()
+    stale = [
+        name
+        for name in NOT_READ
+        if not filling_read_by((ROOT / "scripts" / name).read_text(encoding="utf-8"), constants)
+    ]
+    assert stale == []

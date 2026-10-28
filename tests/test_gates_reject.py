@@ -1989,3 +1989,15 @@ def test_the_meta_gate_refuses_an_unknown_skill_name(tmp_path: Path) -> None:
     [told] = check.skill_problems("Навык: biuld-a-gate", known)
     assert "biuld-a-gate" in told
     assert check.known_skills(tmp_path / "нет") == frozenset()
+
+
+def test_a_skill_line_without_skills_in_the_tree_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Навыков в дереве нет — «Навык:» отказ, а не пропуск без суда (взгляд на #1701, `11e7c27`)."""
+    check = load_script("check_pr_meta.py")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(check.finding_kinds, "table_path", lambda _: tmp_path / "нет.json")
+    said = check.text_problems("", "", ["тема\n\nRefs #1\nНавык: build-a-gate\n"], None)
+    assert any("build-a-gate" in one for one in said), said
+    assert check.text_problems("", "", ["тема\n\nRefs #1\n"], None) == []
