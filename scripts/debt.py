@@ -427,7 +427,9 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
         # КРАСНОЕ — ТО ЖЕ, ЧТО У ОЧЕРЕДИ И ПРЕДЕЛА ТРЁХ (`runs_series.REAL_RED`,
         # находка `77192d6`): прежде долг считал красным одно `failure`, и
         # изменение с `timed_out` выпадало из раздела 2 и из пар раздела 0б,
-        # хотя предел трёх его красным считал (090, 195).
+        # хотя предел трёх его красным считал (090, 195). Соседи с тем же
+        # набором — `main_red.REAL_RED` и `schedules_seen.FELL` — ссылаются на
+        # него же, и копию буквами держит гейт `test_the_red_set_lives_in_one_place`.
         worst = ci_complete.worst_per_name(runs)
         if any(one.get("conclusion") in runs_series.REAL_RED for one in worst):
             red.append(said)
@@ -794,7 +796,7 @@ def catalogue_tree(repo: str) -> bool:
     называет их отсутствие. Опознание по содержимому отдало бы «неприменимо»
     любому дереву, сложенному похоже, — ошибка в сторону тишины (051).
     """
-    return repo.casefold() == catalogue.REPO.casefold()
+    return catalogue.is_catalogue(repo)
 
 
 def main(argv: list[str] | None = None) -> int:

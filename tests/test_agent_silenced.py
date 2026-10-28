@@ -275,3 +275,19 @@ def test_a_foreign_call_of_the_same_path_is_not_ours(
 def test_ours_tells_an_own_call_from_a_foreign_one(said: str, own: str, is_ours: bool) -> None:
     """Обе половины признака: свой путь и свой адрес — наши, чужой — нет, без имени — наш (051)."""
     assert module.ours(said, own) is is_ours
+
+
+def test_the_tree_answers_before_the_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`origin` дерева — раньше имени прогона: оно не отвечает за чужой `--root` (`effc300`)."""
+    monkeypatch.setenv("GITHUB_REPOSITORY", "свой/прогон")
+    root = tree(tmp_path, {STEP: CARRIER}, {})
+    assert module.own_repo(root) == "свой/прогон", "без origin — запасной ответ площадки"
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://example.invalid/чужой/дерево.git"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    assert module.own_repo(root) == "чужой/дерево"

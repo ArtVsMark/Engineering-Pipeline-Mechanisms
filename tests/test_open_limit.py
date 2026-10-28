@@ -417,3 +417,28 @@ def test_main_red_asks_the_trunk_and_names_a_refusal(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(module.agent_pr, "red_on_trunk", refuse)
     with pytest.raises(module.NotRun, match="не ответила"):
         module.main_red("o/r", "t", "tests")
+
+
+def test_a_fix_naming_itself_is_not_a_fix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`Чинит красное: #<свой номер>` из счёта трёх не выводит (взгляд на #1661, `6f68482`)."""
+    monkeypatch.setattr(module, "live_red", lambda *_: True)
+    itself = {"number": 13, "body": f"{module.changerefs.FIXES_RED_KEY} #13"}
+    other = {"number": 13, "body": f"{module.changerefs.FIXES_RED_KEY} #5"}
+    assert module.is_fix("o/r", "t", itself) is False
+    assert module.is_fix("o/r", "t", other) is True
+
+
+def test_free_places_ask_no_fix(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Мест хватает — починки не спрашиваются, и отказ общей ветки толчок не роняет (`06bc9f4`)."""
+    platform(monkeypatch, {11: MINE, 12: MINE})
+    opened = [
+        {"number": one, "body": f"{module.changerefs.FIXES_MAIN_KEY} tests"} for one in (11, 12)
+    ]
+    monkeypatch.setattr(module, "own_open", lambda *_: opened)
+
+    def refuse(*_: object) -> bool:
+        raise module.agent_pr.NotRun("голова общей ветки не прочитана")
+
+    monkeypatch.setattr(module.agent_pr, "red_on_trunk", refuse)
+    code, said = module.look(repo, "agent/новая")
+    assert code == module.EXIT_OK, said

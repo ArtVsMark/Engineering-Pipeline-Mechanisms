@@ -252,6 +252,27 @@ def test_an_unsaid_merge_state_is_unread_not_empty(monkeypatch: pytest.MonkeyPat
     assert module.main(["--repo", "o/r"]) == module.EXIT_PARTIAL
 
 
+def test_unasked_fixes_mark_section_zero_not_sections_one_and_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Отказ чтения починок — непрочитанный раздел 0, а не 1–2 (взгляд на #1661, `8f00a92`).
+
+    Под общим обработчиком он объявлял «не спрошены» разделы 1–2, а раздел
+    0, высший в плане, молча терял строки починок.
+    """
+    quiet_platform(monkeypatch)
+    monkeypatch.setattr(module.debt, "stuck_changes", lambda *_: ([], [], ["#7 — работа"]))
+
+    def refused(*_: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module, "zero_fixes", refused)
+    built, broken, _ = module.sources("o/r", "t")
+    assert "починки раздела 0 не спрошены" in built[0].unread
+    assert "0" in broken and "1" not in broken and "2" not in broken
+    assert built[2].rows == ["#7 — работа — красное на своей голове"]
+
+
 def test_no_living_plan_is_a_refusal_not_an_empty_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     """Живой задачи плана нет — отказ, а не пустой план.
 
@@ -1731,6 +1752,18 @@ def test_rules_half_on_the_catalogue_tree_is_inapplicable(monkeypatch: pytest.Mo
     assert said == module.Source(note=module.debt.CATALOGUE_TREE)
 
 
+def test_a_drifted_contract_survives_on_the_catalogue_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """На дереве каталога разошедшийся контракт — строка плана, как и долг у `debt` (`359ffe9`)."""
+    monkeypatch.setattr(module.debt, "closed_issues", lambda *_: [])
+    monkeypatch.setattr(module.debt, "inbox_body", lambda *_: ("", "", ""))
+    monkeypatch.setattr(module.debt, "rules_debt", lambda _: None)
+    monkeypatch.setattr(module.debt, "contract_note", lambda _: "v3 → v4")
+    said = module.rules_part(module.debt.catalogue.REPO, "t")
+    assert said.rows == ["контракт разошёлся: v3 → v4"]
+    assert said.note == module.debt.CATALOGUE_TREE
+    assert module.debt.rules_left(None, "v3 → v4", inapplicable=True), "два ответа разошлись"
+
+
 def plan_runs_on(condition: str, event: str, workflow: str = "", cause: str = "") -> bool:
     """Условие работы плана, вычисленное на событии: только `||`, `==`, `!=` и строки."""
     known = {
@@ -1766,3 +1799,14 @@ def test_the_plan_rebuilds_after_the_registry_sweep_on_main_only() -> None:
     assert plan_runs_on(condition, "workflow_run", "ci", "pull_request"), "ci изменения отсечён"
     assert plan_runs_on(condition, "workflow_run", "drift", "schedule")
     assert plan_runs_on(condition, "workflow_dispatch"), "ручная кнопка отсечена (104)"
+
+
+def test_a_fix_naming_itself_is_not_a_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Самоссылка с любой стороны — не пара 0б, и #N остаётся в разделе 2 (взгляд на #1729)."""
+    pulls = [
+        {"number": 50, "body": f"{module.changerefs.FIXES_RED_KEY} #50"},
+        {"number": 51, "body": f"{module.changerefs.WAITS_KEY} #51"},
+    ]
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *_, **__: iter(pulls))
+    _, rows, held = module.zero_fixes("o/r", "t", ["#50 — работа", "#51 — работа"])
+    assert rows == [] and held == set()

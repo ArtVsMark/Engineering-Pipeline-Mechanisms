@@ -101,7 +101,7 @@ class _NoOrigin(RuntimeError):
 
 
 def own_repo(root: Path) -> str:
-    """Своё имя `владелец/репозиторий`: площадка в прогоне, `origin` локально; пусто — неизвестно.
+    """Имя `владелец/репозиторий` дерева `root`: `origin`, без него — площадка; пусто — неизвестно.
 
     ОДИН ОТВЕТ НА «КТО Я» ДЛЯ ГЕЙТОВ (#1624). Прежде он жил в
     `check_agent_silenced`; третий спрашивающий (`check_foreign_why`) сделал
@@ -110,14 +110,23 @@ def own_repo(root: Path) -> str:
     Соседние разборы `origin` с другим допуском ошибки — `onboard.repo_of`
     (узкий: имя уходит строкой в чужой README) и
     `check_branch_revival.repo_of` (отказывает: имя идёт запросом к
-    площадке) — названы, а не слиты (195).
+    площадке) — названы, а не слиты (195). `pipeline_checks.running_repo`
+    отвечает на ДРУГОЙ вопрос — где идёт прогон, а не чьё дерево, — и потому
+    читает текущую папку (взгляд на #1651, `903625b`).
+
+    СПЕРВА `origin` САМОГО `root`, ПЛОЩАДКА — ЗАПАСНЫМ (взгляд на #1646,
+    `effc300`). `GITHUB_REPOSITORY` — имя репозитория прогона, а не любого
+    `root`: стоя первым, оно отвечало за `--root <чужое дерево>`, и дерево
+    каталога в прогоне соседа выглядело бы соседом — ошибка в сторону тишины.
+    В прогоне `actions/checkout` ставит `origin` на тот же репозиторий, так что
+    своё дерево ответа не меняет. ГРАНИЦА НАЗВАНА: чужое дерево без `origin`
+    (распакованный архив) по-прежнему получит имя прогона.
     """
-    said = os.environ.get("GITHUB_REPOSITORY", "").strip()
-    if said:
-        return said
     try:
         url = output(["remote", "get-url", "origin"], _NoOrigin, cwd=str(root))
     except _NoOrigin:
-        return ""
+        url = ""
     parts = url.strip().removesuffix(".git").replace(":", "/").split("/")
-    return f"{parts[-2]}/{parts[-1]}" if len(parts) >= 2 and parts[-1] and parts[-2] else ""
+    if len(parts) >= 2 and parts[-1] and parts[-2]:
+        return f"{parts[-2]}/{parts[-1]}"
+    return os.environ.get("GITHUB_REPOSITORY", "").strip()

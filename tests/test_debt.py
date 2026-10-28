@@ -15,7 +15,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script, walk
 
 debt = load_script("debt.py")
 task_shape = load_script("task_shape.py")
@@ -1497,3 +1497,69 @@ def test_the_registry_read_names_its_number_and_the_debt_keeps_its_shape(
     said = [("abc1234", 5, "риск", "scripts/x.py:1 — раз")]
     assert debt.findings_registry("o/r", "t") == (23, said)
     assert debt.findings_debt("o/r", "t") == said
+
+
+def sets_of(module: Any) -> list[tuple[str, Any]]:
+    """Наборы модуля и его классов: имя → значение, как их видит загруженный код."""
+    found = []
+    for name, value in vars(module).items():
+        if isinstance(value, set | frozenset):
+            found.append((name, value))
+        elif isinstance(value, type) and value.__module__ == module.__name__:
+            found += [
+                (f"{name}.{inner}", one)
+                for inner, one in vars(value).items()
+                if isinstance(one, set | frozenset)
+            ]
+    return found
+
+
+def test_the_red_set_lives_in_one_place() -> None:
+    """Красное — одно на всех: набор, равный `ci_complete.REAL_RED`, — он сам (взгляд на #1691).
+
+    СТРОГОЕ ПРАВИЛО ВМЕСТО ФОРМ (210, взгляд на #1729). Прежняя редакция
+    разбирала запись — `frozenset({…})`, затем `….frozenset(…)` — и пропускала
+    следующие: `frozenset([…])`, `set(…)`, набор в теле класса. Теперь модули
+    загружаются, и судится ЗНАЧЕНИЕ: набор, равный канону, но не тот же объект, —
+    копия, как бы она ни была записана; ссылка на канон — тот же объект.
+    ГРАНИЦА НАЗВАНА: набор внутри функции загрузкой не виден — он не константа
+    модуля и до вызова не существует.
+    """
+    canon = load_script("ci_complete.py").REAL_RED
+    copies = [
+        f"{path.name}:{name}"
+        for path in walk(ROOT / "scripts", "*.py")
+        for name, value in sets_of(load_script(path.name))
+        if value == canon and value is not canon
+    ]
+    assert copies == []
+
+
+def test_a_copy_of_the_red_set_is_seen_in_any_form() -> None:
+    """Обратная половина: копия списком, `set` и в классе — копия (взгляд на #1729)."""
+    canon = load_script("ci_complete.py").REAL_RED
+    holder = type("Хранитель", (), {"D": frozenset(tuple(canon)), "__module__": "копия"})
+    copy = SimpleNamespace(
+        __name__="копия",
+        A=frozenset(list(canon)),
+        B=set(canon),
+        C=canon,
+        Хранитель=holder,
+    )
+    said = {name for name, value in sets_of(copy) if value == canon and value is not canon}
+    assert said == {"A", "B", "Хранитель.D"}
+
+
+@pytest.mark.parametrize(
+    ("name", "said"),
+    [
+        ("ArtVsMark/Engineering-Incidents-Playbook", True),
+        ("artvsmark/engineering-incidents-playbook", True),
+        ("fork/Engineering-Incidents-Playbook", False),
+        ("", False),
+    ],
+)
+def test_one_catalogue_predicate(name: str, said: bool) -> None:
+    """«Дерево — сам каталог» — один предикат у долга и у гейта чужого «почему» (`42106cc`)."""
+    assert debt.catalogue.is_catalogue(name) is said
+    assert debt.catalogue_tree(name) is said

@@ -198,9 +198,12 @@ def kept_line(kept: list[tuple[str, int, str, str]], registry: int | None) -> st
     находки около двухсот, и при трёх сотнях копящихся план перестал бы
     записываться вовсе. Строка «находок на слитом копится: N» остаётся
     дословно: по ней навык `bundle-the-work` судит порог волны. Разбивка — по
-    весу и по зоне: по зоне режется волна, а рода у открытой находки нет — его
-    называет человек при разборе, и угадывать его здесь значило бы решить за
-    него (057).
+    весу и по зоне, и зона — МАСШТАБ, А НЕ НАРЕЗКА (взгляд на #1699): верхний
+    каталог кладёт почти всё в `scripts` и `tests` (волна 2, 28.10.2026: 39 и
+    15 из 91). Режет волну пересечение файлов (133), и его собирает чтение
+    реестра: связи «копия», «сосед», «тот же предикат» по месту находки не
+    видны. Рода у открытой находки нет — его называет человек при разборе, и
+    угадывать его здесь значило бы решить за него (057).
 
     СТРОКОЙ, А НЕ ЗАМЕТКОЙ: непустой источник 5 копящиеся находки делали и
     прежде, и шаг долга судит его по тем же строкам (`debt.FED_BY`) — счёт
@@ -281,6 +284,7 @@ def sources(
     # (3). Пока отказ доходил только до нулевого, третий получал пустой список
     # и выглядел полным (045).
     lagging_silent = ""
+    zero_silent = ""
     try:
         holding, lagging = debt.branch_debt(repo, token, listed)
         built[0] = Source(rows=[f"**{one}** — держит слияние" for one in holding])
@@ -302,7 +306,16 @@ def sources(
         )
         if unknown:
             broken.append("1")
-        fixing_main, fixing_red, held = zero_fixes(repo, token, red)
+        # ПОЧИНКИ — ЧЕТВЁРТЫЙ ВОПРОС К ПЛОЩАДКЕ, И ОТКАЗ ЕГО — РАЗДЕЛА 0
+        # (взгляд на #1661). Под общим `except` ниже он объявлял «не спрошены»
+        # разделы 1–2, а раздел 0, высший в плане, молча терял строки починок.
+        try:
+            fixing_main, fixing_red, held = zero_fixes(repo, token, red)
+        except ghrest.TransportError as exc:
+            fixing_main, fixing_red, held = [], [], set()
+            zero_silent = f"починки раздела 0 не спрошены: {exc}"
+            if "0" not in broken:
+                broken.append("0")
         built[2] = Source(
             rows=[
                 f"{one} — красное на своей голове"
@@ -313,7 +326,7 @@ def sources(
         main_rows = built[0].rows + fixing_main
         built[0] = Source(
             rows=main_rows + fixing_red,
-            unread=built[0].unread,
+            unread="; ".join(one for one in (built[0].unread, zero_silent) if one),
             groups=list(zip(ZERO_TITLES, (main_rows, fixing_red), strict=True)),
         )
     except ghrest.TransportError as exc:
@@ -427,13 +440,16 @@ def zero_fixes(repo: str, token: str, red: list[str]) -> tuple[list[str], list[s
             except agent_pr.NotRun as exc:
                 # НЕ СПРОШЕНО — НЕ «ЗЕЛЕНО» (039): строка остаётся с причиной.
                 main_rows.append(f"**#{number}** — чинит «{step}»; краснота не спрошена: {exc}")
+        # САМОССЫЛКА — НЕ ПАРА, с обеих сторон объявления (взгляд на #1729,
+        # 195): `check_open_limit.is_fix` её отсекает, и план отвечает на тот же
+        # вопрос так же — «#N держит #N» нет, и #N остаётся в разделе 2.
         for held in changerefs.fixes_red_in(body):
-            if held in reds:
+            if held in reds and held != number:
                 pairs[(number, held)] = None
         waits = changerefs.held_in(body)
         if number in reds and waits:
             for fix in ISSUE_RE.findall(waits):
-                if int(fix) in numbers:
+                if int(fix) in numbers and int(fix) != number:
                     pairs[(int(fix), number)] = None
     rows = [f"**#{fix}** — держит #{held}" for fix, held in pairs]
     return main_rows, rows, {held for _, held in pairs}
@@ -447,8 +463,14 @@ def rules_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None
     except ghrest.TransportError as exc:
         return Source(unread=f"«входящие» каталога не прочитаны: {exc}")
     numbers = debt.rules_debt(inbox)
+    note = debt.contract_note(inbox)
     if numbers is None and debt.catalogue_tree(repo):
-        return Source(note=debt.CATALOGUE_TREE)
+        # ОДИН ОТВЕТ С ШАГОМ ДОЛГА (взгляд на #1669): на дереве каталога чисел
+        # нет по построению, но разошедшийся контракт `debt.rules_left`
+        # считает долгом и здесь — план не теряет его строку.
+        return Source(
+            rows=[f"контракт разошёлся: {note}"] if note else [], note=debt.CATALOGUE_TREE
+        )
     if numbers is None:
         return Source(unread="числа каталога не найдены во «входящих»")
     tasks, queue, unheld = numbers
@@ -457,7 +479,6 @@ def rules_part(repo: str, token: str, listed: list[dict[str, Any]] | None = None
         rows.append(f"правил без ответа: **{queue}**")
     if unheld:
         rows.append(f"правил «действует, но не держится ничем»: **{unheld}**")
-    note = debt.contract_note(inbox)
     if note:
         rows.append(f"контракт разошёлся: {note}")
     said = debt.inbox_age(seen, inbox_note)
