@@ -200,7 +200,10 @@ def test_a_cyrillic_key_beside_the_trailers_keeps_the_tail_block() -> None:
     assert "Co-Authored-By: Кто <k@e.com>" in said
     assert "Навык: build-a-gate" in said
     assert body.tail_block("Тема\n\n1st: x\nCo-Authored-By: Кто <k@e.com>") == []
-    assert body.tail_block("Тема\n\nЗакрывает пункт: x\nCo-Authored-By: Кто <k@e.com>") == []
+    # Свой ключ из двух слов — трейлер (взгляд на #1709, `66be8d5`), чужая
+    # проза из двух слов с двоеточием — нет.
+    assert body.tail_block("Тема\n\nЗакрывает пункт: x\nCo-Authored-By: Кто <k@e.com>") != []
+    assert body.tail_block("Тема\n\nНапример так: x\nCo-Authored-By: Кто <k@e.com>") == []
 
 
 def test_the_tail_block_is_read_alike_by_the_body_and_the_attribution_gate() -> None:
@@ -217,7 +220,9 @@ def test_the_tail_block_is_read_alike_by_the_body_and_the_attribution_gate() -> 
     сообщения = {
         f"Тема\n\nНавык: x\n{соавтор}": True,
         f"Тема\n\nRod: x\n{соавтор}": True,
-        f"Тема\n\nЗакрывает пункт: x\n{соавтор}": False,
+        f"Тема\n\nЗакрывает пункт: x\n{соавтор}": True,
+        f"Тема\n\nЧинит красное: #5\n{соавтор}": True,
+        f"Тема\n\nНапример так: x\n{соавтор}": False,
         f"Тема\n\n1st: x\n{соавтор}": False,
         f"Тема\n\n{соавтор}\nи пара слов": False,
         f"Тема\n\nСм:https://x\n{соавтор}": False,
