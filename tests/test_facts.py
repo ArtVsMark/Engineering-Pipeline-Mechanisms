@@ -1448,7 +1448,11 @@ def test_the_badges_branch_keeps_only_what_is_published() -> None:
         "family-check.json",
         module.ARCHIVE,
         module.FAMILY_GATES,
+        module.SKILL_RECORDS,
     }
+    # Писатель записей навыков — другой шаг: имя сверяется с его константой (#1694).
+    records = load_script("skill_record.py").RECORDS
+    assert Path(records).name == module.SKILL_RECORDS, "уборка значков сотрёт записи навыков"
     assert "scripts.json" not in kept, "снятый значок остался допустимым на ветке"
     flow = (ROOT / ".github" / "workflows" / "badges.yml").read_text(encoding="utf-8")
     assert 'build_facts.py --prune "$pub/.github/badges"' in flow, "публикация не чистит каталог"
