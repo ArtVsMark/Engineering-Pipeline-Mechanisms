@@ -15,7 +15,7 @@ from typing import Any, Final
 
 import pytest
 
-from tests.conftest import ROOT, RunScript, load_script
+from tests.conftest import ROOT, RunScript, load_script, walk
 
 debt = load_script("debt.py")
 task_shape = load_script("task_shape.py")
@@ -1497,3 +1497,35 @@ def test_the_registry_read_names_its_number_and_the_debt_keeps_its_shape(
     said = [("abc1234", 5, "риск", "scripts/x.py:1 — раз")]
     assert debt.findings_registry("o/r", "t") == (23, said)
     assert debt.findings_debt("o/r", "t") == said
+
+
+def literal_sets(tree: ast.Module) -> list[frozenset[str]]:
+    """Наборы строк, записанные буквами: `frozenset({...})` и `{...}` в присваивании модуля."""
+    found = []
+    for node in tree.body:
+        value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+        if isinstance(value, ast.Call) and getattr(value.func, "id", "") == "frozenset":
+            value = value.args[0] if value.args else None
+        if isinstance(value, ast.Set) and all(
+            isinstance(one, ast.Constant) and isinstance(one.value, str) for one in value.elts
+        ):
+            found.append(frozenset(str(getattr(one, "value", "")) for one in value.elts))
+    return found
+
+
+def test_the_red_set_lives_in_one_place() -> None:
+    """Красное — одно на всех: набор `runs_series.REAL_RED` буквами не повторён (взгляд на #1691).
+
+    Копии в `main_red.py` и `schedules_seen.py` жили без гейта равенства и
+    разошлись бы молча. Судится РАВЕНСТВО набору, а не сходство: у
+    `python_badge.FAILED` (с `startup_failure`) и `headroom.TIMED` вопрос
+    другой, и они законны.
+    """
+    canon = load_script("runs_series.py").REAL_RED
+    copies = [
+        path.name
+        for path in walk(ROOT / "scripts", "*.py")
+        if path.name != "runs_series.py"
+        and canon in literal_sets(ast.parse(path.read_text(encoding="utf-8")))
+    ]
+    assert copies == []

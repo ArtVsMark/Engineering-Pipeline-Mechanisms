@@ -63,6 +63,7 @@ import ghrest
 import paths
 import pipeline_checks as policy
 import report
+import runs_series
 
 MARKER: Final = findings.marker("main-red")
 TITLE: Final = "Общая ветка: краснота"
@@ -136,8 +137,10 @@ class Flake:
 
 
 #: Исходы, которые считаются НАСТОЯЩИМ красным. Отменённая и пропущенная сюда не
-#: входят: пройденной ни одна не считается, но и отказом не является.
-REAL_RED: Final = frozenset({"failure", "timed_out", "action_required"})
+#: входят: пройденной ни одна не считается, но и отказом не является. Набор —
+#: ссылкой на один на всех (`runs_series.REAL_RED`), а не копией: копия здесь
+#: жила без гейта равенства (взгляд на #1691, 195).
+REAL_RED: Final = runs_series.REAL_RED
 
 #: Прогон, которым доказывается зелень общей ветки. Имя файла, а не номер
 #: площадки: номер в дереве не виден и сверить его нечем, а файл виден оба раза
