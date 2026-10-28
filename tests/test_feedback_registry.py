@@ -38,6 +38,13 @@ def uptake(*blocks: dict[str, Any], unread: tuple[str, ...] = ()) -> dict[str, A
     return {"projects": {"unread_repos": list(unread)}, "feedback": list(blocks)}
 
 
+def test_a_record_to_another_supplier_is_not_our_queue() -> None:
+    """Запись с чужим `supplier` в очередь не идёт: вердикт по ней пишет он (`fe6bb5a`)."""
+    other = {**record("hook"), "supplier": "o/catalogue"}
+    said = module.collected(uptake({"repo": "o/a", "records": [record(), other]}))
+    assert [row.key for row in said.rows] == ["o/a:false-refusal/x"]
+
+
 def test_records_broken_sections_and_unread_clones_are_read_apart() -> None:
     """Запись, битый раздел и непрочитанный клон — три разных состояния, а не одно «пусто»."""
     said = module.collected(
