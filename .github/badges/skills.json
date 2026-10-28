@@ -539,6 +539,37 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1733,
+   "merged_at": "2026-10-28",
+   "commit": "f46b84491efa767f616b359d86374bb601981ae8",
+   "touched": [
+    ".claude/skills/tell-the-supplier/SKILL.md",
+    ".pipeline.yml",
+    "changelog.d/feedback-supplier-field.added.md",
+    "docs/use/pipeline.md",
+    "scripts/family_uptake.py",
+    "scripts/feedback_form.py",
+    "scripts/feedback_registry.py",
+    "scripts/onboard.py",
+    "tests/test_feedback_form.py",
+    "tests/test_feedback_registry.py"
+   ],
+   "added": [
+    "changelog.d/feedback-supplier-field.added.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
