@@ -977,6 +977,41 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1770,
+   "merged_at": "2026-10-29",
+   "commit": "358cbebfc0d979b05c44e33875f6983577980c9c",
+   "touched": [
+    ".github/workflows/step-attribution-history.yml",
+    ".github/workflows/step-lint.yml",
+    "changelog.d/attribution-history-onboarding-commit.fixed.md",
+    "changelog.d/facts-without-release.fixed.md",
+    "changelog.d/lint-without-mypy-config.fixed.md",
+    "changelog.d/main-red-off-not-debt.fixed.md",
+    "scripts/facts_common.py",
+    "scripts/main_red.py",
+    "tests/test_attribution_history.py",
+    "tests/test_facts_common.py",
+    "tests/test_main_red.py",
+    "tests/test_reusable_steps.py",
+    "tests/test_type_leniency.py"
+   ],
+   "added": [
+    "changelog.d/attribution-history-onboarding-commit.fixed.md",
+    "changelog.d/facts-without-release.fixed.md",
+    "changelog.d/lint-without-mypy-config.fixed.md",
+    "changelog.d/main-red-off-not-debt.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
