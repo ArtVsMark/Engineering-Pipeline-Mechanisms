@@ -19,7 +19,9 @@ UP = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # 
 OLD = "      - uses: actions/checkout@v4\n"
 NEWER = "      - uses: actions/checkout@v8.0.0\n"
 BARE = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
-FAMILY = "      - uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/x.yml@v1.0.0\n"
+#: Действие семьи формой, которую `ACTION_USE` видит, — иначе случай «семья»
+#: зеленел бы при любом `own_prefixes` (поздний взгляд на #1734, `b0d4beb`).
+FAMILY = "      - uses: ArtVsMark/some-action@v1.0.0\n"
 
 
 def git(repo: Path, *args: str) -> None:
@@ -62,6 +64,26 @@ def test_a_new_line_with_the_old_pin_is_refused(run_script: RunScript, tmp_path:
     done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
     assert done.code == pins.EXIT_FOUND, done.out + done.err
     assert "actions/checkout@v4" in done.out and "v7.0.1" in done.out
+
+
+@pytest.mark.parametrize(
+    "old",
+    [
+        "      - uses: github/codeql-action/init@v2\n",
+        '      - uses: "github/codeql-action@v2"\n',
+    ],
+    ids=["подкаталог", "кавычки"],
+)
+def test_every_form_of_an_old_pin_is_refused(
+    run_script: RunScript, tmp_path: Path, old: str
+) -> None:
+    """Подкаталог и кавычки — тот же прежний пин: разбор их видит (взгляд на #1739, 210)."""
+    up = "      - uses: github/codeql-action/analyze@v3\n"
+    repo = change(
+        tmp_path, {"a.yml": run_file(up)}, {"a.yml": run_file(up), "b.yml": run_file(old)}
+    )
+    done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
+    assert done.code == pins.EXIT_FOUND, done.out + done.err
 
 
 @pytest.mark.parametrize(
