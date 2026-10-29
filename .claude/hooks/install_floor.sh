@@ -40,6 +40,10 @@ if ! command -v "python$want" >/dev/null 2>&1; then
       && ln -sf "$("$floor_uv/bin/uv" python find "$want")" "/usr/local/bin/python$want"; } \
     || warn "Python $want не поставлен"
 fi
+# Сочетание доводов замерено настоящим uv, а не только подделкой пробы
+# (взгляд на #1777, 107): 29.10.2026, uv 0.11.32, `uv pip install --dry-run
+# --python /usr/bin/python3.12 --system --break-system-packages "pyyaml>=6,<7"`
+# — код 0, «Would install 1 package: pyyaml==6.0.3».
 if command -v "python$want" >/dev/null 2>&1 && ! "python$want" -c 'import yaml' 2>/dev/null; then
   { uv_ready \
       && "$floor_uv/bin/uv" pip install -q --python "$(command -v "python$want")" \
