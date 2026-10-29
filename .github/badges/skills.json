@@ -782,6 +782,40 @@
     "bundle-the-work"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1747,
+   "merged_at": "2026-10-29",
+   "commit": "21dfae4b6943bc923bbe157b52477638ad261881",
+   "touched": [
+    ".claude/hooks/bundle_hint.py",
+    ".claude/hooks/push_guard.py",
+    ".claude/hooks/skill_log.py",
+    ".github/workflows/badges.yml",
+    ".github/workflows/ci.yml",
+    "changelog.d/kit-hooks-default-ruff.fixed.md",
+    "changelog.d/push-guard-pushed-tree.fixed.md",
+    "docs/use/onboarding.md",
+    "tests/test_onboard.py",
+    "tests/test_push_guard.py"
+   ],
+   "added": [
+    "changelog.d/kit-hooks-default-ruff.fixed.md",
+    "changelog.d/push-guard-pushed-tree.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
