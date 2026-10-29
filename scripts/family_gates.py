@@ -256,13 +256,17 @@ def render_issue(said: dict[str, Any], reasons: dict[Reason, list[str]] | None =
             lines.append(f"{DATED[1]} {datetime.now(UTC).strftime('%d.%m.%Y')}.")
         for row in rows:
             if isinstance(row, dict):
-                origin = f" · от `{row['origin']}`" if row.get("origin") else ""
+                # ПОЛЯ СТРОКИ КАРТЫ — ДАННЫЕ СОСЕДА, как замер и след (взгляд на
+                # #1730, 195): кодом строки, без упоминаний и ссылок (085).
+                quoted = feedback_registry.quoted
+                origin = f" · от {quoted(row['origin'])}" if row.get("origin") else ""
                 why = reason_of(row, reasons) if key == "rework" else ""
                 lines.append(
-                    f"- {row['rule']} · {row['repo']} · `{row.get('where') or '—'}`{origin}{why}"
+                    f"- {quoted(row['rule'])} · {quoted(row['repo'])}"
+                    f" · {quoted(row.get('where') or '—')}{origin}{why}"
                 )
             else:
-                lines.append(f"- {row}")
+                lines.append(f"- {feedback_registry.quoted(row)}")
     return "\n".join(lines) + "\n"
 
 
