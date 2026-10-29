@@ -573,6 +573,7 @@ def test_types_judge_nothing_without_a_mypy_config(
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
         check=False,
     )
