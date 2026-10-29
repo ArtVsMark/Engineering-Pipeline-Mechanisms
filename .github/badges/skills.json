@@ -866,6 +866,30 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1754,
+   "merged_at": "2026-10-29",
+   "commit": "016b4b73e06a1671c265a7d5e92942fc8fab059a",
+   "touched": [
+    "changelog.d/drift-platform-own-runs.fixed.md",
+    "scripts/drift.py",
+    "tests/test_drift.py"
+   ],
+   "added": [
+    "changelog.d/drift-platform-own-runs.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
