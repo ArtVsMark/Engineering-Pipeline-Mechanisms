@@ -19,7 +19,9 @@ UP = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # 
 OLD = "      - uses: actions/checkout@v4\n"
 NEWER = "      - uses: actions/checkout@v8.0.0\n"
 BARE = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
-FAMILY = "      - uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/x.yml@v1.0.0\n"
+#: Действие семьи формой, которую `ACTION_USE` видит, — иначе случай «семья»
+#: зеленел бы при любом `own_prefixes` (поздний взгляд на #1734, `b0d4beb`).
+FAMILY = "      - uses: ArtVsMark/some-action@v1.0.0\n"
 
 
 def git(repo: Path, *args: str) -> None:
