@@ -13,6 +13,7 @@
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import time
@@ -389,7 +390,41 @@ def test_the_tools_come_from_the_running_interpreter(tmp_path: Path) -> None:
     ровно так этот механизм и упал в первом же заходе.
     """
     room = preflight.environment()
-    assert room["PATH"].startswith(str(Path(preflight.sys.executable).parent))
+    first, tools, *_ = room["PATH"].split(preflight.os.pathsep)
+    assert first == str(preflight.shims(preflight.sys.executable))
+    assert tools == str(Path(preflight.sys.executable).parent)
+
+
+def test_a_bare_python_in_a_step_is_the_running_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Голый `python` блока шага — интерпретатор запуска, а не сосед по папке (#1767).
+
+    У потребителя запускатель зовёт `/usr/bin/python3.14`, а `/usr/bin/python`
+    рядом — системный, ниже планки: блоки шагов падали ложным `SyntaxError`.
+    Здесь сосед — подделка, говорящая «чужой».
+    """
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    running = folder / "python3.99"
+    running.write_text(f'#!/bin/sh\nexec "{preflight.sys.executable}" "$@"\n', encoding="utf-8")
+    # Оба имени подменены: откат любой из двух прокладок краснеет (взгляд на #1772).
+    strangers = [folder / name for name in preflight.PYTHON_NAMES]
+    for one in strangers:
+        one.write_text("#!/bin/sh\necho чужой\nexit 3\n", encoding="utf-8")
+    for one in (running, *strangers):
+        one.chmod(0o755)
+    monkeypatch.setattr(preflight.sys, "executable", str(running))
+    done = subprocess.run(
+        ["bash", "-c", "python -c 'print(\"свой\")' && python3 -c 'print(\"свой\")'"],
+        env=preflight.environment(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0 and done.stdout.split() == ["свой", "свой"], done
 
 
 # --- команда берётся блоком, а не строкой из середины -------------------------
@@ -1767,3 +1802,62 @@ def test_switched_off_reads_the_supplier_path(
     monkeypatch.setattr(preflight.pipeline_checks, "load", load)
     preflight.switched_off(tmp_path, tmp_path / "выкачка")
     assert seen == [tmp_path / "выкачка"]
+
+
+def test_a_bare_tool_in_a_step_runs_on_the_running_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Голый `pytest` блока шага — модуль интерпретатора запуска, а не сосед (взгляд на #1772).
+
+    У потребителя `/usr/bin/pytest` идёт системным `python3` ниже планки.
+    """
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    running = folder / "python3.98"
+    running.write_text(f'#!/bin/sh\nexec "{preflight.sys.executable}" "$@"\n', encoding="utf-8")
+    stranger = folder / "pytest"
+    stranger.write_text("#!/bin/sh\necho чужой\nexit 3\n", encoding="utf-8")
+    for one in (running, stranger):
+        one.chmod(0o755)
+    monkeypatch.setattr(preflight.sys, "executable", str(running))
+    done = subprocess.run(
+        ["bash", "-c", "pytest --version"],
+        env=preflight.environment(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0 and "чужой" not in done.stdout, done
+
+
+#: Строка установки шага и её пакеты — без версий и ключей.
+PIP_INSTALL = re.compile(r"python -m pip install\s+(?P<rest>.+)")
+
+
+def test_every_bare_tool_of_the_steps_has_a_shim() -> None:
+    """Инструмент, что шаг ставит и зовёт голым словом, есть в `STEP_TOOLS` (взгляд на #1772).
+
+    Иначе новый голый инструмент снова пойдёт соседом по папке интерпретатора.
+    """
+    root = Path(__file__).resolve().parents[1]
+    installed: set[str] = set()
+    called: set[str] = set()
+    texts = [
+        one.read_text(encoding="utf-8") for one in (root / ".github" / "workflows").glob("*.yml")
+    ]
+    for text in texts:
+        for match in PIP_INSTALL.finditer(text):
+            for word in match["rest"].split():
+                name = re.split(r"[<>=\[]", word.strip("\"'"), maxsplit=1)[0]
+                if re.fullmatch(r"[A-Za-z][\w.-]*", name):
+                    installed.add(name)
+    assert {"pytest", "ruff", "mypy"} <= installed, installed
+    for text in texts:
+        for line in text.splitlines():
+            first = line.strip().removeprefix("run:").split()[:1]
+            if first and first[0] in installed:
+                called.add(first[0])
+    assert called, "ни одного голого инструмента не найдено — разбор сломан"
+    assert called <= set(preflight.STEP_TOOLS), called - set(preflight.STEP_TOOLS)
