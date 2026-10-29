@@ -295,3 +295,20 @@ def test_an_unknown_self_lets_nothing_through(repo: Path, monkeypatch: pytest.Mo
         SIGN.format("o/поставщик") + '"""Гейт."""\n', encoding="utf-8"
     )
     assert module.silent(["scripts/check_kit.py"], repo) == (["scripts/check_kit.py"], [])
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        (THIN.format("o/поставщик"), True),
+        (THIN.format("o/свой"), False),
+        ("on: push\njobs:\n  a:\n    uses: ./.github/workflows/x.yml\n", False),
+        ("on: push\njobs: {}\n", False),
+        ("jobs: [", False),
+    ],
+    ids=["чужой-вызов", "вызов-своего", "свой-путь", "без-джобов", "не-разбирается"],
+)
+def test_calls_only_knows_a_thin_caller(tmp_path: Path, text: str, said: bool) -> None:
+    """Тонкий вызов — каждый джоб зовёт чужой переиспользуемый прогон; прочее — нет."""
+    (tmp_path / "ci.yml").write_text(text, encoding="utf-8")
+    assert module.calls_only(tmp_path, "ci.yml", "o/свой") is said

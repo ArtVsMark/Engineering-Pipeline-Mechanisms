@@ -103,10 +103,10 @@ from pathlib import Path, PurePosixPath
 from typing import Final
 
 import check_new_is_tested as neighbour
+import check_workflow_forms as forms
 import gitcall
 import main_guard
 import onboard
-import yaml
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -221,8 +221,9 @@ def added_mechanisms(base: str) -> list[str]:
 
 
 #: Адрес поставщика в строке подписи заготовки: `… — https://github.com/<владелец>/<репо>`.
+#: Форма строки — `onboard.licensed`; здесь только её разбор.
 SIGNED_BY: Final = re.compile(
-    rf"{re.escape(onboard.LICENSE_ID)} — https://github\.com/([\w.-]+/[\w.-]+)"
+    rf"{re.escape(onboard.LICENSE_ID)} — https://github.com/([\w.-]+/[\w.-]+)"
 )
 
 
@@ -234,24 +235,28 @@ def supplier_of(path: str, text: str) -> str:
     return said[1] if said else ""
 
 
-def calls_only(text: str, own: str) -> bool:
-    """Прогон, каждый джоб которого — вызов чужого переиспользуемого прогона: тонкий вызов."""
+def calls_only(root: Path, path: str, own: str) -> bool:
+    """Прогон, каждый джоб которого — вызов чужого переиспользуемого прогона: тонкий вызов.
+
+    Разбор прогона — общий (`check_workflow_forms`), а не свой: второй разбор
+    того же файла разошёлся бы с первым молча (214). Не разобран — не тонкий.
+    """
     try:
-        flow = yaml.safe_load(text)
-    except yaml.YAMLError:
+        _, said = forms.parsed(root, Path(path))
+    except forms.NotRun:
         return False
-    jobs = flow.get("jobs") if isinstance(flow, dict) else None
-    if not isinstance(jobs, dict) or not jobs:
+    jobs = forms.jobs_of(Path(path), said)
+    if not jobs:
         return False
     for job in jobs.values():
-        uses = str((job or {}).get("uses") or "") if isinstance(job, dict) else ""
+        uses = str(job.get("uses") or "")
         caller = "/".join(uses.split("@", 1)[0].split("/")[:2])
         if not uses or uses.startswith("./") or caller.lower() == own.lower():
             return False
     return True
 
 
-def connected(path: str, text: str, own: str) -> bool:
+def connected(root: Path, path: str, text: str, own: str) -> bool:
     """Механизм подключён готовым у поставщика — заход положил его, а не проект написал.
 
     ПОДКЛЮЧЁННОЕ ГОТОВЫМ — ТОЖЕ ОТВЕТ 162, и написан он подписью, а не абзацем
@@ -269,7 +274,7 @@ def connected(path: str, text: str, own: str) -> bool:
     signed = supplier_of(path, text)
     if signed:
         return signed.lower() != own.lower()
-    return path.endswith((".yml", ".yaml")) and calls_only(text, own)
+    return path.endswith((".yml", ".yaml")) and calls_only(root, path, own)
 
 
 def silent(paths: list[str], root: Path) -> tuple[list[str], list[str]]:
@@ -282,7 +287,7 @@ def silent(paths: list[str], root: Path) -> tuple[list[str], list[str]]:
             text = (root / one).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise neighbour.NotRun(f"механизм {one} не прочитан: {exc}") from exc
-        if connected(one, text, own):
+        if connected(root, one, text, own):
             ready.append(one)
         elif not recorded(text):
             quiet.append(one)
