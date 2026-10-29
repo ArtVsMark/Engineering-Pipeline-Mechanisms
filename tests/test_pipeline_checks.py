@@ -219,7 +219,7 @@ def test_the_supplier_is_named_by_the_origin_of_its_clone(tmp_path: Path) -> Non
 
 def test_the_own_version_outside_the_window_is_refused(tmp_path: Path) -> None:
     """У поставщика без выкачки версия — своя, из дерева: окно сверяется и у нас."""
-    path = answered(tmp_path)
+    path = answered(mechanisms(tmp_path))
     (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
     with pytest.raises(policy.BadPolicy, match="вне объявленного диапазона"):
         policy.load(path)
@@ -1315,7 +1315,7 @@ def test_span_names_a_broken_yaml(tmp_path: Path) -> None:
 
 def test_a_contract_version_not_in_utf8_is_a_refusal(tmp_path: Path) -> None:
     """`CONTRACT_VERSION` не в UTF-8 — `BadPolicy` у `contract_of` (взгляд на #1593)."""
-    (tmp_path / "CONTRACT_VERSION").write_bytes("1.0.0 ы\n".encode("cp1251"))
+    (mechanisms(tmp_path) / "CONTRACT_VERSION").write_bytes("1.0.0 ы\n".encode("cp1251"))
     with pytest.raises(policy.BadPolicy, match="версия контракта"):
         policy.contract_of(tmp_path, None)
 
@@ -1508,16 +1508,41 @@ def test_a_tag_outside_the_window_still_refuses_beside_an_own_number(tmp_path: P
 def test_the_release_step_keeps_the_consumers_own_number(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Шаг выпуска ведёт номер потребителя в его дереве, не трогая номер механизмов (#1774)."""
+    """Настоящий `do_release` ведёт номер потребителя, номер механизмов не тронут (#1774).
+
+    Поверхность тронута — шаг выпуска сам поднимает `CONTRACT_VERSION`
+    потребителя; окно механизмов по-прежнему читается у выкачки. Коммит,
+    тег и журнал подменены: предмет здесь — какой номер пишет выпуск.
+    """
     release = load_script("release.py")
     consumer = tmp_path / "consumer"
     consumer.mkdir()
     (consumer / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     supplier = supplier_at(tmp_path / "mechanisms", "0.1.7")
     monkeypatch.chdir(consumer)
-    assert release.declared_version() == "0.1.0"
-    after = release.next_contract("0.1.0", touched=True, breaking=False)
-    release.paths.VERSION.write_text(f"{after}\n", encoding="utf-8")
-    assert (consumer / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == after != "0.1.0"
+    monkeypatch.setattr(release, "git", lambda *a: "")
+    monkeypatch.setattr(release.build_changelog, "main", lambda argv: 0)
+    monkeypatch.setattr(release.build_changelog, "do_release", lambda version: None)
+    monkeypatch.setattr(release, "fragments", lambda: [Path("a.contract.md")])
+    monkeypatch.setattr(release, "touches_contract", lambda waiting: ["a.contract.md"])
+    monkeypatch.setattr(release.check_version, "rewrite_markers", lambda *a: [])
+    monkeypatch.setattr(release, "staying", lambda waiting: [])
+    release.do_release("0.2.0")
+    own = (consumer / "CONTRACT_VERSION").read_text(encoding="utf-8").strip()
+    assert own == release.next_contract("0.1.0", touched=True) != "0.1.0", own
     assert (supplier / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == "0.1.7"
     assert policy.contract_of(consumer, supplier) == "0.1.7"
+
+
+def test_a_consumer_without_a_supplier_has_nothing_to_compare(tmp_path: Path) -> None:
+    """Поставщика нет — номер потребителя окном не сверяется: `None` (взгляд на #1778)."""
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / "CONTRACT_VERSION").write_text("9.0.0\n", encoding="utf-8")
+    assert policy.contract_of(consumer, None) is None
+
+
+def test_carries_mechanisms_is_the_module_in_scripts(tmp_path: Path) -> None:
+    """Дерево с механизмами узнаётся по файлу модуля в `scripts/` (#1774)."""
+    assert not policy.carries_mechanisms(tmp_path)
+    assert policy.carries_mechanisms(mechanisms(tmp_path))
