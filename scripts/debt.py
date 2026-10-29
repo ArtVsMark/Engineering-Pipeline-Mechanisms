@@ -424,12 +424,13 @@ def stuck_changes(repo: str, token: str) -> tuple[list[str], list[str], list[str
         )
         if not runs:
             continue
-        # КРАСНОЕ — ТО ЖЕ, ЧТО У ОЧЕРЕДИ И ПРЕДЕЛА ТРЁХ (`runs_series.REAL_RED`,
-        # находка `77192d6`): прежде долг считал красным одно `failure`, и
-        # изменение с `timed_out` выпадало из раздела 2 и из пар раздела 0б,
-        # хотя предел трёх его красным считал (090, 195). Соседи с тем же
-        # набором — `main_red.REAL_RED` и `schedules_seen.FELL` — ссылаются на
-        # него же, и копию буквами держит гейт `test_the_red_set_lives_in_one_place`.
+        # КРАСНОЕ — ТО ЖЕ, ЧТО У ОЧЕРЕДИ И ПРЕДЕЛА ТРЁХ (находка `77192d6`):
+        # прежде долг считал красным одно `failure`, и изменение с `timed_out`
+        # выпадало из раздела 2 и из пар раздела 0б, хотя предел трёх его
+        # красным считал (090, 195). Канон набора — `ci_complete.REAL_RED`;
+        # `runs_series.REAL_RED`, `main_red.REAL_RED` и `schedules_seen.FELL` —
+        # ссылки на него (взгляд на #1729), копию буквами держит гейт
+        # `test_the_red_set_lives_in_one_place`.
         worst = ci_complete.worst_per_name(runs)
         if any(one.get("conclusion") in runs_series.REAL_RED for one in worst):
             red.append(said)
