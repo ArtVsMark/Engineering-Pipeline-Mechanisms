@@ -30,6 +30,7 @@ import atexit
 import dataclasses
 import functools
 import hashlib
+import importlib.util
 import os
 import platform
 import re
@@ -494,6 +495,10 @@ def plain(line: str) -> str:
 
 #: Имена, под которыми блок шага зовёт интерпретатор голым словом.
 PYTHON_NAMES: Final = ("python", "python3")
+#: Инструменты, которые блоки шагов зовут голым словом: `pytest` (`ci.yml`),
+#: `ruff` и `mypy` (`step-lint.yml`). Перечень сверяет с прогонами тест по
+#: дереву — новый голый инструмент без прокладки краснеет там.
+STEP_TOOLS: Final = ("pytest", "ruff", "mypy")
 
 
 @functools.cache
@@ -510,14 +515,28 @@ def shims(executable: str) -> Path:
     окружение по пути, которым его вызвали: ссылка из чужой папки на
     `.venv/bin/python` потеряла бы `pyvenv.cfg`, а с ним пакеты окружения.
 
+    ИНСТРУМЕНТЫ — ТЕМ ЖЕ ПУТЁМ (взгляд на #1772, 195). Голый `pytest` из
+    `/usr/bin` идёт системным `python3` — тот же ложный `SyntaxError` на
+    соседнем слове. Инструмент, чей модуль у интерпретатора запуска есть,
+    получает прокладку `exec <интерпретатор> -m <инструмент>`; модуля нет —
+    прокладки нет, и слово ищется по `PATH`, как прежде. Модуль спрашивается у
+    ЭТОГО процесса: ``executable`` — его же `sys.executable`.
+
     Каталог — свой на процесс (`mkdtemp`: имя не угадать, права только
     владельцу), стирается на выходе.
     """
     where = Path(tempfile.mkdtemp(prefix="preflight-python-"))
     atexit.register(shutil.rmtree, where, True)
-    for name in PYTHON_NAMES:
+    runner = shlex.quote(executable)
+    lines = {name: f'exec {runner} "$@"' for name in PYTHON_NAMES}
+    lines |= {
+        tool: f'exec {runner} -m {tool} "$@"'
+        for tool in STEP_TOOLS
+        if importlib.util.find_spec(tool) is not None
+    }
+    for name, line in lines.items():
         shim = where / name
-        shim.write_text(f'#!/bin/sh\nexec {shlex.quote(executable)} "$@"\n', encoding="utf-8")
+        shim.write_text(f"#!/bin/sh\n{line}\n", encoding="utf-8")
         shim.chmod(0o700)
     return where
 
