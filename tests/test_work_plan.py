@@ -1798,8 +1798,12 @@ def test_the_plan_rebuilds_after_every_run_that_writes_the_registry() -> None:
     plan = flow("work-plan.yml")
     # `on:` YAML 1.1 читает как True.
     assert "review" in plan[True]["workflow_run"]["workflows"], "уборка реестра плана не будит"
+    # ТОЧНАЯ ФОРМА, А НЕ ПОДСТРОКА (взгляд на #1736): `"pull_request" in` прошло
+    # бы и на `!= 'pull_request'` — то есть на взгляде, реестра не пишущем.
     writes = flow("step-review.yml")["jobs"]["findings"].get("if", "")
-    assert "pull_request" in writes, "взгляд по изменению реестр больше не пишет — пересмотреть"
+    assert writes == "github.event_name == 'pull_request'", (
+        f"условие записи реестра сменилось ({writes!r}) — пересмотреть посылку плана"
+    )
     assert "if" not in plan["jobs"]["work-plan"], "условие отсекло бы прогон, пишущий реестр"
     assert "workflow_dispatch" in plan[True], "ручная кнопка отсечена (104)"
 
