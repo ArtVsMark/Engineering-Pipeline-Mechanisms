@@ -1184,6 +1184,48 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1785,
+   "merged_at": "2026-10-30",
+   "commit": "0a35ad858a07f76e0522582f9490f1ca0c2830b8",
+   "touched": [
+    ".github/workflows/handover-probe.yml",
+    "changelog.d/findings-wave-sweep.fixed.md",
+    "kit/data/.github/dependabot.yml",
+    "scripts/breaking_notice.py",
+    "scripts/check_asked_family.py",
+    "scripts/check_decisions_edit.py",
+    "scripts/debt.py",
+    "scripts/deps_intercept.py",
+    "scripts/drift.py",
+    "scripts/family_gates.py",
+    "scripts/family_uptake.py",
+    "scripts/feedback_form.py",
+    "scripts/gitcall.py",
+    "scripts/unlooked.py",
+    "tests/test_action_pins.py",
+    "tests/test_breaking_notice.py",
+    "tests/test_decisions_edit.py",
+    "tests/test_drift.py",
+    "tests/test_family_gates.py",
+    "tests/test_family_pinning.py",
+    "tests/test_family_uptake.py",
+    "tests/test_steps_get_their_token.py",
+    "tests/test_unlooked.py"
+   ],
+   "added": [
+    "changelog.d/findings-wave-sweep.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
