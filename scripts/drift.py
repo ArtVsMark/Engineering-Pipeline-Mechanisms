@@ -1337,27 +1337,29 @@ WARNING_LEVELS: Final = ("warning", "notice")
 #: Кириллица в тексте аннотации — признак, что её написали МЫ.
 OURS_RE: Final = re.compile(r"[а-яё]", re.IGNORECASE)
 
-#: Событие прогона, который площадка запускает САМА, без файла в дереве:
+#: Набор проверок, который площадка запускает САМА, без файла в дереве:
 #: обновление Dependabot (`dynamic/dependabot/dependabot-updates`). Образ и
 #: действия ему выбирает она, и правкой дерева его предупреждение не снять
-#: (#1753, замер 29.10.2026: `ubuntu-latest` на проверке `Dependabot`, когда все
-#: `runs-on` дерева — `ubuntu-26.04`).
-PLATFORM_EVENT: Final = "dynamic"
+#: (#1753: `ubuntu-latest` на проверке `Dependabot`, когда все `runs-on`
+#: дерева — `ubuntu-26.04`). Узнаётся он по `rerequestable: false` у набора
+#: приложения действий — признаку, который читается правом `checks: read`,
+#: уже выданным дрейфу. Событие прогона (`event: dynamic`) точнее, но требует
+#: `actions: read`, а шаг общий: новое право сломало бы вызов у потребителя
+#: (взгляд на #1754). ЗАМЕР 29.10.2026, 40 голов общей ветки: наборов
+#: приложения действий 6926, неперезапускаемых 5 — все пять `Dependabot`,
+#: ложных среди наших ноль.
+ACTIONS_APP: Final = "github-actions"
 
 
-def platform_run(repo: str, token: str, run: dict[str, Any]) -> bool:
-    """Проверку дал прогон самой площадки (:data:`PLATFORM_EVENT`), а не прогон из дерева.
-
-    Проверка чужого приложения прогона действий не имеет — ответ пуст, и она
-    судится, как прежде.
-    """
-    suite = (run.get("check_suite") or {}).get("id")
-    if not suite:
-        return False
-    found = ghrest.request("GET", f"repos/{repo}/actions/runs?check_suite_id={suite}", token)
-    return any(
-        one.get("event") == PLATFORM_EVENT for one in (found or {}).get("workflow_runs") or []
-    )
+def platform_suites(repo: str, token: str, head: str) -> set[int]:
+    """Наборы проверок головы, которые дал прогон самой площадки (:data:`ACTIONS_APP`)."""
+    return {
+        int(one["id"])
+        for one in ghrest.paginate(
+            f"repos/{repo}/commits/{head}/check-suites", token, key="check_suites"
+        )
+        if (one.get("app") or {}).get("slug") == ACTIONS_APP and one.get("rerequestable") is False
+    }
 
 
 def platform_warnings(repo: str, token: str) -> list[Drift]:
@@ -1407,6 +1409,7 @@ def platform_warnings(repo: str, token: str) -> list[Drift]:
         raise NotRun(
             f"на голове {head[:7]} нет ни одной проверки — предупреждений спросить не у кого"
         )
+    theirs_suites = platform_suites(repo, token, head)
     asked: dict[str, dict[str, Any]] = {}
     for run in runs:
         if (run.get("output") or {}).get("annotations_count"):
@@ -1415,7 +1418,7 @@ def platform_warnings(repo: str, token: str) -> list[Drift]:
     for name, run in sorted(asked.items()):
         # ПРОГОН ПЛОЩАДКИ НЕ СУДИТСЯ, НО НАЗЫВАЕТСЯ (#1753, 045): запись дрейфа о
         # нём снять нечем, а молчание спрятало бы, что предупреждение было.
-        theirs = platform_run(repo, token, run)
+        theirs = (run.get("check_suite") or {}).get("id") in theirs_suites
         for note in ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", token):
             text = " ".join(str(note.get("message") or "").split())
             if note.get("annotation_level") not in WARNING_LEVELS or not text:
