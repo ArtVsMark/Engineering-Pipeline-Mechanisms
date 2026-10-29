@@ -528,3 +528,56 @@ def test_no_run_reads_or_runs_from_the_shared_tmp() -> None:
 def test_the_shared_tmp_is_told_from_a_variable_tail(line: str, shared: bool) -> None:
     """Общий каталог ловится и как `/var/tmp`; хвост переменной — не он."""
     assert bool(SHARED_TMP.search(line)) is shared
+
+
+def types_step() -> str:
+    """Блок шага «типы» общего `step-lint.yml` — как его исполнит площадка."""
+    flow = yaml.safe_load((STEPS / "step-lint.yml").read_text(encoding="utf-8"))
+    steps = flow["jobs"]["lint"]["steps"]
+    return str(next(step["run"] for step in steps if step.get("name") == "типы"))
+
+
+@pytest.mark.parametrize(
+    ("config", "called"),
+    [
+        ({}, False),
+        ({"pyproject.toml": "[project]\nname = 'x'\n"}, False),
+        ({"pyproject.toml": "[tool.mypy]\nfiles = ['a']\n"}, True),
+        ({"mypy.ini": "[mypy]\n"}, True),
+        ({".mypy.ini": "[mypy]\n"}, True),
+        ({"setup.cfg": "[mypy]\nfiles = a\n"}, True),
+    ],
+    ids=[
+        "без-настройки",
+        "pyproject-без-mypy",
+        "tool-mypy",
+        "mypy-ini",
+        "точка-mypy-ini",
+        "setup-cfg",
+    ],
+)
+def test_types_judge_nothing_without_a_mypy_config(
+    tmp_path: Path, config: dict[str, str], called: bool
+) -> None:
+    """Без настройки `mypy` шаг «типы» — «судить нечего» и зелёный; с ней зовёт `mypy` (#1758)."""
+    for name, text in config.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "mypy").write_text("#!/bin/sh\necho mypy-called\nexit 7\n", encoding="utf-8")
+    (fake / "mypy").chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"}
+    done = subprocess.run(
+        ["bash", "-e", "-c", types_step()],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if called:
+        assert done.returncode == 7 and "mypy-called" in done.stdout, done
+    else:
+        assert done.returncode == 0 and "судить нечего" in done.stdout, done
+        assert "mypy-called" not in done.stdout

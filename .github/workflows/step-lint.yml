@@ -51,4 +51,18 @@ jobs:
       - name: формат
         run: ruff format --check
       - name: типы
-        run: mypy
+        # ЦЕЛИ `mypy` ЗАДАЁТ ЕГО НАСТРОЙКА, и без неё судить нечего (#1758). У
+        # потребителя без своего Python голый `mypy` падал «Missing target
+        # module» кодом 2 на каждом изменении — замер EPL 29.10.2026, проба
+        # #1558 — и выход оставался один: выключить весь `lint` с `ruff`
+        # вместе. Нет настройки — вердикт назван строкой, а не пропущен молча
+        # (045); настройка есть, а целей нет — это ошибка настройки, и `mypy`
+        # её скажет сам.
+        run: |
+          if [ -f mypy.ini ] || [ -f .mypy.ini ] \
+            || grep -qs '^\[tool\.mypy\]' pyproject.toml \
+            || grep -qs '^\[mypy\]' setup.cfg; then
+            mypy
+          else
+            echo "судить нечего: настройки mypy нет (mypy.ini, .mypy.ini, [tool.mypy], [mypy]) — типы не проверяются"
+          fi
