@@ -2,8 +2,8 @@
   "schema": "2.2",
   "schema_of": "договор фактов семьи ArtVsMark/Engineering-Pipeline-Mechanisms — export/facts/facts-contract.md",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-29T15:24:10+00:00",
-  "commit": "7d4fd308bc028c90024a1ff61a311846f2bbf85e",
+  "generated_at": "2026-10-29T17:23:48+00:00",
+  "commit": "b705f93820a4bf862ce50d35b0191bce69ddadd4",
   "ci": {
     "workflow": "ci.yml"
   },
@@ -19,11 +19,11 @@
       "ubuntu-26.04"
     ]
   },
-  "version": "1.13.3",
+  "version": "1.13.4",
   "release": "1.13",
   "coverage_percent": 94.4,
   "tests": {
-    "functions": 4831,
+    "functions": 4834,
     "modules": 206
   },
   "checks_per_pr": {
@@ -68,8 +68,8 @@
       "schema_of": "общий шаг фактов механизмов: детали покрытия и полнота версии",
       "coverage": {
         "read": true,
-        "covered": 19887,
-        "lines": 21066
+        "covered": 19905,
+        "lines": 21084
       },
       "version_whole": true
     },
@@ -78,11 +78,11 @@
       "schema_of": "числа поставщика механизмов: разрез семьи и исполняемые скрипты",
       "family": {
         "schema_read": "1.7",
-        "snapshot_at": "2026-10-29T14:54:46+00:00",
+        "snapshot_at": "2026-10-29T16:28:08+00:00",
         "consumers": 6,
         "held_by_machine": 912,
         "adopted": {
-          "ours": 30,
+          "ours": 31,
           "of": 699,
           "by": [
             {
@@ -113,6 +113,12 @@
               "repo": "ArtVsMark/Engineering-Incidents-Playbook",
               "rule": "134",
               "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-rulebook-fresh.yml@c36d16b1abe8",
+              "kind": "called"
+            },
+            {
+              "repo": "ArtVsMark/Engineering-Incidents-Playbook",
+              "rule": "174",
+              "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-facts.yml@96c2c93b52cd",
               "kind": "called"
             },
             {
@@ -268,13 +274,13 @@
           ]
         },
         "origins": {
-          "pairs": 24,
-          "taken": 5,
+          "pairs": 25,
+          "taken": 6,
           "adapted": 19,
           "by_kind": {
             "adapted": 19,
             "copied": 0,
-            "called": 5
+            "called": 6
           },
           "undeclared": 0,
           "projects": {
@@ -448,6 +454,14 @@
             },
             {
               "repo": "ArtVsMark/Engineering-Incidents-Playbook",
+              "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-facts.yml",
+              "kind": "called",
+              "rules": [
+                "174"
+              ]
+            },
+            {
+              "repo": "ArtVsMark/Engineering-Incidents-Playbook",
               "mechanism": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-rulebook-fresh.yml",
               "kind": "called",
               "rules": [
@@ -500,10 +514,11 @@
             "unread_repos": []
           },
           "steps": {
-            "taken": 8,
+            "taken": 9,
             "of": 31,
             "names": [
               "automerge",
+              "facts",
               "journal",
               "lint",
               "pipeline",
@@ -528,6 +543,7 @@
             {
               "repo": "ArtVsMark/Engineering-Incidents-Playbook",
               "steps": [
+                "step-facts",
                 "step-journal",
                 "step-lint",
                 "step-pipeline",
