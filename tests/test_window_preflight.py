@@ -1861,3 +1861,16 @@ def test_every_bare_tool_of_the_steps_has_a_shim() -> None:
                 called.add(first[0])
     assert called, "ни одного голого инструмента не найдено — разбор сломан"
     assert called <= set(preflight.STEP_TOOLS), called - set(preflight.STEP_TOOLS)
+
+
+def test_a_tree_without_its_own_python_needs_no_interpreter(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Нет `pyproject.toml` — сверка говорит «не требуется» и проходит (#1763).
+
+    У журнала EPL своего Python нет, и сверка отказывала при каждом старте
+    окна. Отказ входа у `python_floor` остаётся: его зовут те, кому граница
+    нужна.
+    """
+    assert env.main(["--root", str(tmp_path)]) == env.EXIT_OK
+    assert "не требуется" in capsys.readouterr().out

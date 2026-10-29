@@ -111,7 +111,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -1000,6 +1000,9 @@ DATA_KITTED: Final = (
     # наполнением: число планки ставит заход, окружение проверки — проект.
     paths.FLOOR,
     paths.SESSION_START,
+    # #1763: порядок источников работы читают навыки окна (`paths.py behaviour`);
+    # заготовка — форма с местами «Наполнение проекта», порядок — проекта.
+    paths.BEHAVIOUR,
 )
 #: Что кладётся из НАШЕГО дерева как есть (#1554): хуки окна с ответом `as-is`
 #: и настройки, что подключают их к событиям площадки. Копия в `kit/data/` была
@@ -1152,7 +1155,6 @@ KIT_REFUSED: Final = {
     paths.SHOWCASE: "вопросы вашей витрины: наш набор отвечал бы о нашем проекте",
     paths.VENDOR_WATCH: "знание, снятое с кода ваших закреплений действий, а не наших",
     paths.WORKFLOW_FORMS: "исключения ваших прогонов, с вашими причинами; нет файла — нет их",
-    paths.BEHAVIOUR: "шаги называют документ ссылкой в сообщении; порядок работ — ваш",
     paths.RELEASE_DOC: "шаги называют документ ссылкой в сообщении; порядок выпуска — ваш",
     paths.DECISIONS: "записи ваших решений; пустой каталог законен",
     paths.ENTRANCE: "ваш вход: он называет ВАШЕ отданное; другой файл — разделом shipped",
@@ -1488,9 +1490,75 @@ def bindings_note(consumer: Path) -> str:
     if (consumer / answer).exists():
         return ""
     return (
-        f"`{answer}` нет: без него карта взгляда не собирается, и взгляд идёт без "
-        "карты. Заготовкой он не кладётся — это ответ проекта каталогу правил: "
-        "заведите его по договору ответа каталога."
+        f"`{answer}` нет: без него карта взгляда не собирается, `audit_profile.py` "
+        "отказывает, а навыки `answer-a-rule`, `audit-the-answers` и `close-a-finding` "
+        "молчат. Заготовкой он не кладётся — это ответ проекта каталогу правил: скелет "
+        f"собирает заход подключения КАТАЛОГА (`python scripts/onboard_consumer.py --repo "
+        f"<владелец/имя> --out <папка>` в клоне {CATALOGUE_REPO}, его `CONNECT.md`), "
+        "а заявка `consumer-announce` подаётся каталогу, когда ответ лёг на вашу "
+        "общую ветку (#1763)."
+    )
+
+
+def data_note(data: list[str]) -> str:
+    """Данные общих шагов, которых заготовка не кладёт, — построчно и с причиной.
+
+    Голый перечень путей через запятую не говорил, почему заготовки нет и что
+    заводить (#1763): причина берётся из `KIT_REFUSED`, у пути без неё —
+    только путь.
+    """
+    return "Данных общих шагов заготовка не кладёт — заведите их у себя:\n" + "\n".join(
+        f"  - {one}" + (f" — {KIT_REFUSED[Path(one)]}" if Path(one) in KIT_REFUSED else "")
+        for one in data
+    )
+
+
+#: Метка места, которое заготовка оставляет проекту: свод и данные её несут (#1763).
+FILLING: Final = "Наполнение проекта"
+
+
+def filling_note(consumer: Path, laid: Iterable[Path]) -> str:
+    """Положенные заготовки с местами «Наполнение проекта» — путь и число мест.
+
+    Заготовка кладёт форму, а перечень захода о её пустых местах молчал
+    (#1763): свод с девятью незаполненными разделами выглядел подключённым.
+    Пусто — пустая строка: о незаполненном нечего сказать.
+    """
+    counted = [
+        (one, text.count(FILLING))
+        for one in sorted(set(laid))
+        if (consumer / one).is_file()
+        and (text := (consumer / one).read_text(encoding="utf-8")).count(FILLING)
+    ]
+    if not counted:
+        return ""
+    return f"Места «{FILLING}» в положенном — заполните их своим:\n" + "\n".join(
+        f"  - {one}: {count}" for one, count in counted
+    )
+
+
+#: Каталог правил: подключение к нему и список семьи ведёт он (#1763).
+CATALOGUE_REPO: Final = "ArtVsMark/Engineering-Incidents-Playbook"
+
+
+def family_steps_note() -> str:
+    """Что заводится на площадке после захода — задача плана и объявления (#1763).
+
+    Заход идёт без площадки и ничего на ней не заводит (154), поэтому называет:
+    без живой задачи плана сборщик `work-plan` отказывает; без объявления у нас
+    смена контракта до вас не дойдёт, без объявления в каталоге проект не
+    виден списку семьи и значкам (`uptake`). Замер — проба #1558 на EPL.
+    """
+    return (
+        "На площадке заведите сами (заход туда не пишет, 154):\n"
+        "  - живую задачу плана работ — задачу с первой строкой тела "
+        f"`{findings.PLAN_MARKER}`: без неё прогон `work-plan` отказывает «живой "
+        "задачи плана нет»; тело дальше пишет сборщик;\n"
+        "  - объявление у поставщика механизмов — строкой в `.rules/consumers.json` "
+        "или обращением «подключился» (`docs/use/onboarding.md`, «Объявитесь»): иначе "
+        "оповещение о смене контракта до вас не дойдёт;\n"
+        f"  - объявление в каталоге правил ({CATALOGUE_REPO}, заявка "
+        "`consumer-announce`): иначе проект не виден списку семьи и значкам."
     )
 
 
@@ -2476,6 +2544,8 @@ def main(argv: list[str] | None = None) -> int:
             print(unwired)
         if unanswered := bindings_note(args.write):
             print(unanswered)
+        if unfilled := filling_note(args.write, [*files, *free, *laid]):
+            print(unfilled)
         if dormant := dormant_areas_note(args.write):
             print(dormant)
         if kept:
@@ -2496,11 +2566,12 @@ def main(argv: list[str] | None = None) -> int:
         if data is None:
             print(f"Перечень данных общих шагов не выведен: нет `{paths.PORTABLE}`.")
         elif data:
-            print("Данных общих шагов заготовка не кладёт — заведите их у себя: " + ", ".join(data))
+            print(data_note(data))
         else:
             print(
                 "Инвентарь переноса не называет данных, которые общие шаги читают из вашего дерева."
             )
+        print(family_steps_note())
         return EXIT_OK
 
     # ПЕЧАТЬ — ВТОРОЙ ПУТЬ ЗАГОТОВКИ К ПОТРЕБИТЕЛЮ (взгляд на #1487): целый файл
