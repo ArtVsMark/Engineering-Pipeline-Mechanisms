@@ -1071,6 +1071,41 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1776,
+   "merged_at": "2026-10-29",
+   "commit": "e979549e722f520034be239fa181a329efa0fd16",
+   "touched": [
+    ".claude/hooks/push_guard.sh",
+    ".github/workflows/step-facts.yml",
+    "changelog.d/consumer-family-manifest.added.md",
+    "changelog.d/push-guard-fallback-reads-command.fixed.md",
+    "scripts/build_facts.py",
+    "scripts/facts_common.py",
+    "scripts/publish_facts.py",
+    "tests/test_counting.py",
+    "tests/test_facts.py",
+    "tests/test_facts_common.py",
+    "tests/test_publish_facts.py",
+    "tests/test_push_guard.py",
+    "tests/test_reusable_steps.py"
+   ],
+   "added": [
+    "changelog.d/consumer-family-manifest.added.md",
+    "changelog.d/push-guard-fallback-reads-command.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
