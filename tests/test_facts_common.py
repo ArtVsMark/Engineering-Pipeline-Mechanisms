@@ -40,6 +40,78 @@ def test_a_consumer_without_its_own_numbers_gets_reasons_not_silence(tmp_path: P
     assert said["none"]["python"] == module.NO_MATRIX
 
 
+def committed(root: Path) -> Path:
+    """Дерево — репозиторий с одним коммитом, без тегов и без источника."""
+    import subprocess
+
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "init", "-q", "-b", "main"], check=True, timeout=60)
+    subprocess.run(
+        [
+            *run,
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "старт",
+        ],
+        check=True,
+        timeout=60,
+    )
+    return root
+
+
+def test_without_a_release_tag_the_release_is_a_reason(tmp_path: Path) -> None:
+    """Тега выпуска нет — `none.release`, а не `release: ""`: пустое договор не знает (#1761)."""
+    said = module.common(committed(tree(tmp_path)), sha="голова", repo=REPO, ci_workflow="ci.yml")
+    assert "release" not in said, said.get("release")
+    assert said["none"]["release"] == module.NO_RELEASE
+
+
+def test_an_unread_release_is_not_said_to_be_absent(tmp_path: Path) -> None:
+    """Отсутствие тега не доказано — «не прочитан», а не «тега нет» (взгляд на #1770, 045).
+
+    Не репозиторий: git не отвечает, и «выпусков нет» было бы непрочитанным,
+    выданным за отсутствие.
+    """
+    said = module.common(tree(tmp_path), sha="голова", repo=REPO, ci_workflow="ci.yml")
+    assert "release" not in said, said.get("release")
+    assert said["none"]["release"].startswith("выпуск не прочитан"), said["none"]["release"]
+
+
+def test_a_release_tag_gives_the_series(tmp_path: Path) -> None:
+    """Тег выпуска есть — серия `X.Y`, как прежде (#1761)."""
+    import subprocess
+
+    root = tree(tmp_path)
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "init", "-q", "-b", "main"], check=True, timeout=60)
+    subprocess.run(
+        [
+            *run,
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "старт",
+        ],
+        check=True,
+        timeout=60,
+    )
+    subprocess.run([*run, "tag", "v1.2.0"], check=True, timeout=60)
+    said = module.common(root, sha="голова", repo=REPO, ci_workflow="ci.yml")
+    assert said["release"] == "1.2"
+    assert "release" not in said.get("none", {})
+
+
 def test_an_own_key_does_not_override_a_common_one() -> None:
     """Свой генератор того же числа — отказ, а не перезапись (045)."""
     with pytest.raises(module.NotRun, match="перекрывает общие"):
@@ -498,3 +570,18 @@ def test_ours_reads_the_answer_where_the_table_puts_it(
     with pytest.raises(build.NotRun, match="вне дерева"):
         build.ours(tmp_path)
     assert len(seen) == 1, "битая таблица дошла до чтения ответа"
+
+
+@pytest.mark.parametrize(
+    ("why", "absent"),
+    [("none", True), ("shallow", False), ("unfetched", False), ("unasked", False)],
+)
+def test_release_absent_says_none_only_when_proven(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, why: str, absent: bool
+) -> None:
+    """«Тега нет» — только при доказанном отсутствии `version.absence` (взгляд на #1770)."""
+    monkeypatch.setattr(module.version, "absence", lambda _root: why)
+    said = module.release_absent(tmp_path)
+    assert (said == module.NO_RELEASE) is absent, said
+    if not absent:
+        assert why in said
