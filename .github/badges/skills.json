@@ -1226,6 +1226,38 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1786,
+   "merged_at": "2026-10-30",
+   "commit": "073f03fab0a00b7b0d5fdf6c36e98b97239b6d97",
+   "touched": [
+    ".github/workflows/step-facts.yml",
+    "changelog.d/facts-python-by-jobs.added.md",
+    "changelog.d/step-facts-family-reads-run-facts.fixed.md",
+    "changelog.d/step-facts-header-names-the-painter.fixed.md",
+    "scripts/facts_common.py",
+    "scripts/pipeline_checks.py",
+    "tests/test_facts_common.py",
+    "tests/test_reusable_steps.py"
+   ],
+   "added": [
+    "changelog.d/facts-python-by-jobs.added.md",
+    "changelog.d/step-facts-family-reads-run-facts.fixed.md",
+    "changelog.d/step-facts-header-names-the-painter.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "bundle-the-work"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
