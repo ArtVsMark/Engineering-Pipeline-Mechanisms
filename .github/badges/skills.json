@@ -816,6 +816,32 @@
     "bundle-the-work"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1750,
+   "merged_at": "2026-10-29",
+   "commit": "5fdc25bd198db796fddb2071c5b0436529b560cc",
+   "touched": [
+    "changelog.d/preflight-off-count.fixed.md",
+    "changelog.d/preflight-test-selection.fixed.md",
+    "scripts/pipeline_checks.py",
+    "scripts/preflight.py",
+    "tests/test_pipeline_checks.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/preflight-off-count.fixed.md",
+    "changelog.d/preflight-test-selection.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
