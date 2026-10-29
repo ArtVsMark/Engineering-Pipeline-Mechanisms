@@ -323,16 +323,18 @@ def ci_facts(
     if not python_matrix:
         return run, {"python": NO_MATRIX}
     flow, job = matrix_at(root, python_matrix)
-    # ДЖОБА МАТРИЦЫ НЕТ ВОВСЕ — СОСТОЯНИЕ, А НЕ ПОЛОМКА (#1766). Заготовка зовёт
-    # шаг с `python-matrix` и у потребителя без своего Python (EPL, проба
-    # #1558): причина названа своей, а не «матрица не прочитана» с
-    # предупреждением на каждом заходе.
+    # ДЖОБА МАТРИЦЫ НЕТ У ПРОЕКТА БЕЗ СВОЕГО PYTHON — СОСТОЯНИЕ, А НЕ ПОЛОМКА
+    # (#1766). Заготовка зовёт шаг с `python-matrix` и у потребителя без
+    # Python (EPL, проба #1558): причина своя, без предупреждения на каждом
+    # заходе. У проекта с `pyproject.toml` пропавший джоб — поломка
+    # (переименован, удалён): «не прочитана» с предупреждением, а не тихое
+    # «матрицы нет» (045). Признак тот же, что у `check_env.py` (#1763).
     try:
         listed = policy.run_of(flow).get("jobs") or {}
     except policy.BadPolicy as exc:
         print(f"warning: {exc}", file=sys.stderr)
         return run, {"python": UNREAD_MATRIX.format(flow.name)}
-    if job not in listed:
+    if job not in listed and not (root / "pyproject.toml").is_file():
         return run, {"python": NO_MATRIX_JOB.format(flow.name, job)}
     later, later_job = matrix_at(root, python_next) if python_next else (None, "")
     try:
