@@ -187,6 +187,8 @@ NOT_GIVEN: Final = "проект не отдал показатель во вх�
 NO_MATRIX: Final = "матрица версий Python не названа входом шага — версии не названы, а не пусты"
 #: Матрица названа, но не прочитана: причина для читателя витрины, а не трасса.
 UNREAD_MATRIX: Final = "матрица версий Python в {} не прочитана — версии не названы, а не пусты"
+#: Джоба матрицы в прогоне нет: проект Python не проверяет (#1766).
+NO_MATRIX_JOB: Final = "в {} нет джоба «{}» — матрицы версий Python у проекта нет"
 NO_VERSION: Final = "версия не выводится: в дереве нет ни тега выпуска, ни объявленной версии"
 
 EXIT_OK: Final = 0
@@ -316,6 +318,17 @@ def ci_facts(
     if not python_matrix:
         return run, {"python": NO_MATRIX}
     flow, job = matrix_at(root, python_matrix)
+    # ДЖОБА МАТРИЦЫ НЕТ ВОВСЕ — СОСТОЯНИЕ, А НЕ ПОЛОМКА (#1766). Заготовка зовёт
+    # шаг с `python-matrix` и у потребителя без своего Python (EPL, проба
+    # #1558): причина названа своей, а не «матрица не прочитана» с
+    # предупреждением на каждом заходе.
+    try:
+        listed = policy.run_of(flow).get("jobs") or {}
+    except policy.BadPolicy as exc:
+        print(f"warning: {exc}", file=sys.stderr)
+        return run, {"python": UNREAD_MATRIX.format(flow.name)}
+    if job not in listed:
+        return run, {"python": NO_MATRIX_JOB.format(flow.name, job)}
     later, later_job = matrix_at(root, python_next) if python_next else (None, "")
     try:
         run["python"] = python_facts(flow, job, later, later_job)
