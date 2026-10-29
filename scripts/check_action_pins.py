@@ -185,7 +185,8 @@ def look(base: str) -> tuple[list[str], list[str]]:
     # ArtVsMark/Engineering-Pipeline-Mechanisms#1734, `7ca7778`): откат действия во
     # всех строках — с `v7.0.1` на `v6`, потому что выпуск сломан, — оставляет
     # старшую версию только в базе, и сравнение с базой краснело бы на нём без
-    # обхода. Случай #1674 голова видит так же: поднятые строки в ней остались.
+    # обхода. Случай ArtVsMark/Engineering-Pipeline-Mechanisms#1674 голова видит так же:
+    # поднятые строки в ней остались.
     names = gitcall.output(["ls-tree", "-r", "-z", "--name-only", "HEAD", "--", workflows], NotRun)
     runs = [name for name in names.split("\0") if name.endswith((".yml", ".yaml"))]
     # Один вызов на все файлы: `git show` отдаёт блобы подряд.
