@@ -68,8 +68,10 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     # Номер — договора, а не наш (#1337, #1396), и берётся у константы, а не
     # вписывается здесь второй раз: подъём 2.0 → 2.1 (#1563) иначе краснел бы тут.
     assert collected["schema"] == facts.SCHEMA
-    # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
-    assert collected["none"]["python"] == facts.NO_PYTHON
+    # В синтетическом дереве нет джоба матрицы CI — значит причина, а не пропуск (#1766).
+    assert collected["none"]["python"] == facts.common.NO_MATRIX_JOB.format(
+        facts.CI_FLOW.name, facts.SUPPORTED_JOB
+    )
     assert collected["generated_at"].endswith("+00:00")
 
 
@@ -145,6 +147,7 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
     (tmp_path / facts.VERSION_FILE).write_text("0.7.3\n", encoding="utf-8")
     gives = {"steps": "0.7", "facts": facts.facts_number()}
     assert facts.manifest_facts(tmp_path) == {"release": None, "gives": gives}
+    assert facts.release_of(tmp_path) is None
     git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "add", "."], check=True)
     subprocess.run([*git, "commit", "-qm", "c"], check=True)
@@ -153,6 +156,7 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
         [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8"
     ).stdout.strip()
     assert facts.manifest_facts(tmp_path)["release"] == {"tag": "v1.5.0", "sha": sha}
+    assert facts.release_of(tmp_path) == {"tag": "v1.5.0", "sha": sha}
     # Голова ушла вперёд выпуска — номер остаётся номером тега (#299, взгляд на #1294).
     # Голова — ДРУГОГО минора: у 0.7.4 тот же MAJOR.MINOR «0.7», и чтение головы
     # вместо тега прошло бы зелёным (находка `46a0c7f` на #1395).
@@ -1538,3 +1542,99 @@ def test_the_shared_steps_files_are_kept_on_the_branch() -> None:
     )
     missing = written - set(module.branch_files())
     assert not missing, f"чистка сняла бы файлы общего шага: {sorted(missing)}"
+
+
+def test_a_consumer_manifest_is_of_the_family_form(tmp_path: Path) -> None:
+    """Манифест потребителя: форма семьи, `gives` и `takes` пусты, выпуск из дерева (#1766)."""
+    family_contract = load_script("family_contract.py")
+    run = ["git", "-C", str(tmp_path)]
+    subprocess.run([*run, "init", "-q", "-b", "main"], check=True, timeout=60)
+    subprocess.run(
+        [
+            *run,
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "с",
+        ],
+        check=True,
+        timeout=60,
+    )
+    bare = json.loads(facts.consumer_manifest(tmp_path, "Я/Журнал"))
+    assert family_contract.form_flaw(bare) is None, family_contract.form_flaw(bare)
+    assert (bare["project"], bare["release"], bare["gives"], bare["takes"]) == (
+        "Я/Журнал",
+        None,
+        {},
+        [],
+    )
+    subprocess.run([*run, "tag", "v1.0.0"], check=True, timeout=60)
+    tagged = json.loads(facts.consumer_manifest(tmp_path, "Я/Журнал"))
+    assert tagged["release"]["tag"] == "v1.0.0" and len(tagged["release"]["sha"]) == 40
+    out = tmp_path / "contracts.json"
+    assert (
+        facts.main(["--root", str(tmp_path), "--repo", "Я/Журнал", "--consumer-manifest", str(out)])
+        == 0
+    )
+    assert json.loads(out.read_text(encoding="utf-8")) == tagged
+
+
+@pytest.mark.parametrize(("repo", "written"), [("o/consumer", True), ("O/Supplier", False)])
+def test_the_shared_step_writes_the_manifest_only_for_a_consumer(
+    tmp_path: Path, repo: str, written: bool
+) -> None:
+    """Шаг фактов кладёт манифест потребителю; у поставщика — его собственный прогон (#1766)."""
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-facts.yml").read_text("utf-8"))
+    step = next(
+        one
+        for one in flow["jobs"]["facts"]["steps"]
+        if one.get("name") == "манифест семьи потребителя"
+    )
+    subprocess.run(["git", "init", "-q", str(tmp_path / "t")], check=True, timeout=60)
+    (tmp_path / "facts").mkdir()
+    env = {
+        **os.environ,
+        "GITHUB_REPOSITORY": repo,
+        "SUPPLIER": "o/supplier",
+        "MECHANISMS": str(ROOT),
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    done = subprocess.run(
+        ["bash", "-c", str(step["run"])],
+        cwd=tmp_path / "t",
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert (tmp_path / "facts" / "contracts.json").is_file() is written
+
+
+@pytest.mark.parametrize("why", ["shallow", "unfetched", "unasked"])
+def test_an_unproven_absence_is_not_said_to_be_no_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, why: str
+) -> None:
+    """Тега не видно, отсутствие не доказано — `NotRun`, а не `release: null` (взгляд на #1776)."""
+    monkeypatch.setattr(facts.version, "release_tag", lambda _root: None)
+    monkeypatch.setattr(facts.version, "absence", lambda _root: why)
+    with pytest.raises(facts.NotRun, match=why):
+        facts.proven_release(tmp_path)
+
+
+def test_an_unread_tag_commit_is_not_said_to_be_no_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Тег есть, а его коммит не прочитан — `NotRun`, а не «выпусков нет» (взгляд на #1776)."""
+    monkeypatch.setattr(facts.version, "release_tag", lambda _root: "v1.0.0")
+    monkeypatch.setattr(facts.version, "git", lambda *a, **k: None)
+    assert facts.release_of(tmp_path) is None, "прежний путь значков поставщика не тронут"
+    with pytest.raises(facts.NotRun, match=r"v1\.0\.0"):
+        facts.proven_release(tmp_path)

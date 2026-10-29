@@ -1465,3 +1465,35 @@ def test_the_head_is_read_in_the_pushed_tree(
     monkeypatch.chdir(project)
     said = {"второй": str(second), "база": str(tmp_path)}
     assert module.judge(command.format(**said), start.format(**said)) == expect
+
+
+@pytest.mark.parametrize(
+    ("command", "description", "code"),
+    [
+        ("git status && git log --oneline", "показать ветку и unpushed commit — не push", 0),
+        ("ls", "push всё, что есть", 0),
+        ("git push origin agent/x", "толкнуть", 2),
+        ('git commit -m "a \\"b\\" c" && git push', "коммит и толчок", 2),
+    ],
+    ids=["описание-со-словом-push", "описание-push", "толчок", "кавычка-в-команде"],
+)
+def test_the_fallback_guard_reads_the_command_not_the_description(
+    tmp_path: Path, command: str, description: str, code: int
+) -> None:
+    """Запасной режим судит значение `command`, а не хвост события с `description` (#1764)."""
+    where = tmp_path / "hooks"
+    where.mkdir()
+    for name in ("push_guard.sh", "push_guard.py"):
+        shutil.copy2(HOOK.parent / name, where / name)
+    said = subprocess.run(
+        [str(where / "push_guard.sh")],
+        input=json.dumps(
+            {"tool_input": {"command": command, "description": description}}, ensure_ascii=False
+        ),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={"PATH": f"{floor_interpreter()}:/usr/bin:/bin"},
+        timeout=30,
+    )
+    assert said.returncode == code, said.stdout + said.stderr

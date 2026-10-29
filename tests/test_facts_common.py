@@ -139,6 +139,30 @@ def test_a_named_matrix_is_read_and_a_bad_name_is_refused(tmp_path: Path) -> Non
     assert none == {} and run["python"] == build.python_facts()
 
 
+def test_a_missing_matrix_job_is_a_state_not_unread(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Джоба матрицы в прогоне нет — своя причина и без предупреждения (#1766)."""
+    run, none = module.ci_facts(tree(tmp_path), "ci.yml", "ci.yml:test-matrix")
+    assert none == {"python": module.NO_MATRIX_JOB.format("ci.yml", "test-matrix")}
+    assert "python" not in run and "warning" not in capsys.readouterr().err
+
+
+def test_a_missing_matrix_job_of_a_python_project_is_unread(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """У проекта со своим Python пропавший джоб — поломка: «не прочитана» и предупреждение.
+
+    Тихое «матрицы нет» спрятало бы переименованный джоб у действующего
+    проекта (045); без Python то же отсутствие — состояние (тест выше).
+    """
+    root = tree(tmp_path)
+    (root / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    run, none = module.ci_facts(root, "ci.yml", "ci.yml:test-matrix")
+    assert none == {"python": module.UNREAD_MATRIX.format("ci.yml")}
+    assert "python" not in run and "warning" in capsys.readouterr().err
+
+
 def test_our_build_and_the_shared_step_give_the_same_facts(tmp_path: Path) -> None:
     """Наша сборка и общий шаг дают одни факты: источник общей части один (022)."""
     whole = build.collect(ROOT, "голова", mine=REPO)
@@ -585,3 +609,12 @@ def test_release_absent_says_none_only_when_proven(
     assert (said == module.NO_RELEASE) is absent, said
     if not absent:
         assert why in said
+
+
+def test_own_python_is_a_root_manifest_or_a_package(tmp_path: Path) -> None:
+    """Свой Python — корневой `pyproject.toml` или пакет `packages/*` (взгляд на #1776, 195)."""
+    assert not module.own_python(tmp_path)
+    package = tmp_path / "packages" / "core"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text("[project]\nname = 'core'\n", encoding="utf-8")
+    assert module.own_python(tmp_path)
