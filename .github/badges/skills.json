@@ -601,6 +601,28 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1737,
+   "merged_at": "2026-10-29",
+   "commit": "4feb5640c6e9d935c5adb41415f74a5ed6f61b6a",
+   "touched": [
+    "changelog.d/contract-texts-after-1733.internal.md",
+    "docs/use/pipeline.md",
+    "scripts/feedback_form.py"
+   ],
+   "added": [
+    "changelog.d/contract-texts-after-1733.internal.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source"
+   ],
+   "invoked": [
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
