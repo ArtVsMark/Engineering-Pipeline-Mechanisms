@@ -2945,3 +2945,21 @@ def test_each_unlaid_data_path_is_its_own_line_with_its_reason() -> None:
     said = module.data_note([str(refused), "свой/путь.txt"]).splitlines()
     assert said[1] == f"  - {refused} — {module.KIT_REFUSED[refused]}", said
     assert said[2] == "  - свой/путь.txt", said
+
+
+def test_write_ignores_the_window_state_and_keeps_foreign_lines(tmp_path: Path) -> None:
+    """`--write` дописывает `.claude/state/` в `.gitignore`, чужое не трогает (#1769)."""
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    consumer.mkdir()
+    (consumer / ".gitignore").write_text("свой/\n", encoding="utf-8")
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    said = (consumer / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert said == ["свой/", module.STATE_IGNORE], said
+
+
+def test_a_standing_state_line_is_not_doubled(tmp_path: Path) -> None:
+    """Строка уже стоит — `.gitignore` не меняется; файла нет — создаётся (#1769)."""
+    assert module.ignore_state(tmp_path) is True
+    assert module.ignore_state(tmp_path) is False
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == f"{module.STATE_IGNORE}\n"
