@@ -1113,8 +1113,14 @@ def render_body(
     queue: Queue | None = None,
     tries: Proof | None = None,
     unfixed: list[Unfixed] | None = None,
+    switched_off: list[str] | None = None,
 ) -> str:
-    """Собирает тело задачи: три зеркала и один журнал."""
+    """Собирает тело задачи: три зеркала и один журнал.
+
+    `switched_off` — красное класса `off`: решение потребителя с причиной, а
+    не долг (#1765). Оно названо своим разделом, а в «Не держит слияние» не
+    идёт — тот раздел читает план источником 3 (`debt.branch_debt`).
+    """
     lines = [
         MARKER,
         "",
@@ -1165,6 +1171,18 @@ def render_body(
         ]
     else:
         lines += ["Пусто — совещательные проверки на голове зелены.", ""]
+
+    if switched_off:
+        lines += [
+            "## Выключено потребителем — не долг",
+            "",
+            "Класс `off` в `.pipeline.yml`: проверку проект выключил с причиной.",
+            "Красное названо, чтобы не пропасть молча (045), но долгом не считается",
+            "и в план не идёт (#1765).",
+            "",
+            *[f"- `{name}`" for name in switched_off],
+            "",
+        ]
 
     lines += ["## Красное, пережившее слияние — источник 3", ""]
     lines += [
@@ -1282,6 +1300,10 @@ def main(argv: list[str] | None = None) -> int:
         fed = policy.feeds()
         red = red_of(runs)
         holds, rest = split(red, required)
+        # ВЫКЛЮЧЕННОЕ — НЕ ДОЛГ (#1765): класс `off` решён потребителем с
+        # причиной. Перезапуск и прочие решения по `rest` его видят, как прежде;
+        # меняется только раздел, в котором он назван.
+        switched = set(policy.names_of(answer, policy.OFF))
 
         live_number, body = findings.live_issue(args.repo, token, MARKER)
         flakes = parse_flakes(body)
@@ -1381,7 +1403,16 @@ def main(argv: list[str] | None = None) -> int:
         save(
             args.repo,
             token,
-            render_body(holds, rest, flakes, sha, queue, proof, seen.unfixed),
+            render_body(
+                holds,
+                [name for name in rest if name not in switched],
+                flakes,
+                sha,
+                queue,
+                proof,
+                seen.unfixed,
+                [name for name in rest if name in switched],
+            ),
             args.apply,
             findings.found_or_unread(live_number),
         )

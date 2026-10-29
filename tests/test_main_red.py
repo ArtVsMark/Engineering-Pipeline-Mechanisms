@@ -1962,3 +1962,30 @@ def test_found_or_unread_keeps_a_number_and_relooks_an_absence() -> None:
     """Найденный номер едет в запись; «задачи нет» — `UNREAD`, ищется перед записью."""
     assert module.findings.found_or_unread(7) == 7
     assert module.findings.found_or_unread(None) == module.findings.UNREAD
+
+
+def test_a_switched_off_red_is_named_but_not_debt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красное класса `off` названо своим разделом и в «Не держит слияние» не идёт (#1765).
+
+    Тот раздел план читает источником 3 (`debt.branch_debt`): выключенное
+    потребителем с причиной держало бы его непустым навсегда.
+    """
+    from tests.conftest import load_script
+
+    debt = load_script("debt.py")
+    answer = {
+        "lint / lint": module.policy.Check("lint / lint", module.policy.OFF, "своего Python нет"),
+        "facts / facts": module.policy.Check("facts / facts", module.policy.ADVISORY, "свои факты"),
+    }
+    written = platform(
+        monkeypatch,
+        [
+            {"name": "lint / lint", "status": "completed", "conclusion": "failure"},
+            {"name": "facts / facts", "status": "completed", "conclusion": "failure"},
+        ],
+    )
+    monkeypatch.setattr(module.policy, "load", lambda *a, **k: answer)
+    module.main(["--repo", "o/r"])
+    body = written[-1]
+    assert debt.section(body, "Не держит слияние") == ["facts / facts"]
+    assert "## Выключено потребителем — не долг" in body and "- `lint / lint`" in body
