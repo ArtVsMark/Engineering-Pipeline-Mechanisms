@@ -184,6 +184,9 @@ KIT_LAID: Final = Path(".claude/kit-laid.json")
 HOOKS: Final = Path(".claude/hooks")
 #: Настройки окна: подключают хуки к событиям площадки.
 SETTINGS: Final = Path(".claude/settings.json")
+#: Список игнорируемого проекта: заход подключения дописывает в него строку
+#: состояния окна, а не кладёт свой (#1769).
+GITIGNORE: Final = Path(".gitignore")
 #: Число планки хуков — одно на хук старта и обёртки (#1058).
 FLOOR: Final = HOOKS / "floor.sh"
 #: Хук старта облачного окна.
@@ -376,6 +379,7 @@ ALL: Final = (
     KIT_LAID,
     HOOKS,
     SETTINGS,
+    GITIGNORE,
     FLOOR,
     SESSION_START,
 )
