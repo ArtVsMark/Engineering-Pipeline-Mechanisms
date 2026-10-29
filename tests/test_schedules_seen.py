@@ -408,3 +408,33 @@ def test_the_third_outcome_still_names_the_misses_of_the_counted(
     monkeypatch.setattr(module, "sweep", lambda *a, **k: rows)
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
     assert "требуют взгляда среди досчитанных: 1 из 1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        module.NotRun("прогон «b.yml» площадке неизвестен"),
+        module.ghrest.TransportError("площадка ответила 502"),
+    ],
+    ids=["неизвестен", "отказ-площадки"],
+)
+def test_an_unread_run_says_unread_not_zero(
+    monkeypatch: pytest.MonkeyPatch, refusal: Exception
+) -> None:
+    """Отказал `fired` — строка «заходы не прочитаны», а не «случилось 0» (взгляд на #1773, 045).
+
+    Отказ площадки по одному прогону — его строка, остальные досчитаны (195).
+    """
+    monkeypatch.setattr(module, "declared", lambda: {"a.yml": "17 6 * * *", "b.yml": "17 6 * * *"})
+    monkeypatch.setattr(module, "born", lambda *a, **k: None)
+
+    def fired(_repo: str, name: str, *_a: object) -> tuple[int, int]:
+        if name == "b.yml":
+            raise refusal
+        return 7, 0
+
+    monkeypatch.setattr(module, "fired", fired)
+    seen = {item.name: item for item in module.sweep("o/r", "t", NOW)}
+    assert seen["a.yml"].expected == 7
+    said = seen["b.yml"].said()
+    assert "заходы не прочитаны" in said and "случилось" not in said, said

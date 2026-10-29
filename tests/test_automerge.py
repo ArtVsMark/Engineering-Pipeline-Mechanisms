@@ -3582,3 +3582,14 @@ def test_a_skipped_look_without_the_review_run_in_the_base_is_not_owed(
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
     monkeypatch.setattr(module.ghrest, "request", request)
     assert module.owed_look("o/r", change(1, "automerge"), "token") == ""
+
+
+def test_a_self_reference_is_not_a_red_fixer(
+    platform: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    """«Чинит красное: #<свой номер>» ступени 0 не даёт (взгляд на #1729, 195)."""
+    red_heads(monkeypatch, 8)
+    own = change(8, body="Чинит красное: #8")
+    marked = module.red_fixers("o/r", [own], [own], "t")
+    assert not marked[0].fixes_red
+    assert "#8 — оно само" in capsys.readouterr().out
