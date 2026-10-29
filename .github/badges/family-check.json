@@ -3,9 +3,50 @@
   "project": "ArtVsMark/Engineering-Pipeline-Mechanisms",
   "segments": {
     "gives": {
-      "state": "unknown",
-      "why": "манифеста нет — проект не издатель",
-      "links": []
+      "state": "ok",
+      "why": "",
+      "links": [
+        {
+          "segment": "gives",
+          "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+          "what": "release",
+          "mine": "v1.13.0",
+          "latest": "v1.13.0",
+          "where": ".github/badges/contracts.json",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "gives",
+          "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+          "what": "form",
+          "mine": "1.1",
+          "latest": "1.2",
+          "where": ".github/badges/contracts.json",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "gives",
+          "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+          "what": "facts",
+          "mine": "2.2",
+          "latest": "2.2",
+          "where": "сводка семьи",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "gives",
+          "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+          "what": "steps",
+          "mine": "0.14",
+          "latest": "0.14",
+          "where": "сводка семьи",
+          "state": "ok",
+          "why": ""
+        }
+      ]
     },
     "family": {
       "state": "behind",
@@ -54,6 +95,16 @@
         {
           "segment": "family",
           "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+          "what": "facts",
+          "mine": "2.2",
+          "latest": "2.2",
+          "where": ".github/badges/facts.json",
+          "state": "ok",
+          "why": ""
+        },
+        {
+          "segment": "family",
+          "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
           "what": "steps",
           "mine": ">=0.13,<0.15",
           "latest": "0.14",
@@ -69,9 +120,20 @@
       "links": []
     },
     "external": {
-      "state": "unknown",
-      "why": "фактов нет: .github/badges/facts.json не прочитан",
-      "links": []
+      "state": "ok",
+      "why": "",
+      "links": [
+        {
+          "segment": "external",
+          "publisher": "runner",
+          "what": "ubuntu-26.04",
+          "mine": "ubuntu-26.04",
+          "latest": "ubuntu-26.04",
+          "where": ".github/badges/facts.json:python.os",
+          "state": "ok",
+          "why": ""
+        }
+      ]
     }
   },
   "publishers": [
@@ -84,7 +146,7 @@
     {
       "code": "EPM",
       "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-      "state": "unknown",
+      "state": "ok",
       "why": "свой: состояние отдачи"
     }
   ],
