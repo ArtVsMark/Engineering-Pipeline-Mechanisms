@@ -1132,6 +1132,28 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1778,
+   "merged_at": "2026-10-29",
+   "commit": "da8ec0e1ac9bb0e1059fd5406205acd02b78324d",
+   "touched": [
+    "changelog.d/consumer-own-release-number.fixed.md",
+    "scripts/pipeline_checks.py",
+    "tests/test_contract_surface.py",
+    "tests/test_pipeline_checks.py"
+   ],
+   "added": [
+    "changelog.d/consumer-own-release-number.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
