@@ -51,9 +51,9 @@ FAMILY_PREFIX: Final = f"{REPO.split('/')[0]}/"
 #: живёт на `main`, снимок «у кого чем держится» — на ветке значков.
 RAW: Final = f"https://raw.githubusercontent.com/{REPO}"
 
-#: Выгрузка правил: номера, имена файлов, разбор.
 #: Выгрузка правил в дереве самого каталога: путь от корня.
 EXPORT_PATH: Final = "export/rules.json"
+#: Выгрузка правил: номера, имена файлов, разбор.
 EXPORT_URL: Final = f"{RAW}/main/{EXPORT_PATH}"
 
 #: Снимок семьи: кто из соседей чем держит правило.

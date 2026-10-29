@@ -336,6 +336,27 @@ def test_the_catalogue_tree_checks_against_its_own_export(
     assert module.known(tmp_path) == {"231": "new-rule"}
 
 
+@pytest.mark.parametrize(
+    ("body", "said"),
+    [
+        (None, "не прочитана"),
+        ("{не json", "не прочитана"),
+        ('["231"]', "не объект"),
+    ],
+    ids=["absent", "broken", "not-an-object"],
+)
+def test_the_catalogue_tree_without_a_readable_export_is_not_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str | None, said: str
+) -> None:
+    """Каталог без читаемой выгрузки-объекта — «не отработал», а не «чисто» (взгляд на #1787)."""
+    if body is not None:
+        (tmp_path / "export").mkdir()
+        (tmp_path / "export" / "rules.json").write_text(body, encoding="utf-8")
+    monkeypatch.setattr(module.gitcall, "own_repo", lambda _root: module.catalogue.REPO)
+    with pytest.raises(module.NotRun, match=said):
+        module.known(tmp_path)
+
+
 def test_another_tree_still_reads_the_published_export(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
