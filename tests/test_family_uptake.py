@@ -728,3 +728,17 @@ def test_the_feedback_of_every_read_neighbour_goes_to_the_file() -> None:
         {"repo": "o/a", "records": [vars(record)], "broken": ""},
         {"repo": "o/b", "records": [], "broken": "раздел feedback: …"},
     ]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-a.yml@v1.13.0",
+        'uses: "ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-a.yml@v1.13.0"',
+        "uses: 'artvsmark/engineering-pipeline-mechanisms/.github/workflows/step-a.yml@v1.13.0'",
+    ],
+    ids=["голая", "двойные-кавычки", "одинарные-и-регистр"],
+)
+def test_a_quoted_call_of_our_step_is_taken(line: str) -> None:
+    """Вызов нашего шага в кавычках — тоже взятый: оповещение до соседа дойдёт (взгляд на #1785)."""
+    assert module.pins_in(line) == (("step-a", "v1.13.0"),)

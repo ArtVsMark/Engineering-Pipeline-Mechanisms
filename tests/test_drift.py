@@ -2188,7 +2188,7 @@ def annotated_head(
     """Подделка площадки для предупреждений: голова, её проверки, их аннотации.
 
     `suites` — наборы проверок головы; по умолчанию их нет. `head_age_days` —
-    возраст коммита головы.
+    возраст коммита головы; отрицательный — даты у головы нет.
 
     Отдаёт СТРАНИЦАМИ, как площадка: `page=N` получает N-й кусок по
     `PER_PAGE`. Иначе проверка не различала бы чтение первой страницы и чтение
@@ -2205,6 +2205,8 @@ def annotated_head(
     def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> Any:
         asked.append(path)
         if path.endswith("/commits/main"):
+            if head_age_days < 0:
+                return {"sha": "c" * 40}
             when = datetime.now(UTC) - timedelta(days=head_age_days)
             return {"sha": "c" * 40, "commit": {"committer": {"date": when.isoformat()}}}
         if "/annotations" in path:
@@ -3070,10 +3072,25 @@ def test_an_old_head_judges_every_run(
     ]
     notes = {1: [note("warning", NODE)]}
     suites = [{"id": 9, "app": {"slug": module.ACTIONS_APP}, "rerequestable": False}]
-    annotated_head(monkeypatch, runs, notes, suites, head_age_days=60)
+    asked = annotated_head(monkeypatch, runs, notes, suites, head_age_days=60)
     found = module.platform_warnings("o/r", "t")
     assert any("Node.js 20" in one.said for one in found)
     assert "судятся все" in capsys.readouterr().out
+    assert not [one for one in asked if "/check-suites" in one], "наборы давней головы спрошены"
+
+
+def test_a_head_without_a_date_judges_every_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Дата головы не прочитана — судятся все, как у давней (взгляд на #1785, 051)."""
+    runs = [
+        {"id": 1, "name": "lint", "output": {"annotations_count": 1}, "check_suite": {"id": 9}},
+    ]
+    suites = [{"id": 9, "app": {"slug": module.ACTIONS_APP}, "rerequestable": False}]
+    annotated_head(monkeypatch, runs, {1: [note("warning", NODE)]}, suites, head_age_days=-1)
+    found = module.platform_warnings("o/r", "t")
+    assert any("Node.js 20" in one.said for one in found)
+    assert "без даты" in capsys.readouterr().out
 
 
 def test_a_tree_job_named_like_a_platform_run_is_judged(
