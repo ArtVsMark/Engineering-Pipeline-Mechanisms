@@ -931,6 +931,31 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1760,
+   "merged_at": "2026-10-29",
+   "commit": "7d4fd308bc028c90024a1ff61a311846f2bbf85e",
+   "touched": [
+    "changelog.d/unlooked-onboarding-boundary.fixed.md",
+    "scripts/unlooked.py",
+    "tests/test_review_skip_branches.py",
+    "tests/test_unlooked.py"
+   ],
+   "added": [
+    "changelog.d/unlooked-onboarding-boundary.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
