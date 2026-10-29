@@ -56,7 +56,7 @@
           "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
           "what": "steps",
           "mine": ">=0.13,<0.15",
-          "latest": "0.13",
+          "latest": "0.14",
           "where": ".pipeline.yml:contract",
           "state": "ok",
           "why": ""
