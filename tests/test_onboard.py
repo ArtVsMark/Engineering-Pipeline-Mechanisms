@@ -2886,3 +2886,62 @@ def test_the_kitted_python_passes_ruff_by_default(command: list[str]) -> None:
         timeout=60,
     )
     assert done.returncode == 0, done.stdout + done.stderr
+
+
+# --- заход называет шаги семьи после подключения (#1763) ----------------------
+
+
+def test_write_names_the_plan_and_both_announcements(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """После `--write` названы живая задача плана и оба объявления (#1763).
+
+    Проба #1558 на EPL: заход молчал о них, и прогон `work-plan` отказывал
+    «живой задачи плана нет», а значок семьи не видел подключившегося.
+    """
+    root = tree(tmp_path / "наше", tagged="v2.5.0", **{"step-пример": MARKED})
+    consumer = tmp_path / "потребитель"
+    assert module.main(["--root", str(root), "--write", str(consumer)]) == module.EXIT_OK
+    out = capsys.readouterr().out
+    assert module.findings.PLAN_MARKER in out, "маркер живой задачи плана не назван"
+    assert ".rules/consumers.json" in out, "объявление у поставщика не названо"
+    assert "consumer-announce" in out and module.CATALOGUE_REPO in out, (
+        "объявление в каталоге не названо"
+    )
+    assert (consumer / module.paths.BEHAVIOUR).is_file(), "порядок источников работы не положен"
+
+
+def test_the_unfilled_places_are_named_per_laid_file(tmp_path: Path) -> None:
+    """Положенное с местами «Наполнение проекта» названо путём и числом (#1763)."""
+    (tmp_path / "AGENTS.md").write_text(
+        f"> **{module.FILLING}:** раз\n> **{module.FILLING}:** два\n", encoding="utf-8"
+    )
+    (tmp_path / "готово.md").write_text("всё заполнено\n", encoding="utf-8")
+    said = module.filling_note(tmp_path, [Path("AGENTS.md"), Path("готово.md"), Path("нет.md")])
+    assert said.splitlines()[1:] == ["  - AGENTS.md: 2"], said
+    assert module.filling_note(tmp_path, [Path("готово.md")]) == ""
+
+
+def test_a_missing_answer_names_the_catalogue_command(tmp_path: Path) -> None:
+    """Нет ответа каталогу — названа команда каталога, что собирает его скелет (#1763)."""
+    said = module.bindings_note(tmp_path)
+    assert "onboard_consumer.py" in said and module.CATALOGUE_REPO in said, said
+    assert "consumer-announce" in said, said
+
+
+def test_the_behaviour_template_is_laid() -> None:
+    """Порядок источников работы кладётся заготовкой, а не отказом (#1763).
+
+    Навыки окна зовут его `paths.py behaviour`; без файла они молчали.
+    """
+    assert module.paths.BEHAVIOUR in module.DATA_KITTED
+    assert module.paths.BEHAVIOUR not in module.KIT_REFUSED
+    assert (ROOT / module.DATA_KIT / module.paths.BEHAVIOUR).is_file()
+
+
+def test_each_unlaid_data_path_is_its_own_line_with_its_reason() -> None:
+    """Перечень данных — строка на путь, у отказанного — его причина (#1763)."""
+    refused = next(iter(module.KIT_REFUSED))
+    said = module.data_note([str(refused), "свой/путь.txt"]).splitlines()
+    assert said[1] == f"  - {refused} — {module.KIT_REFUSED[refused]}", said
+    assert said[2] == "  - свой/путь.txt", said

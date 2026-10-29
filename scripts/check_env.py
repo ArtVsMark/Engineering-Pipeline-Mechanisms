@@ -237,6 +237,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path(), help="корень дерева")
     args = parser.parse_args(argv)
 
+    # ПРОЕКТ БЕЗ СВОЕГО PYTHON — ТРЕБОВАНИЙ НЕТ, А НЕ ОТКАЗ (#1763). У
+    # потребителя без `pyproject.toml` (журнал EPL, проба #1558) сверка
+    # отказывала «требование взять неоткуда» при каждом старте окна. Вердикт
+    # назван строкой (045); `pyproject.toml` есть — сверка как прежде.
+    if not (args.root / "pyproject.toml").is_file():
+        print("интерпретатор не требуется: pyproject.toml нет — у проекта нет своего Python")
+        return EXIT_OK
     try:
         said = survey(args.root)
     except (NotRun, tomllib.TOMLDecodeError) as exc:
