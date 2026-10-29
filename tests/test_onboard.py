@@ -16,6 +16,7 @@
 import itertools
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Final
@@ -2857,3 +2858,31 @@ def test_our_ci_and_the_kit_share_one_table_of_steps_about_a_change() -> None:
     assert set(conditioned) == module.ABOUT_A_CHANGE
     odd = {name: said for name, said in conditioned.items() if said != module.ON_CHANGE_ONLY}
     assert not odd, f"условие шага об изменении записано иначе, чем у заготовки: {odd}"
+
+
+#: Что кладёт заход потребителю на Python: его линтуют настройки потребителя.
+KITTED_PYTHON: Final = [one for one in module.TREE_KITTED if one.suffix == ".py"]
+
+
+@pytest.mark.parametrize("command", [["check"], ["format", "--check"]], ids=["check", "format"])
+def test_the_kitted_python_passes_ruff_by_default(command: list[str]) -> None:
+    """Хуки заготовки чисты под ruff по умолчанию: иначе красное потребителя — о нас (#1744).
+
+    Шаг `lint` потребителя зовёт `ruff` без путей, и без своего `include` под
+    линт попадает и заготовка. Настройки — умолчание (`--isolated`): у
+    потребителя наших нет. Ruff ставит шаг `test` (`ci.yml`), и пропуск здесь —
+    окружение без него, а не «чисто».
+    """
+    ruff = shutil.which("ruff")
+    if ruff is None:
+        pytest.skip("ruff не установлен — шаг test ставит его сам")
+    done = subprocess.run(
+        [ruff, *command, "--isolated", *map(str, KITTED_PYTHON)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stdout + done.stderr

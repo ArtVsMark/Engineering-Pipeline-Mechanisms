@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Толчок не туда отвергается ДО вызова git, а не ловится после.
 
 Держит два критических запрета свода, и адреса у них разные. «НЕ писать в общую
@@ -119,6 +118,7 @@ def git(*args: str, where: str = "") -> subprocess.CompletedProcess[str] | str:
     try:
         return subprocess.run(
             ["git", *args],
+            check=False,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -149,13 +149,28 @@ def git(*args: str, where: str = "") -> subprocess.CompletedProcess[str] | str:
 #: Совпадение с каноном держит `tests/test_push_guard.py::test_the_prefix_is_the_pipeline_one`.
 AGENT_PREFIX: Final = "agent/"
 #: Ключи `git push`, за которыми идёт значение, а не имя ветки.
-WITH_VALUE: Final = frozenset({"--repo", "-o", "--push-option", "--exec", "--receive-pack"})
+WITH_VALUE: Final = frozenset(
+    {"--repo", "-o", "--push-option", "--exec", "--receive-pack"}
+)
 #: Управляющие операторы оболочки: они делят строку на команды. Длинные — раньше
 #: коротких, иначе `&&` прочёлся бы двумя `&`.
 CONTROL: Final = ("&&", "||", ";;", "|&", ";", "|", "&", "\n", "(", ")")
 #: Операторы перенаправления. Цель — следующее слово, слитное или раздельное
 #: (`>out.log`, `> out.log`, `2>&1`), и она снимается вместе с оператором.
-REDIRECTS: Final = ("&>>", "&>", "<<<", "<<-", ">>", ">|", ">&", "<<", "<>", "<&", ">", "<")
+REDIRECTS: Final = (
+    "&>>",
+    "&>",
+    "<<<",
+    "<<-",
+    ">>",
+    ">|",
+    ">&",
+    "<<",
+    "<>",
+    "<&",
+    ">",
+    "<",
+)
 #: Присваивание переменной перед командой: имя по правилу оболочки, затем `=`.
 ASSIGNMENT: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 #: Глобальные ключи самого git со значением: `git -C путь push`. Отделять их
@@ -278,7 +293,9 @@ def script_of(segment: list[str]) -> tuple[str | None, str]:
         cluster = word[1:]
         if "c" not in cluster:
             continue
-        if cluster.endswith("c") and all(letter in SHELL_FLAGS for letter in cluster[:-1]):
+        if cluster.endswith("c") and all(
+            letter in SHELL_FLAGS for letter in cluster[:-1]
+        ):
             if place + 1 < len(segment):
                 return segment[place + 1], ""
             return None, f"у оболочки ключ «{cut(word)}» без скрипта — читать нечего"
@@ -315,7 +332,10 @@ def after_wrapper(name: str, rest: list[str]) -> tuple[list[str], str]:
     делает сторожа слепым: угадать, несёт он значение или нет, нечем, а ошибка
     в любую сторону молча меняет, что считается командой.
     """
-    values, flags = WRAPPERS.get(name, frozenset()), WRAPPER_FLAGS.get(name, frozenset())
+    values, flags = (
+        WRAPPERS.get(name, frozenset()),
+        WRAPPER_FLAGS.get(name, frozenset()),
+    )
     place = 0
     eaten = 0
     while place < len(rest):
@@ -486,7 +506,9 @@ def commands_of(text: str) -> list[list[str]]:
                     # (находка `664b218` на #1079). `<<` бывает и арифметикой
                     # (`$((1<<2))`), и тогда «тело» проглотило бы толчок на
                     # следующей строке, а сторож ответил бы «не толчок» (045).
-                    raise ValueError(f"встроенный документ без разделителя «{cut(mark)}»")
+                    raise ValueError(
+                        f"встроенный документ без разделителя «{cut(mark)}»"
+                    )
                 end = text.find("\n", at)
                 line = text[at : len(text) if end < 0 else end]
                 at = len(text) if end < 0 else end + 1
@@ -542,7 +564,9 @@ def commands_of(text: str) -> list[list[str]]:
         elif char == "#" and not started:
             end = text.find("\n", at)
             at = len(text) if end < 0 else end
-        elif redirect := next((one for one in REDIRECTS if text.startswith(one, at)), None):
+        elif redirect := next(
+            (one for one in REDIRECTS if text.startswith(one, at)), None
+        ):
             if started and not quoted and "".join(word).isdigit():
                 word.clear()
                 started = False
@@ -551,7 +575,9 @@ def commands_of(text: str) -> list[list[str]]:
             dropping = True
             heredoc = redirect == "<<-" if redirect in ("<<", "<<-") else None
             at += len(redirect)
-        elif control := next((one for one in CONTROL if text.startswith(one, at)), None):
+        elif control := next(
+            (one for one in CONTROL if text.startswith(one, at)), None
+        ):
             finish()
             dropping = False
             commands.append([])
@@ -601,7 +627,9 @@ def push_targets(command: str, start: str = "") -> Look:
         if not lost:
             # Переменные `GIT_DIR` и `GIT_WORK_TREE` уводят git в другое дерево
             # так же, как `--git-dir`, — где бы они ни стояли в строке.
-            moving = [one for one in part if one.startswith(("GIT_DIR=", "GIT_WORK_TREE="))]
+            moving = [
+                one for one in part if one.startswith(("GIT_DIR=", "GIT_WORK_TREE="))
+            ]
             if moving:
                 lost = f"«{cut(moving[0])}» уводит git в другое дерево"
         found, blind = unwrap(part, DEPTH)
@@ -626,7 +654,9 @@ def push_targets(command: str, start: str = "") -> Look:
             if rest and rest[0] == "push":
                 if unknown:
                     return Look(blind=f"каталог толчка не узнан — {unknown}")
-                return Look(targets=tuple(named_branches(rest[1:])), push=True, where=here)
+                return Look(
+                    targets=tuple(named_branches(rest[1:])), push=True, where=here
+                )
     return Look()
 
 
@@ -765,7 +795,9 @@ def merged_away(branch: str, where: str = "") -> str:
     if not branch or branch == "HEAD":
         return ""
     tracked = git("config", "--get", f"branch.{branch}.merge", where=where)
-    gone = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}", where=where)
+    gone = git(
+        "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}", where=where
+    )
     # НЕ ПРОВЕРЕНО — НЕ ПУЩУ: тот же ответ, что у неузнанной головы (045).
     # Две проверки, а не цикл: сужение типа mypy через цикл не переносит.
     if isinstance(tracked, str):
@@ -786,7 +818,9 @@ def merged_away(branch: str, where: str = "") -> str:
     # толчка. Признак здесь ОДИН; «оба» относится к его половинам, а не к двум
     # признакам: второй снят по замеру, и путать их — значит читать этот разбор
     # как описание снятого.
-    pushed = tracked.returncode == 0 and tracked.stdout.strip() == f"{REF_PREFIX}{branch}"
+    pushed = (
+        tracked.returncode == 0 and tracked.stdout.strip() == f"{REF_PREFIX}{branch}"
+    )
     if not pushed:
         return ""
     if gone.returncode != 0:
@@ -847,7 +881,7 @@ def run() -> int:
         command = str((tool.get("command") if isinstance(tool, dict) else None) or "")
         start = event.get("cwd") if isinstance(event, dict) else None
         return judge(command, start if isinstance(start, str) else "")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — сбой судейства на толчке — отказ, причина ниже
         # СБОЙ СУДЕЙСТВА НА ТОЛЧКЕ — ОТКАЗ, А НЕ КОД 1 (взгляд на #1454, 195).
         # Трейсбек с кодом 1 площадка считает НЕблокирующей ошибкой, и толчок
         # прошёл бы без проверки — тот же исход, что у отказа git выше. Прочую
