@@ -343,8 +343,10 @@ def ci_facts(
     # заходе. У проекта с `pyproject.toml` пропавший джоб — поломка
     # (переименован, удалён): «не прочитана» с предупреждением, а не тихое
     # «матрицы нет» (045). Свой Python — корневой файл `PYTHON_MARKERS` или
-    # пакет `packages/*/pyproject.toml`, который сверяет и `check_env.py`
-    # (взгляд на #1776, 195).
+    # пакет `packages/*/pyproject.toml` (взгляд на #1776, 195). Пакеты
+    # `packages/*` сверяет и `check_env.py`; корень он судит только по
+    # `pyproject.toml` — у него другой вопрос: откуда взять `requires-python`
+    # для границы, а её пишут только там (взгляд на #1788).
     try:
         listed = policy.run_of(flow).get("jobs") or {}
     except policy.BadPolicy as exc:
@@ -363,10 +365,12 @@ def ci_facts(
 
 
 #: Корневые файлы, по которым у дерева свой Python (взгляд на #1776, 195):
-#: манифест пакета любой из трёх форм упаковки или список зависимостей. Без
-#: `setup.py`, `setup.cfg` и `requirements.txt` переименованный джоб матрицы
-#: у такого проекта тихо становился «матрицы нет».
-PYTHON_MARKERS: Final = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
+#: манифест пакета любой из трёх форм упаковки. Без `setup.py` и `setup.cfg`
+#: переименованный джоб матрицы у такого проекта тихо становился «матрицы
+#: нет». `requirements.txt` — НЕ признак (взгляд на #1788): его заводят и под
+#: одну документацию (mkdocs), и дерево без Python-CI получало бы «не
+#: прочитана» на каждом заходе.
+PYTHON_MARKERS: Final = ("pyproject.toml", "setup.py", "setup.cfg")
 
 
 def own_python(root: Path) -> bool:
@@ -591,8 +595,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sha", required=True, help="голова, на которой собрано")
     parser.add_argument("--repo", required=True, help="имя проекта у площадки: владелец/репо")
     parser.add_argument("--ci-workflow", default="ci.yml", help="файл прогона CI проекта")
-    parser.add_argument("--python-matrix", default="", help="матрица версий: <файл>:<джоб>")
-    parser.add_argument("--python-next", default="", help="пробные версии: <файл>:<джоб>")
+    parser.add_argument(
+        "--python-matrix",
+        default="",
+        help="версии Python: <файл>:<джоб>[,<джоб>…] — матрица или python-version работы",
+    )
+    parser.add_argument(
+        "--python-next", default="", help="пробные версии: та же форма, что --python-matrix"
+    )
     parser.add_argument("--coverage", type=Path, default=None, help="отчёт покрытия coverage.json")
     parser.add_argument("--extra", type=Path, default=None, help="свои числа проекта, JSON")
     parser.add_argument(

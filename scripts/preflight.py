@@ -386,11 +386,20 @@ PYTEST: Final = "pytest "
 #: Где в строке оболочки начинается новая команда: после `&&`, `||`, `;`, `|`,
 #: `then`, `do`, `else` (взгляды на #1772, #1779).
 COMMAND_BREAK: Final = re.compile(r"&&|\|\||[;|]|\bthen\b|\bdo\b|\belse\b")
-#: Приставки перед именем команды: `exec`, `time`, `timeout <срок>` и
-#: присваивания окружения `X=1`.
-COMMAND_PREFIX: Final = re.compile(r"^(?:(?:exec|time)\s+|timeout\s+\S+\s+|\w+=\S*\s+)+")
-#: Вызов модуля интерпретатором: `python -m <модуль>`, и с ключами до `-m`.
-MODULE_CALL: Final = re.compile(r"^python3?(?:\s+-\w+)*?\s+-m\s+(?P<tool>[\w.-]+)")
+#: Приставки перед именем команды: `exec`, `time`, `nice`, `timeout <срок>`,
+#: `env` и присваивания окружения `X=1`, исполнители `uv run`, `poetry run`,
+#: `pdm run`, `hatch run`, `pipenv run` (взгляд на #1788: прежний поиск слова
+#: находил `pytest` за ними, и разбор позиции не должен был это сузить).
+COMMAND_PREFIX: Final = re.compile(
+    r"^(?:(?:exec|time|nice|env)\s+|timeout\s+\S+\s+|\w+=\S*\s+"
+    r"|(?:uv|poetry|pdm|hatch|pipenv)\s+run\s+)+"
+)
+#: Вызов модуля интерпретатором: `python -m <модуль>` — и путём
+#: (`.venv/bin/python`), и с версией (`python3.12`), и с ключами до `-m`,
+#: в том числе с доводом (`-W error`) (взгляд на #1788).
+MODULE_CALL: Final = re.compile(
+    r"^(?:\S*/)?python(?:\d+(?:\.\d+)*)?(?:\s+-\w+(?:\s+(?!-)\S+)?)*?\s+-m\s+(?P<tool>[\w.-]+)"
+)
 
 
 def command_starts(line: str) -> list[str]:
@@ -402,7 +411,9 @@ def command_starts(line: str) -> list[str]:
     `pip3 install pytest`) и выбрасывал строку целиком за `pip install`
     (`pip install -e . && pytest`), а тест держал свой, другой разбор.
     Граница названа: кавычки и подстановки `$(…)` не разбираются — `;`
-    внутри строки в кавычках разрежет её лишний раз.
+    внутри строки в кавычках разрежет её лишний раз; исполнители — только
+    перечисленные в `COMMAND_PREFIX`, ключи у них (`uv run --with x`) не
+    разбираются.
     """
     starts = (COMMAND_PREFIX.sub("", part.strip()) for part in COMMAND_BREAK.split(plain(line)))
     return [one for one in starts if one]

@@ -55,7 +55,7 @@ on:
         type: string
         default: ""
       python-next:
-        description: матрица пробных версий Python — «<файл прогона>:<джоб>»
+        description: пробные версии Python — «<файл прогона>:<джоб>[,<джоб>…]», той же формы, что python-matrix
         type: string
         default: ""
       inputs-artifact:

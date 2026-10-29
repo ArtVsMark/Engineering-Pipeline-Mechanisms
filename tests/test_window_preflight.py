@@ -1956,6 +1956,13 @@ def test_a_tree_without_its_own_python_still_refuses_a_bounds_dispute(tmp_path: 
         ('echo "skip pytest"', False),
         ("python -P -m pytest -q", True),
         ("/usr/bin/pytest -q", True),
+        ("python3.12 -m pytest", True),
+        (".venv/bin/python -m pytest -q", True),
+        ("python -W error -m pytest", True),
+        ("uv run pytest -q", True),
+        ("poetry run pytest", True),
+        ("env CI=1 pytest", True),
+        ("python -m pip install pytest && uv run ruff check", False),
     ],
     ids=[
         "голый",
@@ -1969,6 +1976,13 @@ def test_a_tree_without_its_own_python_still_refuses_a_bounds_dispute(tmp_path: 
         "в-кавычках-echo",
         "ключ-до-m",
         "путём",
+        "python-с-версией",
+        "интерпретатор-путём",
+        "ключ-с-доводом",
+        "uv-run",
+        "poetry-run",
+        "env",
+        "исполнитель-не-pytest",
     ],
 )
 def test_runs_pytest_reads_a_call_not_a_name(command: str, runs: bool) -> None:

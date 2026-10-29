@@ -1224,7 +1224,10 @@ def version_text(value: object, where: str) -> str:
     причиной, а `3.12` числом читается как прежде. Выражение `${{ … }}` —
     не версия, а подстановка площадки: тоже отказ (045).
     """
-    if isinstance(value, float) and len(str(value).split(".")[1]) < 2:
+    # Число без дробной части цифрами (`.inf`, `1e+20`) — тоже отказ, а не
+    # `IndexError` трассой (взгляд на #1786).
+    fraction = str(value).partition(".")[2] if isinstance(value, float) else ""
+    if isinstance(value, float) and (not fraction.isdigit() or len(fraction) < 2):
         raise BadPolicy(
             f"{where}: версия числом «{value}» неоднозначна — YAML теряет нули, пишите строкой"
         )

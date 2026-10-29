@@ -620,11 +620,19 @@ def test_own_python_is_a_root_manifest_or_a_package(tmp_path: Path) -> None:
     assert module.own_python(tmp_path)
 
 
-@pytest.mark.parametrize("name", ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"])
-def test_own_python_is_any_root_packaging_form(tmp_path: Path, name: str) -> None:
-    """Корневые `setup.py`, `setup.cfg`, `requirements.txt` — тоже свой Python (взгляд на #1776)."""
+@pytest.mark.parametrize(
+    ("name", "own"),
+    [
+        ("pyproject.toml", True),
+        ("setup.py", True),
+        ("setup.cfg", True),
+        ("requirements.txt", False),
+    ],
+)
+def test_own_python_is_any_root_packaging_form(tmp_path: Path, name: str, own: bool) -> None:
+    """`setup.py` и `setup.cfg` — свой Python; `requirements.txt` — нет (#1776, #1788)."""
     (tmp_path / name).write_text("", encoding="utf-8")
-    assert module.own_python(tmp_path)
+    assert module.own_python(tmp_path) is own
 
 
 CI_BY_JOBS = """\
@@ -725,3 +733,10 @@ def test_version_text_refuses_an_ambiguous_number_and_an_expression() -> None:
     for bad in (3.1, "${{ matrix.python }}"):
         with pytest.raises(module.policy.BadPolicy):
             module.policy.version_text(bad, "ci.yml:x")
+
+
+@pytest.mark.parametrize("value", [float("inf"), 1e20])
+def test_a_number_without_digits_after_the_point_is_refused_not_a_trace(value: float) -> None:
+    """`.inf` и `1e+20` — отказ «неоднозначна», а не `IndexError` (взгляд на #1786)."""
+    with pytest.raises(module.policy.BadPolicy, match="неоднозначна"):
+        module.policy.version_text(value, "ci.yml:x")
