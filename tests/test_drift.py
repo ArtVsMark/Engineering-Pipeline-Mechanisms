@@ -2181,8 +2181,11 @@ def annotated_head(
     monkeypatch: pytest.MonkeyPatch,
     runs: list[dict[str, Any]],
     notes: dict[int, list[dict[str, Any]]],
+    events: dict[str, str] | None = None,
 ) -> list[str]:
     """Подделка площадки для предупреждений: голова, её проверки, их аннотации.
+
+    `events` — событие прогона по набору проверок; по умолчанию `push`.
 
     Отдаёт СТРАНИЦАМИ, как площадка: `page=N` получает N-й кусок по
     `PER_PAGE`. Иначе проверка не различала бы чтение первой страницы и чтение
@@ -2190,6 +2193,7 @@ def annotated_head(
     """
     asked: list[str] = []
     size = module.ghrest.PER_PAGE
+    events = events or {}
 
     def page_of(items: list[Any], path: str) -> list[Any]:
         number = int(path.rsplit("page=", 1)[1]) if "page=" in path else 1
@@ -2201,6 +2205,9 @@ def annotated_head(
             return {"sha": "c" * 40}
         if "/annotations" in path:
             return page_of(notes[int(path.split("/check-runs/")[1].split("/")[0])], path)
+        if "check_suite_id=" in path:
+            suite = path.rsplit("=", 1)[1]
+            return {"workflow_runs": [{"event": events.get(suite, "push")}]}
         return {"check_runs": page_of(runs, path)}
 
     monkeypatch.setattr(module.ghrest, "request", request)
@@ -2254,6 +2261,27 @@ def test_a_platform_warning_reaches_an_addressee_and_ours_does_not(
     # же в каждом задании, а ночной заход не обязан спрашивать девяносто раз.
     annotated = sorted({path.split("?")[0] for path in asked if "/annotations" in path})
     assert annotated == ["repos/o/r/check-runs/1/annotations", "repos/o/r/check-runs/3/annotations"]
+
+
+def test_a_platform_run_is_named_not_judged(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Прогон самой площадки (Dependabot, `dynamic`) записью не становится, но назван (#1753)."""
+    runs = [
+        {
+            "id": 1,
+            "name": "Dependabot",
+            "output": {"annotations_count": 1},
+            "check_suite": {"id": 9},
+        },
+        {"id": 2, "name": "lint", "output": {"annotations_count": 1}, "check_suite": {"id": 8}},
+    ]
+    notes = {1: [note("notice", UBUNTU)], 2: [note("warning", NODE)]}
+    annotated_head(monkeypatch, runs, notes, {"9": module.PLATFORM_EVENT})
+    found = module.platform_warnings("o/r", "t")
+    assert [one.said for one in found if "Ubuntu 26" in one.said] == []
+    assert any("Node.js 20" in one.said for one in found), "прогон из дерева перестал судиться"
+    assert "прогон площадки, не судится: Dependabot" in capsys.readouterr().out
 
 
 def test_a_head_without_checks_is_a_refusal_not_silence(monkeypatch: pytest.MonkeyPatch) -> None:

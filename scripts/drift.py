@@ -1337,6 +1337,28 @@ WARNING_LEVELS: Final = ("warning", "notice")
 #: Кириллица в тексте аннотации — признак, что её написали МЫ.
 OURS_RE: Final = re.compile(r"[а-яё]", re.IGNORECASE)
 
+#: Событие прогона, который площадка запускает САМА, без файла в дереве:
+#: обновление Dependabot (`dynamic/dependabot/dependabot-updates`). Образ и
+#: действия ему выбирает она, и правкой дерева его предупреждение не снять
+#: (#1753, замер 29.10.2026: `ubuntu-latest` на проверке `Dependabot`, когда все
+#: `runs-on` дерева — `ubuntu-26.04`).
+PLATFORM_EVENT: Final = "dynamic"
+
+
+def platform_run(repo: str, token: str, run: dict[str, Any]) -> bool:
+    """Проверку дал прогон самой площадки (:data:`PLATFORM_EVENT`), а не прогон из дерева.
+
+    Проверка чужого приложения прогона действий не имеет — ответ пуст, и она
+    судится, как прежде.
+    """
+    suite = (run.get("check_suite") or {}).get("id")
+    if not suite:
+        return False
+    found = ghrest.request("GET", f"repos/{repo}/actions/runs?check_suite_id={suite}", token)
+    return any(
+        one.get("event") == PLATFORM_EVENT for one in (found or {}).get("workflow_runs") or []
+    )
+
 
 def platform_warnings(repo: str, token: str) -> list[Drift]:
     """Предупреждения площадки с головы общей ветки — те, что не видит никто.
@@ -1385,16 +1407,25 @@ def platform_warnings(repo: str, token: str) -> list[Drift]:
         raise NotRun(
             f"на голове {head[:7]} нет ни одной проверки — предупреждений спросить не у кого"
         )
-    asked: dict[str, int] = {}
+    asked: dict[str, dict[str, Any]] = {}
     for run in runs:
         if (run.get("output") or {}).get("annotations_count"):
-            asked.setdefault(str(run.get("name")), int(run["id"]))
+            asked.setdefault(str(run.get("name")), run)
     said: dict[str, set[str]] = {}
-    for name, number in sorted(asked.items()):
-        for note in ghrest.paginate(f"repos/{repo}/check-runs/{number}/annotations", token):
+    for name, run in sorted(asked.items()):
+        # ПРОГОН ПЛОЩАДКИ НЕ СУДИТСЯ, НО НАЗЫВАЕТСЯ (#1753, 045): запись дрейфа о
+        # нём снять нечем, а молчание спрятало бы, что предупреждение было.
+        theirs = platform_run(repo, token, run)
+        for note in ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", token):
             text = " ".join(str(note.get("message") or "").split())
-            if note.get("annotation_level") in WARNING_LEVELS and text and not OURS_RE.search(text):
-                said.setdefault(text, set()).add(name)
+            if note.get("annotation_level") not in WARNING_LEVELS or not text:
+                continue
+            if OURS_RE.search(text):
+                continue
+            if theirs:
+                print(f"прогон площадки, не судится: {name} — {report.cut(text)}")
+                continue
+            said.setdefault(text, set()).add(name)
     return [
         Drift(
             "platform-warning",
