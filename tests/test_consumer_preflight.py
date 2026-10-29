@@ -391,3 +391,33 @@ def test_a_tree_without_mechanisms_is_named_and_not_cached(tmp_path: Path) -> No
         assert "остаток" not in done.stderr, done.stderr
     assert not cache.exists(), "чужое дерево встало на место кеша"
     assert not list(cache.parent.glob("*.part*")), "выкачка осталась рядом с кешем"
+
+
+def test_the_launcher_defaults_to_the_floor_interpreter(tmp_path: Path) -> None:
+    """Без `PYTHON` запускатель зовёт `python<планка>` из `floor.sh`, а не голый `python3` (#1771).
+
+    Хук старта ставит `pyyaml` в интерпретатор планки; системный `python3`
+    окна ниже планки и без `yaml`.
+    """
+    origin = supplier(tmp_path)
+    repo = origin / "o" / "m.git"
+    (repo / "scripts" / "work_plan.py").write_text(
+        "import os\nprint('через планку:', os.environ.get('VIA_FLOOR', 'нет'))\n",
+        encoding="utf-8",
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "ещё скрипт")
+    git(repo, "tag", "-f", "v1.2.3")
+    tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
+    hooks = tree / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "floor.sh").write_text("want=9.97\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    floor = bin_dir / "python9.97"
+    floor.write_text(f'#!/bin/sh\nVIA_FLOOR=да exec "{sys.executable}" "$@"\n', encoding="utf-8")
+    floor.chmod(0o755)
+    env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PYTHON": ""}
+    done = launch(tree, tmp_path, "work_plan.py", env_over=env)
+    assert done.returncode == 0, done.stderr
+    assert "через планку: да" in done.stdout, done.stdout

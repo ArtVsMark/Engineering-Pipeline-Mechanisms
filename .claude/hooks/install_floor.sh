@@ -18,11 +18,28 @@
 # интерпретатор планки тем же путём, uv из PyPI. Общего файла установки на два
 # хука у каталога нет: вынос сделан только для себя, ради заготовки потребителя.
 #
+# `pyyaml` — В ТОТ ЖЕ ИНТЕРПРЕТАТОР (#1771). Запускатель механизмов потребителя
+# (`kit/data/.claude/mechanisms.sh`) зовёт им скрипты поставщика, а им нужен
+# `yaml`: голый интерпретатор падал `ModuleNotFoundError` (замер окна EPL
+# 29.10.2026). Границы — те же, что объявляют прогоны; их равенство держит
+# `tests/test_session_start.py`. У поставщика `.venv` ставит хук старта сам, и
+# здесь `yaml` нужен только для запускателя потребителя — но установка одна на
+# оба хука (214).
+#
 # Файл не исполняется сам и потому без `#!` и без права на исполнение, как `floor.sh`.
+floor_pyyaml="pyyaml>=6,<7"
+uv_ready() {
+  [ -x /opt/uv/bin/uv ] || { python3.12 -m venv /opt/uv && /opt/uv/bin/pip install -q -U uv; }
+}
 if ! command -v "python$want" >/dev/null 2>&1; then
-  { python3.12 -m venv /opt/uv \
-      && /opt/uv/bin/pip install -q -U uv \
+  { uv_ready \
       && /opt/uv/bin/uv python install "$want" \
       && ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"; } \
     || warn "Python $want не поставлен"
+fi
+if command -v "python$want" >/dev/null 2>&1 && ! "python$want" -c 'import yaml' 2>/dev/null; then
+  { uv_ready \
+      && /opt/uv/bin/uv pip install -q --python "$(command -v "python$want")" \
+        --system --break-system-packages "$floor_pyyaml"; } \
+    || warn "pyyaml в Python $want не поставлен — запускатель механизмов упадёт на import yaml"
 fi

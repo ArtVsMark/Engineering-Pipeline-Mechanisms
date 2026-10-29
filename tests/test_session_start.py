@@ -11,7 +11,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 HOOK: Final = ROOT / ".claude" / "hooks" / "session-start.sh"
 #: Число планки для обоих хуков окна — одно место (#1058).
@@ -413,3 +413,27 @@ def test_without_a_repository_the_hook_names_the_signing_left_on(tmp_path: Path)
     assert done.returncode == 0, done.stderr
     assert "подпись коммитов не выключена" in done.stderr, done.stderr
     assert "выключена — автор" not in done.stdout, done.stdout
+
+
+#: Строка границ `pyyaml` в установке интерпретатора планки.
+FLOOR_PYYAML = re.compile(r'^floor_pyyaml="(?P<need>[^"]+)"$', re.MULTILINE)
+
+
+def test_the_floor_gets_pyyaml_with_the_bounds_of_the_runs() -> None:
+    """Интерпретатор планки получает `pyyaml` — с границами, что объявляют прогоны (#1771).
+
+    Запускатель механизмов потребителя зовёт им скрипты поставщика, и без
+    `yaml` они падали. Границы — одни на дерево: вторая запись разошлась бы
+    с прогонами молча (022).
+    """
+    install = INSTALL_FILE.read_text(encoding="utf-8")
+    match = FLOOR_PYYAML.search(install)
+    assert match, "установка планки не объявляет границ pyyaml"
+    declared = {
+        found
+        for path in walk(ROOT / ".github" / "workflows", "*.yml")
+        for found in re.findall(r'"(pyyaml[^"]*)"', path.read_text(encoding="utf-8"))
+    }
+    assert declared == {match["need"]}, (declared, match["need"])
+    assert "\"python$want\" -c 'import yaml'" in install, "наличие yaml не спрашивается"
+    assert '--python "$(command -v "python$want")"' in install, "pyyaml ставится не в планку"
