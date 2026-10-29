@@ -2,7 +2,7 @@
   "schema": "3",
   "_schema": "версия формы архива: findings (отпечаток → запись), resolutions (снятия, в том числе ещё без находки; fix_check — снято проверкой починки, а не строкой в теле слияния), counted (учтённые изменения), kinds (род → встречи по словарю и строкам «Род:» истории, и судьба; с формы 3 род находки, которой нет в словаре, берётся из строки «Род:» в теле слияния), merged (номер изменения → дата слияния из истории общей ветки, #1136), gaps (чего архив не знает), unconfirmed (что сверка с историей не подтвердила)",
   "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-  "generated_at": "2026-10-29T20:15:56+00:00",
+  "generated_at": "2026-10-29T20:40:16+00:00",
   "counted": [
     1,
     6,
@@ -1398,7 +1398,8 @@
     1773,
     1775,
     1776,
-    1777
+    1777,
+    1778
   ],
   "merged": {
     "19": "2026-09-09T09:17:26+00:00",
@@ -2779,7 +2780,8 @@
     "1773": "2026-10-29T18:07:09+00:00",
     "1775": "2026-10-29T18:31:00+00:00",
     "1776": "2026-10-29T19:06:46+00:00",
-    "1777": "2026-10-29T19:50:58+00:00"
+    "1777": "2026-10-29T19:50:58+00:00",
+    "1778": "2026-10-29T20:31:10+00:00"
   },
   "gaps": [
     "ответы верификатора у находок, ушедших из реестра до первого захода архива, неизвестны",
@@ -11187,6 +11189,22 @@
         "породил": []
       }
     },
+    "22c3166": {
+      "pr": 1778,
+      "seen_on": [
+        1778
+      ],
+      "weight": "замечание",
+      "kind": "код",
+      "role": "механик",
+      "title": "scripts/pipeline_checks.py:509 — имя `mechanisms_tree` уже занято в `scripts/python_badge.py:241` функцией с другим смыслом (возвращает `Path`, а не `bool`)",
+      "place": "scripts/pipeline_checks.py",
+      "checked": "",
+      "resolved_by": 1778,
+      "twin_of": "",
+      "род": null,
+      "правило": null
+    },
     "22d0f84": {
       "pr": 284,
       "seen_on": [
@@ -12884,6 +12902,22 @@
         },
         "породил": []
       }
+    },
+    "288d23e": {
+      "pr": 1778,
+      "seen_on": [
+        1778
+      ],
+      "weight": "замечание",
+      "kind": "код",
+      "role": "ревизор",
+      "title": "scripts/pipeline_checks.py:534-536 — граница «не узнали, чей поставщик, — своя версия первее, как прежде» больше не верна, а осталась в докстроке",
+      "place": "scripts/pipeline_checks.py",
+      "checked": "",
+      "resolved_by": 1778,
+      "twin_of": "",
+      "род": null,
+      "правило": null
     },
     "28a95ca": {
       "pr": 678,
@@ -22614,6 +22648,22 @@
         ]
       }
     },
+    "5053898": {
+      "pr": 1778,
+      "seen_on": [
+        1778
+      ],
+      "weight": "замечание",
+      "kind": "код",
+      "role": "ревизор",
+      "title": "changelog.d/consumer-own-release-number.fixed.md:4 — «брала своя `CONTRACT_VERSION`»: ошибка согласования, нужно «свою»",
+      "place": "changelog.d/consumer-own-release-number.fixed.md",
+      "checked": "",
+      "resolved_by": 1778,
+      "twin_of": "",
+      "род": null,
+      "правило": null
+    },
     "506cf96": {
       "pr": 874,
       "seen_on": [
@@ -31093,6 +31143,22 @@
       "род": null,
       "правило": null
     },
+    "6ff7ea4": {
+      "pr": 1778,
+      "seen_on": [
+        1778
+      ],
+      "weight": "замечание",
+      "kind": "код",
+      "role": "тестировщик",
+      "title": "tests/test_pipeline_checks.py:1508-1523 — тест шага выпуска пишет `CONTRACT_VERSION` сам, без шага выпуска; проверка «номер механизмов не тронут» верна по построению",
+      "place": "tests/test_pipeline_checks.py",
+      "checked": "",
+      "resolved_by": 1778,
+      "twin_of": "",
+      "род": null,
+      "правило": null
+    },
     "6ffcae8": {
       "pr": 657,
       "seen_on": [
@@ -36333,6 +36399,22 @@
         },
         "породил": []
       }
+    },
+    "8685fdd": {
+      "pr": 1778,
+      "seen_on": [
+        1778
+      ],
+      "weight": "замечание",
+      "kind": "код",
+      "role": "ревизор",
+      "title": "scripts/pipeline_checks.py:517-518 — докстрока «Дерево, несущее свой `CONTRACT_VERSION`, — поставщик» противоречит новому абзацу #1774",
+      "place": "scripts/pipeline_checks.py",
+      "checked": "",
+      "resolved_by": 1778,
+      "twin_of": "",
+      "род": null,
+      "правило": null
     },
     "8687377": {
       "pr": 1723,
@@ -45003,6 +45085,22 @@
       "place": ".rules/bindings.json",
       "checked": "",
       "resolved_by": 794,
+      "twin_of": "",
+      "род": null,
+      "правило": null
+    },
+    "a8944f9": {
+      "pr": 1778,
+      "seen_on": [
+        1778
+      ],
+      "weight": "риск",
+      "kind": "код",
+      "role": "критик метода",
+      "title": "scripts/pipeline_checks.py:511 — поставщик опознаётся по файлу `scripts/pipeline_checks.py`: у потребителя, переписавшего механизм к себе, своя версия снова первее тега, если поставщик не опознан",
+      "place": "scripts/pipeline_checks.py",
+      "checked": "",
+      "resolved_by": 1778,
       "twin_of": "",
       "род": null,
       "правило": null
@@ -66567,6 +66665,22 @@
       "twin_of": "",
       "род": null,
       "правило": null
+    },
+    "fff07f4": {
+      "pr": 1778,
+      "seen_on": [
+        1778
+      ],
+      "weight": "риск",
+      "kind": "код",
+      "role": "механик",
+      "title": "scripts/pipeline_checks.py:553 — при `supplier is None` свой `CONTRACT_VERSION` потребителя по-прежнему сверяется с окном механизмов: соседний случай #1774 не назван и не починен (правило 195)",
+      "place": "scripts/pipeline_checks.py",
+      "checked": "",
+      "resolved_by": 1778,
+      "twin_of": "",
+      "род": null,
+      "правило": null
     }
   },
   "resolutions": {
@@ -69052,6 +69166,11 @@
       "twin_of": "",
       "fix_check": true
     },
+    "22c3166": {
+      "by": 1778,
+      "twin_of": "",
+      "fix_check": true
+    },
     "22cdad1": {
       "by": 1295,
       "twin_of": "67a4395"
@@ -69543,6 +69662,11 @@
     },
     "28704c9": {
       "by": 1241,
+      "twin_of": "",
+      "fix_check": true
+    },
+    "288d23e": {
+      "by": 1778,
       "twin_of": "",
       "fix_check": true
     },
@@ -72452,6 +72576,11 @@
       "twin_of": "",
       "fix_check": true
     },
+    "5053898": {
+      "by": 1778,
+      "twin_of": "",
+      "fix_check": true
+    },
     "506cf96": {
       "by": 874,
       "twin_of": ""
@@ -74854,6 +74983,11 @@
       "by": 822,
       "twin_of": ""
     },
+    "6ff7ea4": {
+      "by": 1778,
+      "twin_of": "",
+      "fix_check": true
+    },
     "6ffcae8": {
       "by": 660,
       "twin_of": ""
@@ -76430,6 +76564,11 @@
     },
     "867d52f": {
       "by": 1730,
+      "twin_of": "",
+      "fix_check": true
+    },
+    "8685fdd": {
+      "by": 1778,
       "twin_of": "",
       "fix_check": true
     },
@@ -78984,6 +79123,11 @@
     "a872318": {
       "by": 1368,
       "twin_of": ""
+    },
+    "a8944f9": {
+      "by": 1778,
+      "twin_of": "",
+      "fix_check": true
     },
     "a8b4455": {
       "by": 867,
@@ -85454,6 +85598,11 @@
     "ffaff9b": {
       "by": 824,
       "twin_of": ""
+    },
+    "fff07f4": {
+      "by": 1778,
+      "twin_of": "",
+      "fix_check": true
     },
     "fffc86e": {
       "by": 1730,
