@@ -67,6 +67,26 @@ def test_a_new_line_with_the_old_pin_is_refused(run_script: RunScript, tmp_path:
 
 
 @pytest.mark.parametrize(
+    "old",
+    [
+        "      - uses: github/codeql-action/init@v2\n",
+        '      - uses: "github/codeql-action@v2"\n',
+    ],
+    ids=["подкаталог", "кавычки"],
+)
+def test_every_form_of_an_old_pin_is_refused(
+    run_script: RunScript, tmp_path: Path, old: str
+) -> None:
+    """Подкаталог и кавычки — тот же прежний пин: разбор их видит (взгляд на #1739, 210)."""
+    up = "      - uses: github/codeql-action/analyze@v3\n"
+    repo = change(
+        tmp_path, {"a.yml": run_file(up)}, {"a.yml": run_file(up), "b.yml": run_file(old)}
+    )
+    done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
+    assert done.code == pins.EXIT_FOUND, done.out + done.err
+
+
+@pytest.mark.parametrize(
     ("base", "head"),
     [
         # Подъём: новая версия старше — это решение о переезде, его держит дрейф.
