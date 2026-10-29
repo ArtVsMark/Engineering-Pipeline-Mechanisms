@@ -107,9 +107,17 @@ def test_the_gate_found_its_subject() -> None:
     assert calls(), "ни один шаг прогона не запускает такой скрипт — предмет не найден"
 
 
+#: Ключи, с которыми безтокенный режим всё же идёт к площадке — в той же строке
+#: вызова (взгляд на #1728): `--summary x --map y` к площадке ходит.
+TOKEN_FLAGS: Final = {"family_gates.py": ("--map",)}
+
+
 def tokenless(script: str, run: str) -> bool:
     """Все ли вызовы `script` в `run` — режимы без площадки (та же мерка, что в гейте)."""
     modes = [mode for mode in TOKENLESS_MODES if mode.startswith(f"{script} ")]
+    calls_of = [line for line in run.splitlines() if f"scripts/{script}" in line]
+    if any(flag in line for line in calls_of for flag in TOKEN_FLAGS.get(script, ())):
+        return False
     return bool(modes) and run.count(f"scripts/{script}") == sum(
         run.count(f"scripts/{mode}") for mode in modes
     )
@@ -156,4 +164,5 @@ def test_a_step_with_both_modes_still_needs_a_token() -> None:
         "python scripts/family_gates.py --summary a --out b\npython scripts/family_gates.py --map b"
     )
     assert not tokenless("family_gates.py", both)
+    assert not tokenless("family_gates.py", "python scripts/family_gates.py --summary a --map b")
     assert tokenless("family_gates.py", "python scripts/family_gates.py --summary a --out b")
