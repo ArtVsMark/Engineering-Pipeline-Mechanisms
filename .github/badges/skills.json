@@ -1154,6 +1154,36 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1779,
+   "merged_at": "2026-10-29",
+   "commit": "8fdfe8d47a309a01e34296191da274e92afb1018",
+   "touched": [
+    "changelog.d/findings-wave-own-mechanisms.fixed.md",
+    "scripts/automerge.py",
+    "scripts/check_env.py",
+    "scripts/preflight.py",
+    "scripts/schedules_seen.py",
+    "tests/test_automerge.py",
+    "tests/test_schedules_seen.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/findings-wave-own-mechanisms.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "bundle-the-work",
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
