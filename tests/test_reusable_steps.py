@@ -582,3 +582,39 @@ def test_types_judge_nothing_without_a_mypy_config(
     else:
         assert done.returncode == 0 and "судить нечего" in done.stdout, done
         assert "mypy-called" not in done.stdout
+
+
+def test_a_failed_consumer_manifest_does_not_drop_the_facts(tmp_path: Path) -> None:
+    """Сбой манифеста семьи — предупреждение, а не падение джоба фактов (взгляд на #1776).
+
+    Ронять публикацию фактов дороже, чем выйти без манифеста (#1534).
+    """
+    flow = yaml.safe_load((STEPS / "step-facts.yml").read_text(encoding="utf-8"))
+    steps = next(iter(flow["jobs"].values()))["steps"]
+    block = str(
+        next(one["run"] for one in steps if one.get("name") == "манифест семьи потребителя")
+    )
+    mechanisms = tmp_path / "mechanisms"
+    (mechanisms / "scripts").mkdir(parents=True)
+    (mechanisms / "scripts" / "build_facts.py").write_text(
+        "raise SystemExit(2)\n", encoding="utf-8"
+    )
+    env = {
+        **os.environ,
+        "MECHANISMS": str(mechanisms),
+        "GITHUB_REPOSITORY": "someone/consumer",
+        "SUPPLIER": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    done = subprocess.run(
+        ["bash", "-e", "-c", block],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done
+    assert "::warning::Манифест семьи не собран (код 2)" in done.stdout, done

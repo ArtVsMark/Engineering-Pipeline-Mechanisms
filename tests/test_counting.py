@@ -255,7 +255,11 @@ def test_an_unread_matrix_names_a_reason_for_the_reader(
 ) -> None:
     """Матрица не прочитана — в `none.python` причина для читателя, а не трасса (#1004)."""
     (tmp_path / facts.CI_FLOW).parent.mkdir(parents=True)
-    (tmp_path / facts.CI_FLOW).write_text("jobs: {}\n", encoding="utf-8")
+    # Джоб матрицы есть, а матрицы в нём нет: «не прочитана». Джоба нет вовсе —
+    # другое состояние со своей причиной (#1766).
+    (tmp_path / facts.CI_FLOW).write_text(
+        f"jobs:\n  {facts.SUPPORTED_JOB}:\n    runs-on: ubuntu-latest\n", encoding="utf-8"
+    )
     run, none = facts.ci_facts(tmp_path)
     assert run == {"ci": {"workflow": facts.CI_FLOW.name}}
     assert none == {"python": facts.NO_PYTHON}
