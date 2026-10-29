@@ -31,8 +31,8 @@ name: step-facts
 #
 # ПУБЛИКАЦИЯ — КОММИТОМ ПОВЕРХ ВЕТКИ `badges`, А НЕ ПЕРЕЗАПИСЬЮ (вариант 1
 # решения 06.10.2026). Шаг кладёт только `.github/badges/facts.json`, значок
-# проекта `project.svg`, собранный по ним действием каталога (#1282, #1422), и
-# разбор семьи `family-check.json` того же действия (#1532), — перечень
+# проекта `project.svg`, собранный по ним `project_badge.py` механизмов (#1282, #1422), и
+# разбор семьи `family-check.json` той же сборки (#1532), — перечень
 # `publish_facts.PUBLISHES` — и не трогает остального: свои значки и файлы потребителя на ветке живут.
 # ЭТИ ТРИ ИМЕНИ ЗАНЯТЫ ШАГОМ: свой файл потребителя с таким же путём шаг
 # перезапишет. Других путей он не касается (взгляд на #1327). Цена
@@ -51,7 +51,7 @@ on:
         type: string
         default: ci.yml
       python-matrix:
-        description: матрица версий Python — «<файл прогона>:<джоб>»; пусто — причина в none
+        description: версии Python — «<файл прогона>:<джоб>[,<джоб>…]»; матрица или python-version у setup-python каждой работы; пусто — причина в none
         type: string
         default: ""
       python-next:
@@ -63,7 +63,7 @@ on:
         type: string
         default: ""
       publish:
-        description: класть ли facts.json, project.svg и family-check.json на ветку badges; false — собрать, сверить и собрать значок действием каталога, ничего не публикуя
+        description: класть ли facts.json, project.svg и family-check.json на ветку badges; false — собрать, сверить и собрать значок `project_badge.py` механизмов, ничего не публикуя
         type: boolean
         default: true
       # АРХИВ НАХОДОК — ВХОДОМ ЭТОГО ШАГА, А НЕ ОТДЕЛЬНЫМ ШАГОМ (#1414, решение
@@ -339,6 +339,45 @@ jobs:
         run: >-
           python $MECHANISMS/scripts/build_facts.py
           --from-facts "$RUNNER_TEMP/facts/facts.json" --endpoints-out .project-badge
+      # ФАКТЫ И МАНИФЕСТ — ТУДА, ГДЕ ИХ ЧИТАЕТ СВЕРКА СЕМЬИ (#1780). Сверка
+      # ищет `.github/badges/facts.json` и `contracts.json` в дереве, а дерево —
+      # свежая выкачка: оба файла живут на ветке `badges`. Без них зоны `gives`,
+      # `ext` и издателя были «?» у каждого, у механизмов тоже. Факты — этого же
+      # прогона; манифест — собранный выше у потребителя, а у поставщика —
+      # опубликованный на `badges` его прогоном значков. Не прочитан —
+      # предупреждение, а не отказ: значок без зоны лучше, чем без значка (084).
+      # ЗАПАСНОЙ ПУТЬ С `badges` — ТОЛЬКО ПОСТАВЩИКУ (взгляд на #1786): у
+      # потребителя, чья сборка манифеста выше упала, прошлый файл с ветки
+      # судил бы семью устаревшим. «Нет на ветке» и «не прочитан» разведены
+      # `ls-tree`, как у архива ниже (взгляд на #791).
+      - name: факты и манифест — к сверке семьи
+        env:
+          SUPPLIER: ${{ job.workflow_repository }}
+        run: |
+          set -uo pipefail
+          mkdir -p .github/badges
+          cp "$RUNNER_TEMP/facts/facts.json" .github/badges/facts.json
+          rm -f .github/badges/contracts.json
+          if [ -f "$RUNNER_TEMP/facts/contracts.json" ]; then
+            cp "$RUNNER_TEMP/facts/contracts.json" .github/badges/contracts.json
+          elif [ "${GITHUB_REPOSITORY,,}" != "${SUPPLIER,,}" ]; then
+            echo "::warning::манифест семьи этого прогона не собран — зона gives будет «?», прошлый с ветки badges не берётся"
+          elif ! git fetch --quiet origin badges; then
+            echo "::warning::ветка badges не выкачана — манифест поставщика не прочитан, зона gives будет «?»"
+          else
+            listed=0
+            found=$(git ls-tree -z --name-only FETCH_HEAD -- .github/badges/contracts.json | tr -d "\0") || listed=$?
+            if [ "$listed" -ne 0 ]; then
+              echo "::warning::дерево ветки badges не прочитано (ls-tree код $listed) — зона gives будет «?»"
+            elif [ -z "$found" ]; then
+              echo "::warning::манифеста поставщика на ветке badges нет — зона gives будет «?»"
+            elif git show FETCH_HEAD:.github/badges/contracts.json >.github/badges/contracts.json; then
+              echo "манифест семьи — опубликованный на ветке badges"
+            else
+              rm -f .github/badges/contracts.json
+              echo "::warning::манифест поставщика на ветке badges есть, но не прочитан — зона gives будет «?»"
+            fi
+          fi
       # Вход `pypi` не задаётся: шаг не знает имени пакета потребителя, и зона
       # «release / PyPI» показывает выпуск площадки. Чужое число по совпадению
       # имени на значок так не попадает (194).

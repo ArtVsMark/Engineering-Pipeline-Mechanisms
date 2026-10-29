@@ -618,3 +618,91 @@ def test_own_python_is_a_root_manifest_or_a_package(tmp_path: Path) -> None:
     package.mkdir(parents=True)
     (package / "pyproject.toml").write_text("[project]\nname = 'core'\n", encoding="utf-8")
     assert module.own_python(tmp_path)
+
+
+CI_BY_JOBS = """\
+jobs:
+  catalogue:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/setup-python@abc # v6
+        with:
+          python-version: "3.14"
+  catalogue-next-stable:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/setup-python@abc # v6
+        with:
+          python-version: "3.15"
+"""
+
+
+def test_versions_by_separate_jobs_are_read_from_setup_python(tmp_path: Path) -> None:
+    """Версии отдельными работами без матрицы — из `python-version` каждой (#1783)."""
+    root = tree(tmp_path)
+    (root / ".github" / "workflows" / "ci.yml").write_text(CI_BY_JOBS, encoding="utf-8")
+    run, none = module.ci_facts(root, "ci.yml", "ci.yml:catalogue,catalogue-next-stable")
+    assert none == {}, none
+    assert run["python"] == {"supported": ["3.14", "3.15"], "os": ["ubuntu-26.04"]}
+
+
+def test_a_job_without_a_matrix_or_setup_python_is_unread(tmp_path: Path) -> None:
+    """Ни оси, ни `python-version` — «не прочитана», а не пустой список (#1783, 045)."""
+    root = tree(tmp_path)
+    (root / ".github" / "workflows" / "ci.yml").write_text(
+        "jobs:\n  bare:\n    runs-on: x\n    steps: []\n", encoding="utf-8"
+    )
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    _, none = module.ci_facts(root, "ci.yml", "ci.yml:bare")
+    assert none["python"] == module.UNREAD_MATRIX.format("ci.yml"), none
+
+
+def test_job_pythons_and_pythons_of_read_each_named_job(tmp_path: Path) -> None:
+    """`job_pythons` — версии одной работы, `pythons_of` — перечня без повторов (#1783)."""
+    flow = tree(tmp_path) / ".github" / "workflows" / "ci.yml"
+    flow.write_text(CI_BY_JOBS, encoding="utf-8")
+    assert module.policy.job_pythons(flow, "catalogue") == (["3.14"], "ubuntu-26.04")
+    versions, images = module.pythons_of(flow, "catalogue, catalogue-next-stable,catalogue")
+    assert versions == ["3.14", "3.15"] and images == {"ubuntu-26.04"}
+
+
+def test_a_matrix_with_another_axis_is_unread_not_an_expression(tmp_path: Path) -> None:
+    """Матрица с осью не `python` — «не прочитана», а не `${{ matrix.… }}` (взгляд на #1786)."""
+    flow = tree(tmp_path) / ".github" / "workflows" / "ci.yml"
+    flow.write_text(
+        "jobs:\n  test:\n    runs-on: x\n    strategy:\n      matrix:\n"
+        '        python-version: ["3.14"]\n    steps:\n'
+        "      - uses: actions/setup-python@abc\n        with:\n"
+        "          python-version: ${{ matrix.python-version }}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(module.policy.BadPolicy, match="не прочитана"):
+        module.policy.job_pythons(flow, "test")
+
+
+@pytest.mark.parametrize(("version", "ok"), [("3.10", False), ("3.12", True), ('"3.10"', True)])
+def test_a_version_written_as_an_ambiguous_number_is_refused(
+    tmp_path: Path, version: str, ok: bool
+) -> None:
+    """`3.10` без кавычек YAML читает как 3.1 — отказ, а не другая версия (взгляд на #1786)."""
+    flow = tree(tmp_path) / ".github" / "workflows" / "ci.yml"
+    flow.write_text(
+        "jobs:\n  one:\n    runs-on: x\n    steps:\n"
+        "      - uses: actions/setup-python@abc\n        with:\n"
+        f"          python-version: {version}\n",
+        encoding="utf-8",
+    )
+    if ok:
+        assert module.policy.job_pythons(flow, "one")[0] == [version.strip('"')]
+    else:
+        with pytest.raises(module.policy.BadPolicy, match="неоднозначна"):
+            module.policy.job_pythons(flow, "one")
+
+
+def test_version_text_refuses_an_ambiguous_number_and_an_expression() -> None:
+    """`version_text`: 3.12 числом — строка, 3.1 числом и `${{ … }}` — отказ (взгляд на #1786)."""
+    assert module.policy.version_text(3.12, "ci.yml:x") == "3.12"
+    assert module.policy.version_text("3.10", "ci.yml:x") == "3.10"
+    for bad in (3.1, "${{ matrix.python }}"):
+        with pytest.raises(module.policy.BadPolicy):
+            module.policy.version_text(bad, "ci.yml:x")

@@ -644,8 +644,9 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
             )
     except contract_form.NotRun as exc:
         problems.append(str(exc))
-    # Записи соседа о наших механизмах (#1665) — тем же приёмом: битая
-    # запись видна шагом `pipeline` у него, а не нашим обходом семьи.
+    # Записи соседа о механизмах поставщика (#1665) — любого, кого называет
+    # поле `supplier`, а не только наших (взгляд на #1737) — тем же приёмом:
+    # битая запись видна шагом `pipeline` у него, а не обходом семьи.
     try:
         feedback_form.form_of(raw.get(feedback_form.SECTION))
     except feedback_form.NotRun as exc:
@@ -1186,11 +1187,65 @@ def matrix_axis(path: Path, job: str, axis: str) -> tuple[list[str], str]:
         # Джоб-вызов — телом вызванного шага: образ у него, а матрица у
         # вызывающего (#1556).
         said = resolved_job(path, job)
-        values = [str(one) for one in said["strategy"]["matrix"][axis]]
+        values = [version_text(one, f"{path}:{job}") for one in said["strategy"]["matrix"][axis]]
         image = str(said["runs-on"])
     except (BadPolicy, KeyError, TypeError) as exc:
         raise BadPolicy(f"{path}: ось «{axis}» джоба «{job}» не прочитана ({exc!r})") from exc
     return values, image
+
+
+#: Действие установки Python: его `python-version` — версия работы без матрицы.
+SETUP_PYTHON: Final = "actions/setup-python@"
+
+
+def version_text(value: object, where: str) -> str:
+    """Версия Python строкой; число с одним знаком после точки — отказ (взгляд на #1786).
+
+    YAML читает `3.10` без кавычек как число 3.1: версия молча становится
+    другой. По числу их не различить, поэтому `3.1`, `3.2`… числом — отказ с
+    причиной, а `3.12` числом читается как прежде. Выражение `${{ … }}` —
+    не версия, а подстановка площадки: тоже отказ (045).
+    """
+    if isinstance(value, float) and len(str(value).split(".")[1]) < 2:
+        raise BadPolicy(
+            f"{where}: версия числом «{value}» неоднозначна — YAML теряет нули, пишите строкой"
+        )
+    said = str(value)
+    if "${{" in said:
+        raise BadPolicy(f"{where}: «{said}» — подстановка площадки, а не версия")
+    return said
+
+
+def job_pythons(path: Path, job: str) -> tuple[list[str], str]:
+    """Версии Python работы и её образ: ось матрицы, а без матрицы — `python-version` (#1783).
+
+    Проект ставит версии и отдельными работами без матрицы (каталог:
+    `catalogue` на планке, `catalogue-next-stable` на следующей). Есть
+    `strategy.matrix` — читается её ось `python`, и только она: матрица с
+    другой осью, `include` или `fromJSON` — «не прочитана», а не буквальное
+    `${{ matrix.… }}` из `setup-python` (взгляд на #1786, 195). Матрицы нет —
+    `python-version` шага `actions/setup-python` (строка или список).
+    """
+    try:
+        said = resolved_job(path, job)
+    except BadPolicy as exc:
+        raise BadPolicy(f"{path}: ось версий джоба «{job}» не прочитана ({exc})") from exc
+    if (said.get("strategy") or {}).get("matrix") is not None:
+        return matrix_axis(path, job, "python")
+    where = f"{path}:{job}"
+    found: list[str] = []
+    for step in said.get("steps") or []:
+        if isinstance(step, dict) and str(step.get("uses") or "").startswith(SETUP_PYTHON):
+            version = (step.get("with") or {}).get("python-version")
+            for one in version if isinstance(version, list) else [version]:
+                if one is not None:
+                    found.append(version_text(one, where))
+    if not found:
+        raise BadPolicy(
+            f"{path}: ось версий джоба «{job}» не прочитана — ни матрицы,"
+            " ни python-version у actions/setup-python"
+        )
+    return found, str(said.get("runs-on") or "")
 
 
 def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, Job]:
