@@ -68,8 +68,10 @@ def test_numbers_come_from_the_sources(tmp_path: Path) -> None:
     # Номер — договора, а не наш (#1337, #1396), и берётся у константы, а не
     # вписывается здесь второй раз: подъём 2.0 → 2.1 (#1563) иначе краснел бы тут.
     assert collected["schema"] == facts.SCHEMA
-    # В синтетическом дереве нет матрицы CI — значит причина, а не пропуск.
-    assert collected["none"]["python"] == facts.NO_PYTHON
+    # В синтетическом дереве нет джоба матрицы CI — значит причина, а не пропуск (#1766).
+    assert collected["none"]["python"] == facts.common.NO_MATRIX_JOB.format(
+        facts.CI_FLOW.name, facts.SUPPORTED_JOB
+    )
     assert collected["generated_at"].endswith("+00:00")
 
 
@@ -145,6 +147,7 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
     (tmp_path / facts.VERSION_FILE).write_text("0.7.3\n", encoding="utf-8")
     gives = {"steps": "0.7", "facts": facts.facts_number()}
     assert facts.manifest_facts(tmp_path) == {"release": None, "gives": gives}
+    assert facts.release_of(tmp_path) is None
     git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "add", "."], check=True)
     subprocess.run([*git, "commit", "-qm", "c"], check=True)
@@ -153,6 +156,7 @@ def test_manifest_facts_read_the_release_and_the_contract(tmp_path: Path) -> Non
         [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, encoding="utf-8"
     ).stdout.strip()
     assert facts.manifest_facts(tmp_path)["release"] == {"tag": "v1.5.0", "sha": sha}
+    assert facts.release_of(tmp_path) == {"tag": "v1.5.0", "sha": sha}
     # Голова ушла вперёд выпуска — номер остаётся номером тега (#299, взгляд на #1294).
     # Голова — ДРУГОГО минора: у 0.7.4 тот же MAJOR.MINOR «0.7», и чтение головы
     # вместо тега прошло бы зелёным (находка `46a0c7f` на #1395).
