@@ -9,6 +9,7 @@
 """
 
 import codecs
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -112,7 +113,7 @@ def test_links_that_resolve_are_clean(
     от той, что не нашла ничего
     ([075](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/075-a-guard-that-finds-nothing-must-fail.md)).
     """
-    monkeypatch.setattr(module, "known", lambda: {"044": "check-the-premise-before-fixing"})
+    monkeypatch.setattr(module, "known", lambda *_: {"044": "check-the-premise-before-fixing"})
     monkeypatch.setattr(
         module,
         "links",
@@ -130,7 +131,7 @@ def test_a_link_leading_nowhere_is_the_found_outcome(
     Прежде этот исход засчитывался прогнанным по `len(problems) == 1`: число
     совпадало с кодом, а точку входа с находкой не звал никто.
     """
-    monkeypatch.setattr(module, "known", lambda: {"044": "check-the-premise-before-fixing"})
+    monkeypatch.setattr(module, "known", lambda *_: {"044": "check-the-premise-before-fixing"})
     monkeypatch.setattr(module, "links", lambda root: [("AGENTS.md", 1, "044", "not-that-name")])
     assert module.main([]) == module.EXIT_FOUND
     assert "ведущих не туда: 1 из 1" in capsys.readouterr().out
@@ -313,3 +314,36 @@ def test_python_text_and_python_links_name_their_outcomes() -> None:
     assert module.python_links("x.py", b"def (") is None
     said = module.python_links("x.py", f'X = "{FAKE}"  # {FAKE}\n'.encode())
     assert said == [(Path("x.py"), 1, "001", "a")]
+
+
+def test_the_catalogue_tree_checks_against_its_own_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """На дереве каталога правила — из его выгрузки в дереве, а не с общей ветки (#1781).
+
+    Новое правило в изменении каталога иначе краснело до слияния.
+    """
+    (tmp_path / "export").mkdir()
+    (tmp_path / "export" / "rules.json").write_text(
+        json.dumps({"rules": [{"id": "231", "slug": "new-rule"}]}), encoding="utf-8"
+    )
+    monkeypatch.setattr(module.gitcall, "own_repo", lambda _root: module.catalogue.REPO)
+
+    def network(*_: object) -> object:
+        raise AssertionError("на дереве каталога выгрузка с площадки не спрашивается")
+
+    monkeypatch.setattr(module.catalogue, "read", network)
+    assert module.known(tmp_path) == {"231": "new-rule"}
+
+
+def test_another_tree_still_reads_the_published_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Не каталог — опубликованная выгрузка, своя `export/` дерева не в счёт (#1781)."""
+    (tmp_path / "export").mkdir()
+    (tmp_path / "export" / "rules.json").write_text('{"rules": []}', encoding="utf-8")
+    monkeypatch.setattr(module.gitcall, "own_repo", lambda _root: "someone/else")
+    monkeypatch.setattr(
+        module.catalogue, "read", lambda *_: {"rules": [{"id": "001", "slug": "a"}]}
+    )
+    assert module.known(tmp_path) == {"001": "a"}
