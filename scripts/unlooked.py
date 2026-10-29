@@ -73,6 +73,7 @@ import agent_run
 import findings
 import ghrest
 import main_guard
+import paths
 import report
 import review_findings
 
@@ -694,6 +695,30 @@ def scan(
     return entries, mark
 
 
+def onboarded_at(repo: str, token: str) -> datetime | None:
+    """Когда шаг взгляда лёг в общую ветку: время самого старого её коммита с `review.yml`.
+
+    ДО ПОДКЛЮЧЕНИЯ ВЗГЛЯДА СПРАШИВАТЬ НЕ С КОГО (#1757). Потребитель
+    подключается к истории, слитой руками, и без границы реестр называл её
+    осечками канала. Замер 29.10.2026, проба #1558: первый же заход очереди
+    в EPL записал #1, #2, #10, #11 — снять их было нечем. Граница читается
+    у истории (049), а не вписывается потребителем. `review.yml` в общей
+    ветке нет — подключения ещё не было, и `None` значит «всё слитое — до него».
+    """
+    found = list(ghrest.paginate(f"repos/{repo}/commits?path={paths.REVIEW_RUN.as_posix()}", token))
+    if not found:
+        return None
+    return ghrest.moment(((found[-1].get("commit") or {}).get("committer") or {}).get("date"))
+
+
+def before_onboarding(item: dict[str, Any], edge: datetime | None) -> bool:
+    """Слито раньше, чем шаг взгляда лёг в общую ветку; без времени слияния — не раньше (045)."""
+    merged = ghrest.moment(item.get("merged_at"))
+    if merged is None:
+        return False
+    return edge is None or merged < edge
+
+
 def machine_branch(item: dict[str, Any], prefixes: Iterable[str]) -> bool:
     """Слитое изменение открыто с машинной ветки: имя головы начинается с приставки.
 
@@ -1050,6 +1075,15 @@ def main(argv: list[str] | None = None) -> int:
             merged = [item for item in merged if not machine_branch(item, skip)]
             numbers = ", ".join(f"#{item.get('number')}" for item in skipped)
             print(f"машинных веток в окне — в реестр не встали: {len(skipped)} ({numbers})")
+        # СЛИТОЕ ДО ПОДКЛЮЧЕНИЯ ВЗГЛЯДА В РЕЕСТР НЕ ВСТАЁТ (#1757) — тем же
+        # приёмом, что машинные ветки: отсев назван числом, а прежние записи
+        # снимаются ниже вместе с машинными.
+        edge = onboarded_at(args.repo, token)
+        early = [item for item in merged if before_onboarding(item, edge)]
+        if early:
+            merged = [item for item in merged if not before_onboarding(item, edge)]
+            numbers = ", ".join(f"#{item.get('number')}" for item in early)
+            print(f"слито до подключения взгляда — в реестр не встало: {len(early)} ({numbers})")
         known = parse_entries(body)
         # ЗАПИСЬ, ВСТАВШАЯ ДО ВХОДА, СНИМАЕТСЯ ТЕМ ЖЕ ОТСЕВОМ (взгляд на #1353):
         # иначе машинное слитое из прежних заходов оставалось бы «без взгляда»,
@@ -1060,6 +1094,11 @@ def main(argv: list[str] | None = None) -> int:
         if dropped:
             known = {number: entry for number, entry in known.items() if number not in machine}
             print("машинные записи реестра сняты: " + ", ".join(f"#{n}" for n in dropped))
+        prior = {int(item["number"]) for item in early if item.get("number") is not None}
+        gone = sorted(number for number in known if number in prior)
+        if gone:
+            known = {number: entry for number, entry in known.items() if number not in prior}
+            print("записи слитого до подключения сняты: " + ", ".join(f"#{n}" for n in gone))
         entries, watermark = scan(
             merged,
             known,
