@@ -256,3 +256,69 @@ def test_added_mechanisms_are_only_the_added_ones(
     commit(repo)
     monkeypatch.chdir(repo)
     assert module.added_mechanisms("main") == ["scripts/check_new.py"]
+
+
+SIGN = "# SPDX-License-Identifier: MIT — https://github.com/{}\n"
+THIN = (
+    "on: push\njobs:\n  lint:\n    name: lint\n"
+    "    uses: {}/.github/workflows/step-lint.yml@v1.12.0\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("path", "text", "asked"),
+    [
+        ("scripts/check_kit.py", SIGN.format("o/поставщик") + '"""Гейт."""\n', False),
+        ("scripts/check_mine.py", SIGN.format("o/свой") + '"""Гейт."""\n', True),
+        (".github/workflows/ci.yml", THIN.format("o/поставщик"), False),
+        (".github/workflows/ci.yml", THIN.format("o/свой"), True),
+        (".github/workflows/ci.yml", THIN.format("o/сторонний"), True),
+        (".github/workflows/own.yml", "on: push\njobs:\n  a:\n    steps:\n      - run: x\n", True),
+    ],
+    ids=[
+        "подпись-поставщика",
+        "своя-подпись",
+        "тонкий-вызов",
+        "вызов-своего",
+        "вызов-стороннего",
+        "свой-прогон",
+    ],
+)
+def test_a_mechanism_connected_ready_is_not_asked(
+    repo: Path, path: str, text: str, asked: bool
+) -> None:
+    """Заготовка поставщика — ответ 162 подписью или тонким вызовом; своё судится (#1743)."""
+    _git(repo, "remote", "add", "origin", "https://github.com/o/свой.git")
+    # Ответ проекта подписан поставщиком — так его кладёт заход.
+    (repo / ".pipeline.yml").write_text(SIGN.format("o/поставщик") + "schema: 4\n", "utf-8")
+    where = repo / path
+    where.parent.mkdir(parents=True, exist_ok=True)
+    where.write_text(text, encoding="utf-8")
+    quiet, ready = module.silent([path], repo)
+    assert (quiet, ready) == (([path], []) if asked else ([], [path]))
+
+
+def test_an_unknown_self_lets_nothing_through(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Своё имя не узнать — подпись поставщика ничего не отпускает: судится как прежде (045)."""
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    (repo / "scripts" / "check_kit.py").write_text(
+        SIGN.format("o/поставщик") + '"""Гейт."""\n', encoding="utf-8"
+    )
+    assert module.silent(["scripts/check_kit.py"], repo) == (["scripts/check_kit.py"], [])
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        (THIN.format("o/поставщик"), True),
+        (THIN.format("o/сторонний"), False),
+        ("on: push\njobs:\n  a:\n    uses: ./.github/workflows/x.yml\n", False),
+        ("on: push\njobs: {}\n", False),
+        ("jobs: [", False),
+    ],
+    ids=["вызов-поставщика", "вызов-стороннего", "свой-путь", "без-джобов", "не-разбирается"],
+)
+def test_calls_only_knows_a_thin_caller(tmp_path: Path, text: str, said: bool) -> None:
+    """Тонкий вызов — каждый джоб зовёт чужой переиспользуемый прогон; прочее — нет."""
+    (tmp_path / "ci.yml").write_text(text, encoding="utf-8")
+    assert module.calls_only(tmp_path, "ci.yml", frozenset({"o/поставщик"})) is said
