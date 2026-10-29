@@ -47,6 +47,7 @@ git — единственное место, где это возможно, с�
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -101,7 +102,7 @@ def tail(text: str, limit: int = LIMIT) -> str:
     return f"(обрезано, всего {len(text)} знаков) …{text[-limit:]}"
 
 
-def git(*args: str) -> subprocess.CompletedProcess[str] | str:
+def git(*args: str, where: str = "") -> subprocess.CompletedProcess[str] | str:
     """Вызов git с дедлайном; отказ запуска или истёкший срок — причина строкой.
 
     ОТКАЗ НЕ РОНЯЕТ СТРАЖА (письмо каталога #1439). `OSError` от отсутствующего
@@ -122,6 +123,7 @@ def git(*args: str) -> subprocess.CompletedProcess[str] | str:
             text=True,
             encoding="utf-8",
             timeout=deadline,
+            cwd=where or None,
         )
     except subprocess.TimeoutExpired:
         return f"git {args[0]} не ответил за {deadline:.1f} с"
@@ -247,6 +249,9 @@ class Look:
     #: «не толчок» отдавали одно и то же, и после взгляда на #1226 сторож стал
     #: судить головой любую команду — `ls` в отсоединённой голове отвергался.
     push: bool = False
+    #: Каталог, в котором идёт толчок: голова читается в нём, а не в каталоге
+    #: сторожа (#1746). Пусто — каталог процесса.
+    where: str = ""
 
 
 def script_of(segment: list[str]) -> tuple[str | None, str]:
@@ -556,7 +561,7 @@ def commands_of(text: str) -> list[list[str]]:
     return [command for command in commands if command] or [[]]
 
 
-def push_targets(command: str) -> Look:
+def push_targets(command: str, start: str = "") -> Look:
     """Что сторож разглядел: цели толчка, «не толчок» или причину слепоты.
 
     Разбор по СЛОВАМ: подстрока `git push` встречается и в тексте документа, и
@@ -575,19 +580,55 @@ def push_targets(command: str) -> Look:
         # отказы `commands_of` — свои и уже обрезаны, поэтому текст берётся как
         # есть.
         return Look(blind=f"команда не разбирается на слова — {exc}")
+    # КАТАЛОГ ТОЛЧКА ВЕДЁТСЯ ПО СТРОКЕ, А НЕ БЕРЁТСЯ У СТОРОЖА (#1746). Окно,
+    # которое ведёт два репозитория, толкает второй через `cd` или `git -C`, а
+    # голова читалась в дереве проекта — и толчок в свою ветку второго
+    # репозитория отвергался всегда. Начало — каталог события (`cwd`), затем
+    # каждое `cd` строки и каждый `-C` толчка. Каталог, который не узнать
+    # (`cd -`, переменная, `--git-dir`), — слепота при толчке, а не каталог
+    # сторожа (045). ПРЕДЕЛ НАЗВАН: подоболочка `( cd … )` разбором не
+    # отличается от `cd … ;`, и её `cd` считается действующим.
+    where, lost = start, ""
     for part in parts:
+        if part and part[0] == "cd":
+            where, lost = moved(where, lost, part[1:])
+            continue
         found, blind = unwrap(part, DEPTH)
         if blind:
             return Look(blind=blind)
         for segment in found:
             if not segment or not is_git(segment[0]):
                 continue
+            here, unknown = where, lost
             rest = segment[1:]
             while rest and rest[0].startswith("-"):
+                if rest[0] == "-C" and len(rest) > 1:
+                    here, unknown = moved(here, unknown, [rest[1]])
+                elif rest[0] in ("--git-dir", "--work-tree") or rest[0].startswith(
+                    ("--git-dir=", "--work-tree=")
+                ):
+                    unknown = (
+                        f"«{cut(rest[0])}» уводит git в другое дерево, "
+                        "а сторож судит его по `-C` и `cd`"
+                    )
                 rest = rest[2:] if rest[0] in GLOBAL_WITH_VALUE else rest[1:]
             if rest and rest[0] == "push":
-                return Look(targets=tuple(named_branches(rest[1:])), push=True)
+                if unknown:
+                    return Look(blind=f"каталог толчка не узнан — {unknown}")
+                return Look(targets=tuple(named_branches(rest[1:])), push=True, where=here)
     return Look()
+
+
+def moved(where: str, lost: str, arguments: list[str]) -> tuple[str, str]:
+    """Каталог после `cd` или `-C` с этими доводами и причина, если его не узнать."""
+    if lost:
+        return where, lost
+    said = [one for one in arguments if one not in ("-L", "-P")]
+    if not said:
+        return os.path.expanduser("~"), ""
+    if len(said) > 1 or said[0] == "-" or "$" in said[0] or "`" in said[0]:
+        return where, f"«cd {cut(' '.join(arguments))}» сторож не раскрывает"
+    return os.path.join(where or os.getcwd(), os.path.expanduser(said[0])), ""
 
 
 def named_branches(arguments: list[str]) -> list[str]:
@@ -611,7 +652,7 @@ def named_branches(arguments: list[str]) -> list[str]:
     return found
 
 
-def head() -> tuple[str, str]:
+def head(where: str = "") -> tuple[str, str]:
     """Текущая ветка и причина, по которой её не узнать.
 
     ДВА ОТВЕТА, А НЕ ОДИН, и разница здесь стоит половины сторожа. Прежде отказ
@@ -629,7 +670,7 @@ def head() -> tuple[str, str]:
     мимо неё. Та же форма, что у `gitcall.branch`; копия своя — хук дерево не
     импортирует (046).
     """
-    said = git("rev-parse", "--symbolic-full-name", "HEAD")
+    said = git("rev-parse", "--symbolic-full-name", "HEAD", where=where)
     if isinstance(said, str):
         return "", said
     if said.returncode != 0:
@@ -675,7 +716,7 @@ def refused(targets: list[str], current: str) -> str:
     return ""
 
 
-def merged_away(branch: str) -> str:
+def merged_away(branch: str, where: str = "") -> str:
     """Причина отказа, если ветку уже слили и удалили; пусто — толчок разрешён.
 
     ВЕТКА, УДАЛЁННАЯ ПЛОЩАДКОЙ ПРИ СЛИЯНИИ, ВОСКРЕСАЕТ ОТ ЛЮБОГО СЛЕДУЮЩЕГО
@@ -712,8 +753,8 @@ def merged_away(branch: str) -> str:
     """
     if not branch or branch == "HEAD":
         return ""
-    tracked = git("config", "--get", f"branch.{branch}.merge")
-    gone = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    tracked = git("config", "--get", f"branch.{branch}.merge", where=where)
+    gone = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}", where=where)
     # НЕ ПРОВЕРЕНО — НЕ ПУЩУ: тот же ответ, что у неузнанной головы (045).
     # Две проверки, а не цикл: сужение типа mypy через цикл не переносит.
     if isinstance(tracked, str):
@@ -793,7 +834,8 @@ def run() -> int:
         # видно, и сторож молчит (084).
         tool = event.get("tool_input") if isinstance(event, dict) else None
         command = str((tool.get("command") if isinstance(tool, dict) else None) or "")
-        return judge(command)
+        start = event.get("cwd") if isinstance(event, dict) else None
+        return judge(command, start if isinstance(start, str) else "")
     except Exception as exc:
         # СБОЙ СУДЕЙСТВА НА ТОЛЧКЕ — ОТКАЗ, А НЕ КОД 1 (взгляд на #1454, 195).
         # Трейсбек с кодом 1 площадка считает НЕблокирующей ошибкой, и толчок
@@ -829,9 +871,9 @@ def maybe_push(command: str) -> bool:
     return "push" in NOT_A_LETTER.sub("", command.lower())
 
 
-def judge(command: str) -> int:
+def judge(command: str, start: str = "") -> int:
     """Решение по разобранной команде: 0 — пускать, 2 — отказ с причиной в stderr."""
-    look = push_targets(command)
+    look = push_targets(command, start)
     if look.blind:
         # РАЗБОР, НЕ ДОШЕДШИЙ ДО КОНЦА, НЕ МАШЕТ РУКОЙ. Сторож не знает, толчок
         # перед ним или нет, и «не знаю» здесь обязано значить «не пущу» — как
@@ -846,7 +888,7 @@ def judge(command: str) -> int:
     if not look.push:
         return 0
     targets = list(look.targets)
-    current, broken = head()
+    current, broken = head(look.where)
     if not targets:
         # ТОЛЧОК БЕЗ ЦЕЛИ ТОЛКАЕТ ГОЛОВУ, и проверяется он как толчок головы
         # (взгляд на #1226). Прежде он проходил, не дойдя до проверок: окно на
@@ -868,7 +910,7 @@ def judge(command: str) -> int:
         print(f"Толчок отвергнут до вызова git: {foreign}", file=sys.stderr)
         return 2
     for target in targets:
-        revived = merged_away(branch_of(target))
+        revived = merged_away(branch_of(target), look.where)
         if revived:
             print(f"Толчок отвергнут до вызова git: {revived}", file=sys.stderr)
             return 2
