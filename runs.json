@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-10-28T10:26:47+00:00",
+  "updated": "2026-10-29T10:47:43+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -9080,6 +9080,407 @@
         }
       },
       "coverage": 94.3
+    },
+    "2026-10-29": {
+      "runs": {
+        "claude": {
+          "runs": 21,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 661,
+          "timed": 21,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 99,
+          "red": 0,
+          "cancelled": 11,
+          "seconds": 2175,
+          "timed": 99,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 103,
+          "red": 0,
+          "cancelled": 11,
+          "seconds": 1774,
+          "timed": 103,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 149,
+          "red": 0,
+          "cancelled": 72,
+          "seconds": 3646,
+          "timed": 149,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 98,
+          "red": 0,
+          "cancelled": 29,
+          "seconds": 3581,
+          "timed": 98,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 77,
+          "red": 0,
+          "cancelled": 16,
+          "seconds": 2135,
+          "timed": 77,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 77,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 324,
+          "timed": 77,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 77,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 625,
+          "timed": 77,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 78,
+          "red": 0,
+          "cancelled": 14,
+          "seconds": 2161,
+          "timed": 78,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 77,
+          "red": 8,
+          "cancelled": 47,
+          "seconds": 18921,
+          "timed": 77,
+          "red_jobs": {
+            "attribution / attribution": 4,
+            "journal / journal": 7,
+            "pr-meta / pr-meta": 4,
+            "test": 8,
+            "test-matrix (3.14)": 8,
+            "test-matrix (3.15)": 8
+          },
+          "red_steps": {
+            "attribution / attribution · сверить атрибуцию": 4,
+            "journal / journal · фрагмент журнала": 4,
+            "pr-meta / pr-meta · метки и связь с задачей": 4,
+            "test · вердикт матрицы": 8,
+            "test-matrix (3.14) · тесты": 8,
+            "test-matrix (3.15) · тесты": 8,
+            "journal / journal · фрагменты журнала разбираются": 3
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 39
+          }
+        },
+        "ci-complete": {
+          "runs": 72,
+          "red": 9,
+          "cancelled": 48,
+          "seconds": 14134,
+          "timed": 72,
+          "red_jobs": {
+            "ci-complete": 9
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 9
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 6
+          },
+          "red_whose": {
+            "свой": 9
+          }
+        },
+        "fix(preflight): выбор тестов встаёт сразу после `pytest`, а не за `|| rc=$?` (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 2031,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 14,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 374,
+          "timed": 14,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 261,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1234,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 15,
+          "red": 0,
+          "cancelled": 5,
+          "seconds": 9962,
+          "timed": 15,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "build(deps): Bump anthropics/claude-code-action from 1.0.262 to 1.0.263": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 20,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "github_actions in / for anthropics/claude-code-action - Update #1662813772": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 55,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "skills": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 95,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "attribution-history": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 110,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "python-next": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 111,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(preflight): выбор тестов встаёт сразу после `pytest`, а не за `|| rc=$?`": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1453,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(push-guard): голова читается в толкаемом дереве — `-C`, `cd` строки и каталог события (+7)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1399,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(push-guard): голова читается в толкаемом дереве — `-C`, `cd` строки и каталог события (+5)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 75,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(push-guard): голова читается в толкаемом дереве — `-C`, `cd` строки и каталог события (+4)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 978,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(push-guard): голова читается в толкаемом дереве — `-C`, `cd` строки и каталог события (+3)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1608,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(preflight): красное проверки с классом `off` названо, но толчок не держит (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 498,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(preflight): красное проверки с классом `off` названо, но толчок не держит (+2)": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 1088,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "github_actions in / for anthropics/claude-code-action - Update #1662641161": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 50,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Проба передачи поднята до v1.12.0": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1901,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "handover-probe": {
+          "runs": 1,
+          "red": 1,
+          "cancelled": 0,
+          "seconds": 29,
+          "timed": 1,
+          "red_jobs": {
+            "probe-contract / contract": 1,
+            "probe-pipeline / pipeline": 1
+          },
+          "red_steps": {
+            "probe-contract / contract · поверхность контракта не тронута молча": 1,
+            "probe-pipeline / pipeline · ответ по классам проверок полон и сходится с деревом": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 2
+          }
+        },
+        "release": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 61,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "fix(action-pins): откат действия во всех строках законен — рядом стоящее читается в голове (+3)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 981,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        }
+      },
+      "coverage": 94.4
     }
   }
 }
