@@ -1417,7 +1417,7 @@ def test_the_test_step_takes_the_classifier_choice() -> None:
     other = preflight.Step("линтер", "ruff check scripts/", "")
     picked = preflight.scope.Choice("code", ("tests/test_a.py",), "")
     narrowed = preflight.narrowed([step, other], picked)
-    assert narrowed[0].command.splitlines()[-1] == "pytest --strict-markers tests/test_a.py"
+    assert narrowed[0].command.splitlines()[-1] == "pytest tests/test_a.py --strict-markers"
     assert narrowed[1] == other
     empty = preflight.narrowed([step], preflight.scope.Choice("text", (), ""))
     assert empty[0].command.startswith("echo ")
@@ -1425,6 +1425,16 @@ def test_the_test_step_takes_the_classifier_choice() -> None:
     assert preflight.narrowed([step], None) == [step]
     whole = preflight.scope.Choice("full", None, "тронут общий файл")
     assert preflight.narrowed([step], whole) == [step]
+
+
+def test_a_choice_that_lands_nowhere_is_said(capsys: pytest.CaptureFixture[str]) -> None:
+    """Строка тестов не с `pytest ` — выбор не лёг, и это сказано, а не «тест-файлов: N» (195)."""
+    step = preflight.Step("тесты", "python -m pytest --strict-markers", "")
+    picked = preflight.scope.Choice("code", ("tests/test_a.py",), "")
+    assert preflight.narrowed([step], picked) == [step]
+    assert "выбор тестов не применён" in capsys.readouterr().out
+    preflight.narrowed([preflight.Step("тесты", "pytest -q", "")], picked)
+    assert "не применён" not in capsys.readouterr().out
 
 
 def test_a_refused_choice_falls_back_to_the_whole_set(
@@ -1616,6 +1626,39 @@ def test_the_coverage_job_outlasts_the_matrix() -> None:
     assert int(badges["jobs"]["inputs"]["timeout-minutes"]) > matrix
 
 
+def test_the_choice_reaches_pytest_in_the_real_test_step(tmp_path: Path) -> None:
+    """Выбор доходит до `pytest` в НАСТОЯЩЕМ шаге `test` из `ci.yml`, а красное — его кодом (#1749).
+
+    Прежде выбор дописывался в хвост строки за `|| rc=$?`: `pytest` шёл без
+    списка, а при красном оболочка исполняла тест-файл как программу. Шаг здесь
+    берётся из дерева, а не пишется рукой: выдуманная строка без `|| rc=$?` и
+    скрыла дефект (подделка подтверждала наше представление).
+    """
+    found = [step for step in preflight.steps(ROOT / preflight.CI) if "pytest" in step.command]
+    picked = preflight.scope.Choice("code", ("tests/test_a.py", "tests/test_b.py"), "")
+    narrowed = preflight.narrowed(found, picked)
+    assert len(narrowed) == 1, [step.name for step in narrowed]
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "pytest").write_text('#!/bin/sh\necho "доводы: $*"\nexit 3\n', encoding="utf-8")
+    (fake / "pytest").chmod(0o755)
+    env = {"PATH": f"{fake}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    done = subprocess.run(
+        ["bash", "-c", narrowed[0].command],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=60,
+    )
+    said = done.stdout + done.stderr
+    assert "tests/test_a.py tests/test_b.py" in said, said
+    assert done.returncode == 3, (done.returncode, said)
+    assert "Permission denied" not in said and "not found" not in said, said
+
+
 @pytest.mark.parametrize(
     ("check", "expect"),
     [("lint / lint", preflight.EXIT_OK), ("pipeline / pipeline", preflight.EXIT_RED)],
@@ -1641,6 +1684,8 @@ def test_a_switched_off_check_does_not_hold_the_push(
     assert preflight.main([]) == expect
     said = capsys.readouterr().out
     assert ("класс off" in said) is (expect == preflight.EXIT_OK)
+    if expect == preflight.EXIT_OK:
+        assert "зелено: 0 проверок дерева прошли" in said, "выключенное красное посчитано прошедшим"
 
 
 @pytest.mark.parametrize("written", ["off", '"off"'], ids=["булево-yaml", "строкой"])

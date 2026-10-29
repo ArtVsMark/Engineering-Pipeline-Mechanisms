@@ -1028,6 +1028,16 @@ def supplied_jobs(said: str) -> list[str] | None:
     return jobs_of_called(where)
 
 
+def own_name(job_id: str, body: dict[str, Any]) -> str:
+    """Имя записи своего джоба: `name:`, а без него — ключ джоба."""
+    return str(body.get("name") or job_id)
+
+
+def composed(caller: str, inner: str) -> str:
+    """Имя записи вызванного джоба (:data:`COMPOSED`): один разбор на всех (214, #1748)."""
+    return f"{caller}{COMPOSED}{inner}"
+
+
 def check_names(job_id: str, body: dict[str, Any], directory: Path = WORKFLOWS) -> list[str]:
     """Имена записей проверки, которые даст этот джоб.
 
@@ -1036,14 +1046,14 @@ def check_names(job_id: str, body: dict[str, Any], directory: Path = WORKFLOWS) 
     ``<имя вызывающего> / <имя вызванного>``. Замер, которым это узнано, — в
     :data:`COMPOSED`.
     """
-    mine = str(body.get("name") or job_id)
+    mine = own_name(job_id, body)
     uses = body.get("uses")
     if not uses:
         return [mine]
     inner = called_jobs(str(uses), directory)
     if inner is None:
         return [mine]
-    return [f"{mine}{COMPOSED}{one}" for one in inner]
+    return [composed(mine, one) for one in inner]
 
 
 def feeds(directory: Path = WORKFLOWS) -> dict[str, set[str]]:
