@@ -99,8 +99,13 @@ def test_every_form_of_an_old_pin_is_refused(
         ({"a.yml": run_file(FAMILY.replace("v1.0.0", "v2.0.0"))}, {"a.yml": run_file(FAMILY)}),
         # Действия в базе нет — сравнивать не с чем.
         ({"a.yml": run_file()}, {"a.yml": run_file(OLD)}),
+        # Откат во всех строках: старшей версии рядом не осталось (`7ca7778`).
+        (
+            {"a.yml": run_file(UP), "b.yml": run_file(UP)},
+            {"a.yml": run_file(OLD), "b.yml": run_file(OLD)},
+        ),
     ],
-    ids=["подъём", "перестановка", "прежнее-расхождение", "семья", "новое-действие"],
+    ids=["подъём", "перестановка", "прежнее-расхождение", "семья", "новое-действие", "откат"],
 )
 def test_the_lawful_is_not_refused(
     run_script: RunScript, tmp_path: Path, base: dict[str, str], head: dict[str, str]

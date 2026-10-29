@@ -31,8 +31,10 @@ ArtVsMark/Engineering-Pipeline-Mechanisms#1674 с `setup-python` `v7.0.0` при
 его правкой изменения не погасить
 ([051](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/051-warn-on-likely-block-on-certain.md)).
 
-КРАСНЕЕТ «СТАРШЕ», А НЕ «ИНАЧЕ». Новая строка с версией МЛАДШЕ старшей в базе —
-отказ: рядом уже стоит поднятая, и написать её значит ничего не решать заново.
+КРАСНЕЕТ «СТАРШЕ», А НЕ «ИНАЧЕ». Новая строка с версией МЛАДШЕ старшей из
+стоящих в дереве изменения — отказ: рядом уже стоит поднятая, и написать её
+значит ничего не решать заново. Рядом — значит в голове, а не в базе: откат
+действия во всех строках старшую версию из дерева убирает и законен.
 Новая строка с версией СТАРШЕ — это начало подъёма, а подъём — решение о
 переезде, и его держит дрейф (`drift.actions_disagree`), а не этот гейт.
 
@@ -139,12 +141,12 @@ def added(diff: str, own: tuple[str, ...]) -> Counter[Pin]:
     return pins_in(plus, own) - pins_in(minus, own)
 
 
-def findings(base_pins: Counter[Pin], grown: Counter[Pin]) -> tuple[list[str], list[str]]:
-    """Отказы и строки без порядка: новая версия ниже хоть одной в базе — отказ."""
+def findings(near: Counter[Pin], grown: Counter[Pin]) -> tuple[list[str], list[str]]:
+    """Отказы и строки без порядка: новая версия ниже хоть одной, стоящей рядом, — отказ."""
     problems: list[str] = []
     unranked: list[str] = []
     for (repo, said), count in sorted(grown.items()):
-        ranked = [one for (name, version) in base_pins if name == repo and (one := rank(version))]
+        ranked = [one for (name, version) in near if name == repo and (one := rank(version))]
         mine = rank(said)
         if not ranked:
             continue
@@ -153,13 +155,13 @@ def findings(base_pins: Counter[Pin], grown: Counter[Pin]) -> tuple[list[str], l
             continue
         above = [
             version
-            for (name, version) in sorted(base_pins)
+            for (name, version) in sorted(near)
             if name == repo and (theirs := rank(version)) is not None and lower(mine, theirs)
         ]
         if above:
             newest = max(above, key=lambda version: rank(version) or ())
             problems.append(
-                f"{repo}@{said} добавлено {count} раз(а), а в базе уже {newest} — "
+                f"{repo}@{said} добавлено {count} раз(а), а рядом уже стоит {newest} — "
                 f"напишите строку с {newest}"
             )
     return problems, unranked
@@ -179,15 +181,20 @@ def look(base: str) -> tuple[list[str], list[str]]:
         return [], []
     # `-z` обязателен: без него git экранирует имена с не-ASCII, и такой путь
     # не прочитался бы `git show` (165).
-    names = gitcall.output(["ls-tree", "-r", "-z", "--name-only", spot, "--", workflows], NotRun)
+    # Рядом стоящее читается в ГОЛОВЕ, а не в базе (взгляд на
+    # ArtVsMark/Engineering-Pipeline-Mechanisms#1734, `7ca7778`): откат действия во
+    # всех строках — с `v7.0.1` на `v6`, потому что выпуск сломан, — оставляет
+    # старшую версию только в базе, и сравнение с базой краснело бы на нём без
+    # обхода. Случай #1674 голова видит так же: поднятые строки в ней остались.
+    names = gitcall.output(["ls-tree", "-r", "-z", "--name-only", "HEAD", "--", workflows], NotRun)
     runs = [name for name in names.split("\0") if name.endswith((".yml", ".yaml"))]
     # Один вызов на все файлы: `git show` отдаёт блобы подряд.
-    listed = gitcall.output(["show", *(f"{spot}:{name}" for name in runs)], NotRun) if runs else ""
+    listed = gitcall.output(["show", *(f"HEAD:{name}" for name in runs)], NotRun) if runs else ""
     return findings(pins_in(listed.splitlines(), own), grown)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Точка входа: сверяет добавленные пины действий с их версиями в базе."""
+    """Точка входа: сверяет добавленные пины действий с версиями, стоящими рядом."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default=None, help="точка сравнения; по умолчанию общая ветка")
     args = parser.parse_args(argv)
