@@ -1331,3 +1331,33 @@ def test_without_the_review_run_on_trunk_everything_is_before() -> None:
     """`review.yml` в общей ветке нет — всё слитое до подключения; без времени — нет (045)."""
     assert module.before_onboarding(merged(1, "2026-10-29T13:52:00Z"), None)
     assert not module.before_onboarding({"number": 2}, None)
+
+
+def test_the_edge_costs_one_request_when_the_review_run_predates_the_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Коммит с `review.yml` не позже окна — один запрос, без обхода истории (взгляд на #1760)."""
+    asked: list[str] = []
+
+    def request(method: str, path: str, token: str, *_: Any, **__: Any) -> Any:
+        asked.append(path)
+        return [{"commit": {"committer": {"date": "2026-09-01T00:00:00Z"}}}]
+
+    def paginate(*_: Any, **__: Any) -> Any:
+        raise AssertionError("история обходится целиком, хотя хватило одного запроса")
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    by = module.datetime(2026, 10, 1, tzinfo=module.UTC)
+    edge = ONBOARDED_AT("o/r", "t", by)
+    assert edge is not None and edge < by
+    assert len(asked) == 1 and "until=2026-10-01T00:00:00Z" in asked[0] and "per_page=1" in asked[0]
+
+
+def test_an_unread_edge_date_is_a_refusal_not_no_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Дата коммита не прочитана — `NotRun`, а не `None` «взгляда нет» (взгляд на #1760, 045)."""
+    monkeypatch.setattr(
+        module.ghrest, "paginate", lambda *_, **__: iter([{"commit": {"committer": {}}}])
+    )
+    with pytest.raises(module.NotRun, match="граница подключения"):
+        ONBOARDED_AT("o/r", "t")
