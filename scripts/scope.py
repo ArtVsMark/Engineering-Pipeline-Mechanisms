@@ -114,7 +114,7 @@ KNOWN_FILES: Final = frozenset(
         paths.CHANGELOG.as_posix(),
         "HISTORY.md",
         "LICENSE",
-        ".gitignore",
+        paths.GITIGNORE.as_posix(),
         *WHOLE_FILES,
     }
 )

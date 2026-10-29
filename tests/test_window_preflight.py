@@ -1861,3 +1861,33 @@ def test_every_bare_tool_of_the_steps_has_a_shim() -> None:
                 called.add(first[0])
     assert called, "ни одного голого инструмента не найдено — разбор сломан"
     assert called <= set(preflight.STEP_TOOLS), called - set(preflight.STEP_TOOLS)
+
+
+def test_a_tree_without_its_own_python_needs_no_interpreter(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Нет `pyproject.toml` — сверка говорит «не требуется» и проходит (#1763).
+
+    У журнала EPL своего Python нет, и сверка отказывала при каждом старте
+    окна. Отказ входа у `python_floor` остаётся: его зовут те, кому граница
+    нужна.
+    """
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    assert env.main(["--root", str(tmp_path)]) == env.EXIT_OK
+    assert "не требуется" in capsys.readouterr().out
+
+
+def test_a_tree_without_its_own_python_still_checks_its_packages(tmp_path: Path) -> None:
+    """Без `pyproject.toml` снимается только граница: пакеты дерева сверяются (взгляд на #1775).
+
+    Ранний выход пропускал бы и пакеты `packages/*`, и инструменты прогонов.
+    """
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    package = tmp_path / "packages" / "absent"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text(
+        '[project]\nname = "engineering-pipeline-absent-xyz"\n', encoding="utf-8"
+    )
+    said = env.survey(tmp_path)
+    assert said.floor is None
+    assert any("engineering-pipeline-absent-xyz" in one for one in said.problems), said

@@ -160,12 +160,18 @@ def fits(version: str, bounds: str) -> bool:
     return True
 
 
-def advise(floor: tuple[int, int], gaps: list[str]) -> None:
-    """Печатает, ЧТО ДЕЛАТЬ, а не только чего не хватает."""
+def advise(floor: tuple[int, int] | None, gaps: list[str]) -> None:
+    """Печатает, ЧТО ДЕЛАТЬ, а не только чего не хватает; ``floor`` нет — своего Python нет."""
+    python = f"python{floor[0]}.{floor[1]}" if floor else "python3"
     print("\nчто делать:")
-    print(f"  1. взять интерпретатор {floor[0]}.{floor[1]} или новее — тот же, что ставит прогон;")
+    if floor:
+        print(
+            f"  1. взять интерпретатор {floor[0]}.{floor[1]} или новее — тот же, что ставит прогон;"
+        )
+    else:
+        print("  1. интерпретатор — любой: своего Python у проекта нет, границы он не объявляет;")
     print("  2. поднять своё окружение, если установка в системный запрещена (PEP 668):")
-    print(f"     python{floor[0]}.{floor[1]} -m venv .venv && . .venv/bin/activate")
+    print(f"     {python} -m venv .venv && . .venv/bin/activate")
     print("  3. поставить недостающее ровно с теми границами, что объявлены в прогонах:")
     print(f"     python -m pip install {' '.join(gaps)}" if gaps else "     (всё на месте)")
 
@@ -189,7 +195,9 @@ class Survey:
     #: дважды за прогон, и второе чтение молчаливо утверждало, что дерево между
     #: двумя вызовами не изменилось
     #: ([005](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/005-hand-written-numbers-rot.md)).
-    floor: tuple[int, int]
+    #: ``None`` — корневого `pyproject.toml` нет: своего Python у проекта нет, и
+    #: границы интерпретатора он не объявляет (#1763).
+    floor: tuple[int, int] | None
 
 
 def survey(root: Path = Path()) -> Survey:
@@ -201,13 +209,30 @@ def survey(root: Path = Path()) -> Survey:
     запустив процесс и разобрав его вывод — то есть заведя второй разбор того же
     ([090](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/090-shared-helpers-move-up-not-sideways.md)).
     """
-    floor = python_floor(root)
-    declared = needs(root)
+    # ПРОЕКТ БЕЗ СВОЕГО PYTHON — ГРАНИЦЫ ИНТЕРПРЕТАТОРА НЕТ, А НЕ ОТКАЗ (#1763).
+    # У потребителя без `pyproject.toml` (журнал EPL, проба #1558) сверка
+    # отказывала «требование взять неоткуда» при каждом старте окна. Снимается
+    # ТОЛЬКО граница: инструменты прогонов и пакеты дерева сверяются, как
+    # прежде (взгляд на #1775, 195).
+    floor = python_floor(root) if (root / "pyproject.toml").is_file() else None
+    try:
+        declared = needs(root)
+    except NotRun:
+        # Прогоны есть, а строк установки в них нет — у проекта без своего
+        # Python это норма: инструменты ставят общие шаги поставщика. Нет и
+        # прогонов — предмета сверки нет, и это отказ, как прежде (075).
+        if floor is not None or not (root / paths.WORKFLOWS).is_dir():
+            raise
+        declared = {}
     running = sys.version_info[:2]
-    seen = [f"интерпретатор: {running[0]}.{running[1]}, дерево требует >={floor[0]}.{floor[1]}"]
+    seen = [
+        f"интерпретатор: {running[0]}.{running[1]}, дерево требует >={floor[0]}.{floor[1]}"
+        if floor
+        else f"интерпретатор: {running[0]}.{running[1]}, граница не требуется: pyproject.toml нет"
+    ]
     problems: list[str] = []
     gaps: list[str] = []
-    if running < floor:
+    if floor and running < floor:
         problems.append(
             f"интерпретатор {running[0]}.{running[1]} старше требуемого — проверки пойдут "
             "не на той версии, на которой их гоняет площадка"
