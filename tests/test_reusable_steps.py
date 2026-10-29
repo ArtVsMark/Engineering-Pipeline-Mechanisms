@@ -618,3 +618,45 @@ def test_a_failed_consumer_manifest_does_not_drop_the_facts(tmp_path: Path) -> N
     )
     assert done.returncode == 0, done
     assert "::warning::Манифест семьи не собран (код 2)" in done.stdout, done
+
+
+def facts_to_family_block() -> str:
+    """Блок шага «факты и манифест — к сверке семьи» общего `step-facts.yml`."""
+    flow = yaml.safe_load((STEPS / "step-facts.yml").read_text(encoding="utf-8"))
+    steps = next(iter(flow["jobs"].values()))["steps"]
+    return str(
+        next(one["run"] for one in steps if one.get("name") == "факты и манифест — к сверке семьи")
+    )
+
+
+@pytest.mark.parametrize("manifest", [True, False], ids=["манифест-прогона", "манифеста-нет"])
+def test_the_family_check_finds_this_runs_facts_and_manifest(
+    tmp_path: Path, manifest: bool
+) -> None:
+    """Сверка семьи получает факты прогона и манифест там, где их ищет (#1780).
+
+    Манифеста нет ни в прогоне, ни на ветке `badges` — предупреждение, а не отказ.
+    """
+    temp = tmp_path / "temp" / "facts"
+    temp.mkdir(parents=True)
+    (temp / "facts.json").write_text('{"schema": "2.1"}', encoding="utf-8")
+    if manifest:
+        (temp / "contracts.json").write_text('{"release": null}', encoding="utf-8")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    subprocess.run(["git", "init", "-q", str(tree)], check=True, timeout=60)
+    done = subprocess.run(
+        ["bash", "-e", "-c", facts_to_family_block()],
+        cwd=tree,
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path / "temp")},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done
+    assert (tree / ".github/badges/facts.json").read_text(encoding="utf-8") == '{"schema": "2.1"}'
+    assert (tree / ".github/badges/contracts.json").is_file() is manifest
+    if not manifest:
+        assert "::warning::манифест семьи не найден" in done.stdout, done

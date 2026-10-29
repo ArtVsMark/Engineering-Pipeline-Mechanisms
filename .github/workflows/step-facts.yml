@@ -339,6 +339,27 @@ jobs:
         run: >-
           python $MECHANISMS/scripts/build_facts.py
           --from-facts "$RUNNER_TEMP/facts/facts.json" --endpoints-out .project-badge
+      # ФАКТЫ И МАНИФЕСТ — ТУДА, ГДЕ ИХ ЧИТАЕТ СВЕРКА СЕМЬИ (#1780). Сверка
+      # ищет `.github/badges/facts.json` и `contracts.json` в дереве, а дерево —
+      # свежая выкачка: оба файла живут на ветке `badges`. Без них зоны `gives`,
+      # `ext` и издателя были «?» у каждого, у механизмов тоже. Факты — этого же
+      # прогона; манифест — собранный выше у потребителя, а у поставщика —
+      # опубликованный на `badges` его прогоном значков. Не прочитан —
+      # предупреждение, а не отказ: значок без зоны лучше, чем без значка (084).
+      - name: факты и манифест — к сверке семьи
+        run: |
+          set -uo pipefail
+          mkdir -p .github/badges
+          cp "$RUNNER_TEMP/facts/facts.json" .github/badges/facts.json
+          if [ -f "$RUNNER_TEMP/facts/contracts.json" ]; then
+            cp "$RUNNER_TEMP/facts/contracts.json" .github/badges/contracts.json
+          elif git fetch --quiet --depth=1 origin badges 2>/dev/null \
+            && git show FETCH_HEAD:.github/badges/contracts.json >.github/badges/contracts.json 2>/dev/null; then
+            echo "манифест семьи — опубликованный на ветке badges"
+          else
+            rm -f .github/badges/contracts.json
+            echo "::warning::манифест семьи не найден ни в прогоне, ни на ветке badges — зона gives будет «?»"
+          fi
       # Вход `pypi` не задаётся: шаг не знает имени пакета потребителя, и зона
       # «release / PyPI» показывает выпуск площадки. Чужое число по совпадению
       # имени на значок так не попадает (194).
