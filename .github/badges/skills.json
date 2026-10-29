@@ -1035,6 +1035,42 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1775,
+   "merged_at": "2026-10-29",
+   "commit": "c4938c560614c85e0e30fdc6cdfdad96ad12b506",
+   "touched": [
+    "changelog.d/first-change-without-look.fixed.md",
+    "changelog.d/onboard-ignores-window-state.fixed.md",
+    "changelog.d/onboard-names-family-steps.fixed.md",
+    "docs/use/onboarding.md",
+    "kit/data/docs/agent/behaviour.md",
+    "scripts/automerge.py",
+    "scripts/check_env.py",
+    "scripts/onboard.py",
+    "scripts/paths.py",
+    "scripts/scope.py",
+    "tests/test_automerge.py",
+    "tests/test_onboard.py",
+    "tests/test_third_outcome.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/first-change-without-look.fixed.md",
+    "changelog.d/onboard-ignores-window-state.fixed.md",
+    "changelog.d/onboard-names-family-steps.fixed.md",
+    "kit/data/docs/agent/behaviour.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
