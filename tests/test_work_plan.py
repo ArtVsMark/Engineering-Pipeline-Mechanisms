@@ -252,6 +252,19 @@ def test_an_unsaid_merge_state_is_unread_not_empty(monkeypatch: pytest.MonkeyPat
     assert module.main(["--repo", "o/r"]) == module.EXIT_PARTIAL
 
 
+def test_unread_open_changes_mark_section_zero_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Отказ чтения своих открытых — непрочитан и раздел 0: починки не спрошены (`922c17b`)."""
+    quiet_platform(monkeypatch)
+
+    def refused(*_: Any) -> Any:
+        raise module.ghrest.TransportError("502")
+
+    monkeypatch.setattr(module.debt, "stuck_changes", refused)
+    built, broken, _ = module.sources("o/r", "t")
+    assert "починки раздела 0 не спрошены" in built[0].unread
+    assert {"0", "1", "2"} <= set(broken)
+
+
 def test_unasked_fixes_mark_section_zero_not_sections_one_and_two(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1764,41 +1777,35 @@ def test_a_drifted_contract_survives_on_the_catalogue_tree(monkeypatch: pytest.M
     assert module.debt.rules_left(None, "v3 → v4", inapplicable=True), "два ответа разошлись"
 
 
-def plan_runs_on(condition: str, event: str, workflow: str = "", cause: str = "") -> bool:
-    """Условие работы плана, вычисленное на событии: только `||`, `==`, `!=` и строки."""
-    known = {
-        "github.event_name": event,
-        "github.event.workflow_run.name": workflow,
-        "github.event.workflow_run.event": cause,
-    }
-    clauses = [one.strip() for one in condition.split("||")]
-    for clause in clauses:
-        name, op, literal = clause.split(maxsplit=2)
-        assert name in known and op in {"==", "!="}, f"условие вышло из разобранной формы: {clause}"
-        if (known[name] == literal.strip("'")) == (op == "=="):
-            return True
-    return False
+def test_the_plan_rebuilds_after_every_run_that_writes_the_registry() -> None:
+    """План слушает `review` и пересобирается по каждому его прогону (#1726, взгляд на #1727).
 
-
-def test_the_plan_rebuilds_after_the_registry_sweep_on_main_only() -> None:
-    """План слушает `review` и не пересобирается по взгляду на изменение (#1726, #1727)."""
+    ПРЕЖНИЙ ГЕЙТ ЗАКРЕПЛЯЛ ЛОЖНУЮ ПОСЫЛКУ (`f1c5914`): «взгляд на изменение
+    реестр не пишет» стояло проверкой, а джоб `findings` шага `step-review.yml`
+    пишет реестр именно на `pull_request`. Посылка теперь сверяется с самим
+    шагом, а не повторяется: пишет реестр взгляд по изменению — условия у
+    работы плана нет. СТРОГОЕ ПРАВИЛО, А НЕ РАЗБОР УСЛОВИЯ (`c241762`): прежний
+    разбор знал только `||`, и усиление через `&&` ломало гейт.
+    """
     import yaml
 
-    flow = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "work-plan.yml").read_text(encoding="utf-8")
-    )
+    def flow(name: str) -> dict[Any, Any]:
+        said: dict[Any, Any] = yaml.safe_load(
+            (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        )
+        return said
+
+    plan = flow("work-plan.yml")
     # `on:` YAML 1.1 читает как True.
-    assert "review" in flow[True]["workflow_run"]["workflows"], "уборка реестра плана не будит"
-    condition = flow["jobs"]["work-plan"].get("if", "")
-    assert condition, "без условия заход идёт на каждый взгляд по изменению"
-    assert plan_runs_on(condition, "workflow_run", "review", "workflow_run"), "уборка отсечена"
-    assert plan_runs_on(condition, "workflow_run", "review", "schedule"), "поздний взгляд отсечён"
-    assert plan_runs_on(condition, "workflow_run", "review", "workflow_dispatch"), "верификатор"
-    # Взгляд на изменение — и из форка с веткой `main`: судится событие, а не ветка.
-    assert not plan_runs_on(condition, "workflow_run", "review", "pull_request"), "взгляд"
-    assert plan_runs_on(condition, "workflow_run", "ci", "pull_request"), "ci изменения отсечён"
-    assert plan_runs_on(condition, "workflow_run", "drift", "schedule")
-    assert plan_runs_on(condition, "workflow_dispatch"), "ручная кнопка отсечена (104)"
+    assert "review" in plan[True]["workflow_run"]["workflows"], "уборка реестра плана не будит"
+    # ТОЧНАЯ ФОРМА, А НЕ ПОДСТРОКА (взгляд на #1736): `"pull_request" in` прошло
+    # бы и на `!= 'pull_request'` — то есть на взгляде, реестра не пишущем.
+    writes = flow("step-review.yml")["jobs"]["findings"].get("if", "")
+    assert writes == "github.event_name == 'pull_request'", (
+        f"условие записи реестра сменилось ({writes!r}) — пересмотреть посылку плана"
+    )
+    assert "if" not in plan["jobs"]["work-plan"], "условие отсекло бы прогон, пишущий реестр"
+    assert "workflow_dispatch" in plan[True], "ручная кнопка отсечена (104)"
 
 
 def test_a_fix_naming_itself_is_not_a_pair(monkeypatch: pytest.MonkeyPatch) -> None:
