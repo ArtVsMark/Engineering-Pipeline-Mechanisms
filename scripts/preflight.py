@@ -26,8 +26,11 @@
 """
 
 import argparse
+import atexit
 import dataclasses
+import functools
 import hashlib
+import importlib.util
 import os
 import platform
 import re
@@ -35,6 +38,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -489,6 +493,54 @@ def plain(line: str) -> str:
     )
 
 
+#: Имена, под которыми блок шага зовёт интерпретатор голым словом.
+PYTHON_NAMES: Final = ("python", "python3")
+#: Инструменты, которые блоки шагов зовут голым словом: `pytest` (`ci.yml`),
+#: `ruff` и `mypy` (`step-lint.yml`). Перечень сверяет с прогонами тест по
+#: дереву — новый голый инструмент без прокладки краснеет там.
+STEP_TOOLS: Final = ("pytest", "ruff", "mypy")
+
+
+@functools.cache
+def shims(executable: str) -> Path:
+    """Каталог прокладок `python` и `python3`, исполняющих ровно ``executable`` (#1767).
+
+    ПАПКА ИНТЕРПРЕТАТОРА — НЕ ИНТЕРПРЕТАТОР. Запускатель потребителя зовёт
+    `/usr/bin/python3.14`, а `/usr/bin/python` рядом — системный, ниже
+    планки: блоки шагов с голым `python` шли им и падали ложным
+    `SyntaxError` (замер окна EPL 29.10.2026, ~15 отказов). Поставщик этого
+    не видел: в его окне первым стоит `.venv/bin`, где `python` — тот же.
+
+    ПРОКЛАДКА — СЦЕНАРИЙ `exec`, А НЕ ССЫЛКА. Интерпретатор узнаёт своё
+    окружение по пути, которым его вызвали: ссылка из чужой папки на
+    `.venv/bin/python` потеряла бы `pyvenv.cfg`, а с ним пакеты окружения.
+
+    ИНСТРУМЕНТЫ — ТЕМ ЖЕ ПУТЁМ (взгляд на #1772, 195). Голый `pytest` из
+    `/usr/bin` идёт системным `python3` — тот же ложный `SyntaxError` на
+    соседнем слове. Инструмент, чей модуль у интерпретатора запуска есть,
+    получает прокладку `exec <интерпретатор> -m <инструмент>`; модуля нет —
+    прокладки нет, и слово ищется по `PATH`, как прежде. Модуль спрашивается у
+    ЭТОГО процесса: ``executable`` — его же `sys.executable`.
+
+    Каталог — свой на процесс (`mkdtemp`: имя не угадать, права только
+    владельцу), стирается на выходе.
+    """
+    where = Path(tempfile.mkdtemp(prefix="preflight-python-"))
+    atexit.register(shutil.rmtree, where, True)
+    runner = shlex.quote(executable)
+    lines = {name: f'exec {runner} "$@"' for name in PYTHON_NAMES}
+    lines |= {
+        tool: f'exec {runner} -m {tool} "$@"'
+        for tool in STEP_TOOLS
+        if importlib.util.find_spec(tool) is not None
+    }
+    for name, line in lines.items():
+        shim = where / name
+        shim.write_text(f"#!/bin/sh\n{line}\n", encoding="utf-8")
+        shim.chmod(0o700)
+    return where
+
+
 def environment() -> dict[str, str]:
     """Окружение прогона: инструменты берутся оттуда же, откуда запущен механизм.
 
@@ -496,10 +548,13 @@ def environment() -> dict[str, str]:
     интерпретатором, чем тот, на котором окно собиралось их гонять. Ровно этот
     разрыв и ловит `check_env.py`, и повторять его внутри своего же прогона
     значило бы проверять не то окружение (022).
+
+    Голые `python` и `python3` — прокладки на сам интерпретатор запуска
+    (:func:`shims`), а не то, что лежит в его папке (#1767).
     """
     where = str(Path(sys.executable).parent)
     room = dict(os.environ)
-    room["PATH"] = where + os.pathsep + room.get("PATH", "")
+    room["PATH"] = os.pathsep.join([str(shims(sys.executable)), where, room.get("PATH", "")])
     return room
 
 
