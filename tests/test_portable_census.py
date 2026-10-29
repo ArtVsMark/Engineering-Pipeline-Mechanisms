@@ -126,7 +126,9 @@ def test_the_release_page_carries_the_section_or_its_refusal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Страница выпуска несёт раздел; несобранная перепись — строка с причиной, страница цела."""
-    monkeypatch.setattr(release, "contract_at", lambda _tag: "0.14.0")
+    # Номер ниже нынешнего контракта: вписанный следующий номер совпал бы с
+    # тем, что выпуск запишет, и гейт версии отверг бы сам выпуск.
+    monkeypatch.setattr(release, "contract_at", lambda _tag: "0.1.0")
     monkeypatch.setattr(release.build_changelog, "read_fragments", lambda _where: [])
     monkeypatch.setattr(release.portable_census, "for_release", lambda *_: ["### Перепись отдачи"])
     assert "### Перепись отдачи" in release.page_body("1.12.0", "o/r")
@@ -137,7 +139,7 @@ def test_the_release_page_carries_the_section_or_its_refusal(
     monkeypatch.setattr(release.portable_census, "for_release", refuse)
     said = release.page_body("1.12.0", "o/r")
     assert "Перепись отдачи не собрана: тег не прочитан." in said
-    assert "Версия контракта на момент выпуска — `0.14.0`" in said
+    assert "Версия контракта на момент выпуска — `0.1.0`" in said
 
 
 def test_main_prints_the_section_and_names_a_refusal(

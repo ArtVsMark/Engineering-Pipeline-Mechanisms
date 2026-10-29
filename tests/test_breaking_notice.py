@@ -615,3 +615,52 @@ def test_an_unread_answer_stays_not_read(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(module.consumers, "answer_of", answer_of)
     with pytest.raises(module.NotRun, match="не прочитано"):
         module.window_of(took("o/взял", None), "т")
+
+
+def test_a_non_json_answer_on_the_repository_is_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не-JSON ответ при проверке репозитория — `NotRun`, а не трасса (`6f54d8f`, 039)."""
+
+    def request(method: str, path: str, token: str, *_: object, **__: object) -> object:
+        if path.endswith("/contents/.pipeline.yml"):
+            raise module.ghrest.NotFound(f"{method} {path} → 404: Not Found")
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    with pytest.raises(module.NotRun, match="не прочитано"):
+        module.window_of(took("o/шум", None), "т")
+
+
+def not_json(*_: object, **__: object) -> object:
+    """Ответ площадки, который не разбирается как JSON: `ghrest.request` отдаёт `ValueError`."""
+    raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
+def test_a_non_json_notice_makes_the_outcome_partial(
+    tree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Не-JSON на заведении задачи не обрывает цикл: сосед назван, исход частичный.
+
+    Взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1741.
+    """
+    family_of(monkeypatch, [TOOK])
+    monkeypatch.setattr(module, "notify", not_json)
+    assert module.main(["--tag", "v1.8.0", *OURS]) == module.EXIT_PARTIAL
+    assert "не оповещены: o/взял" in capsys.readouterr().out
+
+
+def test_a_non_json_owner_is_the_third_outcome(tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не-JSON на вопросе о владельце токена в боевом заходе — «не отработал», а не трасса."""
+    notified = family_of(monkeypatch, [TOOK])
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "т")
+    monkeypatch.setattr(module.ghrest, "request", not_json)
+    assert module.main(["--tag", "v1.8.0", *OURS, "--apply"]) == module.EXIT_BROKEN
+    assert notified == []
+
+
+def test_a_non_json_owner_in_a_dry_run_is_not_asked(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Пробный заход: не-JSON о владельце — «не спрошено», как и прочий отказ площадки."""
+    monkeypatch.setattr(module.ghrest, "request", not_json)
+    assert module.asked_owner("т") == ""
+    assert "не спрошено" in capsys.readouterr().out

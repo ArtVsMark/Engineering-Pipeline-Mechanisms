@@ -288,7 +288,8 @@ def seen(repo: str, token: str) -> None:
         raise NotRun(
             f"окно не прочитано: {repo} не виден токену — закрыт или удалён, а не без файла"
         ) from exc
-    except ghrest.TransportError as exc:
+    except (ghrest.TransportError, ValueError) as exc:
+        # ValueError — небитый, но не JSON ответ площадки: «не прочитано», как в `window_of` (039).
         raise NotRun(f"окно не прочитано: {exc}") from exc
 
 
@@ -360,7 +361,7 @@ def asked_owner(token: str) -> str:
     """
     try:
         return owner_of(token)
-    except (NotRun, ghrest.TransportError) as exc:
+    except (NotRun, ghrest.TransportError, ValueError) as exc:
         print(f"владелец токена не назван — есть ли уже, не спрошено: {report.cut(str(exc))}")
         return ""
 
@@ -418,6 +419,11 @@ def main(argv: list[str] | None = None) -> int:
         consumers.NotRun,
         family_uptake.NotRun,
         ghrest.TransportError,
+        # Не-JSON ответ площадки (`ValueError` из `ghrest.request`) — «не
+        # отработало», а не трасса (039). Перечень вызовов площадки у шага:
+        # `seen`, `window_of`, `owner_of` здесь, `notified`/`notify` в цикле ниже —
+        # каждый ловит его (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1741).
+        ValueError,
     ) as exc:
         print(f"оповещение не отработало: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
@@ -452,7 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     for repo, body, title in targets:
         try:
             print(notify(repo, args.tag, body, token, login, dry_run=not args.apply, title=title))
-        except ghrest.TransportError as exc:
+        except (ghrest.TransportError, ValueError) as exc:
             print(
                 f"::warning::{repo}: не оповещён — {report.cut(str(exc), SHOWN)}", file=sys.stderr
             )
