@@ -704,6 +704,35 @@
     "propose-a-rule"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1741,
+   "merged_at": "2026-10-29",
+   "commit": "b574690e492689a5e3997353555c30c6e3d6f615",
+   "touched": [
+    "changelog.d/action-pins-rollback.fixed.md",
+    "changelog.d/breaking-notice-non-json.internal.md",
+    "scripts/breaking_notice.py",
+    "scripts/check_action_pins.py",
+    "tests/test_action_pins.py",
+    "tests/test_breaking_notice.py",
+    "tests/test_portable_census.py"
+   ],
+   "added": [
+    "changelog.d/action-pins-rollback.fixed.md",
+    "changelog.d/breaking-notice-non-json.internal.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
