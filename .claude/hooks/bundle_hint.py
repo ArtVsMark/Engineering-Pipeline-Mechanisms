@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Режешь ветку `agent/…` — позван ли `bundle-the-work` в этой сессии (#1708).
 
 ЗАЧЕМ. Свод называет триггер навыка `bundle-the-work`: «звать, когда берёшь
@@ -70,7 +69,11 @@ CREATE_SHORT: Final[dict[str, str]] = {
 }
 #: Короткие ключи с необязательным значением: оно только слитное, и остаток
 #: склейки — их значение, а не ключи (`-tb` — это `--track=b`, не `-t -b`).
-STUCK_SHORT: Final[dict[str, str]] = {"checkout": "t", "switch": "t", "worktree add": ""}
+STUCK_SHORT: Final[dict[str, str]] = {
+    "checkout": "t",
+    "switch": "t",
+    "worktree add": "",
+}
 #: Длинные ключи, создающие ветку; читаются и однозначным сокращением.
 CREATE_LONG: Final[dict[str, tuple[str, ...]]] = {
     "checkout": ("--orphan",),
@@ -191,7 +194,11 @@ def invoked(journal: Path, session: str) -> bool:
         if not isinstance(row, dict) or row.get("session") != session:
             continue
         skill = row.get("skill")
-        if isinstance(skill, str) and skill.rsplit(":", 1)[-1] == SKILL and row.get("outcome") == "ok":
+        if (
+            isinstance(skill, str)
+            and skill.rsplit(":", 1)[-1] == SKILL
+            and row.get("outcome") == "ok"
+        ):
             return True
     return False
 
@@ -251,14 +258,19 @@ def main() -> int:
         return 0
     try:
         said = advice(event, Path(os.environ.get("CLAUDE_PROJECT_DIR") or HERE))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — совет необязателен (084), причина ниже
         # Совет — необязательный канал (084): сбой разбора не роняет нарезку, но
         # и не молчит — модель видит, что совета не было и почему (045).
         said = f"bundle_hint: совет не собран — {push_guard.cut(repr(exc))}"
     if said:
         print(
             json.dumps(
-                {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": said}},
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": said,
+                    }
+                },
                 ensure_ascii=False,
             )
         )

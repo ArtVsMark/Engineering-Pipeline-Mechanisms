@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Каждый вызов навыка — строка журнала: невызванный навык становится виден (#1449).
 
 ЗАЧЕМ. Навыки держат правила каталога, у части правил навык — единственное, чем
@@ -90,7 +89,9 @@ def line_of(event: object, outcome: str, now: datetime) -> dict[str, str | None]
         "ts": now.isoformat(timespec="seconds"),
         "skill": name if isinstance(name, str) and NAME_RE.fullmatch(name) else None,
         "outcome": outcome,
-        "session": session if isinstance(session, str) and NAME_RE.fullmatch(session) else None,
+        "session": session
+        if isinstance(session, str) and NAME_RE.fullmatch(session)
+        else None,
     }
 
 
@@ -111,12 +112,18 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     raw = sys.stdin.read(LIMIT + 1)
     event: object = None
     if len(raw) > LIMIT:
-        print("журнал навыков: вход больше предела — вызов записан без имени", file=sys.stderr)
+        print(
+            "журнал навыков: вход больше предела — вызов записан без имени",
+            file=sys.stderr,
+        )
     else:
         try:
             event = json.loads(raw)
         except ValueError:
-            print("журнал навыков: вход не JSON — вызов записан без имени", file=sys.stderr)
+            print(
+                "журнал навыков: вход не JSON — вызов записан без имени",
+                file=sys.stderr,
+            )
     line = line_of(event, outcome, now or datetime.now(UTC))
     if line is None:
         return RECORDED
