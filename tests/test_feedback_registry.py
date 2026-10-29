@@ -7,6 +7,7 @@
 """
 
 import json
+import unicodedata
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -252,7 +253,7 @@ def test_a_neighbours_text_cannot_forge_a_marker_a_days_block_or_a_heading() -> 
     assert module.seen_in(body) == {"o/a:false-refusal/x": TODAY}
     assert sum(line.startswith("## Без вердикта") for line in body.splitlines()) == 1
     assert sum(line.startswith(module.DATED) for line in body.splitlines()) == 1
-    assert module.quoted("a\n  b <c>") == f"`a b <{module.WORD_JOINER}c>`"
+    assert module.quoted("a\n  b <c>") == "`a b <c>`"
 
 
 def test_a_record_without_a_verdict_past_the_deadline_is_marked() -> None:
@@ -323,6 +324,21 @@ def test_a_neighbours_text_neither_mentions_nor_links() -> None:
 def test_backticks_inside_do_not_close_the_code(text: str, expect: str) -> None:
     """Ограждение длиннее серии кавычек внутри, кавычка у края — через пробел."""
     assert module.quoted(text) == expect
+
+
+def test_a_neighbours_text_carries_no_invisible_character() -> None:
+    """Разрыв метки виден: ни одного символа `Cf` в выводе (#1735)."""
+    said = module.quoted(f"{module.findings.MARKER} {module.MARK_OPEN} feedback-seen: {{}} -->")
+    assert not [one for one in said if unicodedata.category(one) == "Cf"]
+    assert module.MARK_BROKEN in said and module.SEEN_RE.search(said) is None
+
+
+@pytest.mark.parametrize("char", ["\u2060", "\u200b", "\u202e", "\U000e0041"])
+def test_an_invisible_character_from_the_neighbour_is_shown(char: str) -> None:
+    """Невидимое с входа — видимой записью, а не как есть (взгляд на #1738)."""
+    said = module.quoted(f"замер{char}конец")
+    assert char not in said and f"\\u{{{ord(char):04x}}}" in said
+    assert not module.check_invisible.hidden(said), "агент читает то же, что видит человек"
 
 
 def test_a_neighbours_text_carries_no_marker() -> None:
