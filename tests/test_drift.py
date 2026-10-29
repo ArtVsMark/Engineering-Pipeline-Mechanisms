@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import textwrap
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -2182,10 +2183,12 @@ def annotated_head(
     runs: list[dict[str, Any]],
     notes: dict[int, list[dict[str, Any]]],
     suites: list[dict[str, Any]] | None = None,
+    head_age_days: int = 0,
 ) -> list[str]:
     """Подделка площадки для предупреждений: голова, её проверки, их аннотации.
 
-    `suites` — наборы проверок головы; по умолчанию их нет.
+    `suites` — наборы проверок головы; по умолчанию их нет. `head_age_days` —
+    возраст коммита головы.
 
     Отдаёт СТРАНИЦАМИ, как площадка: `page=N` получает N-й кусок по
     `PER_PAGE`. Иначе проверка не различала бы чтение первой страницы и чтение
@@ -2202,7 +2205,8 @@ def annotated_head(
     def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> Any:
         asked.append(path)
         if path.endswith("/commits/main"):
-            return {"sha": "c" * 40}
+            when = datetime.now(UTC) - timedelta(days=head_age_days)
+            return {"sha": "c" * 40, "commit": {"committer": {"date": when.isoformat()}}}
         if "/annotations" in path:
             return page_of(notes[int(path.split("/check-runs/")[1].split("/")[0])], path)
         if "/check-suites" in path:
@@ -3055,3 +3059,44 @@ def test_the_probe_pin_is_read_in_quotes_too(line: str) -> None:
     """Прибивка пробы в кавычках видна, как у `ACTION_USE` (взгляд на #1739, 195)."""
     found = [one["ref"] for one in module.PROBE_PIN_RE.finditer(line)]
     assert found == ["v1.2.3"], found
+
+
+def test_an_old_head_judges_every_run(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Давняя голова: все наборы неперезапускаемы — судятся все, и это сказано (взгляд на #1754)."""
+    runs = [
+        {"id": 1, "name": "lint", "output": {"annotations_count": 1}, "check_suite": {"id": 9}},
+    ]
+    notes = {1: [note("warning", NODE)]}
+    suites = [{"id": 9, "app": {"slug": module.ACTIONS_APP}, "rerequestable": False}]
+    annotated_head(monkeypatch, runs, notes, suites, head_age_days=60)
+    found = module.platform_warnings("o/r", "t")
+    assert any("Node.js 20" in one.said for one in found)
+    assert "судятся все" in capsys.readouterr().out
+
+
+def test_a_tree_job_named_like_a_platform_run_is_judged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Джоб дерева с именем прогона площадки судится своим (взгляд на #1754)."""
+    runs = [
+        {
+            "id": 1,
+            "name": "Dependabot",
+            "output": {"annotations_count": 1},
+            "check_suite": {"id": 9},
+        },
+        {
+            "id": 2,
+            "name": "Dependabot",
+            "output": {"annotations_count": 1},
+            "check_suite": {"id": 8},
+        },
+    ]
+    notes = {1: [note("notice", UBUNTU)], 2: [note("warning", NODE)]}
+    suites = [{"id": 9, "app": {"slug": module.ACTIONS_APP}, "rerequestable": False}]
+    annotated_head(monkeypatch, runs, notes, suites)
+    found = module.platform_warnings("o/r", "t")
+    assert any("Node.js 20" in one.said for one in found), "джоб дерева ушёл с прогоном площадки"
+    assert not any("Ubuntu 26" in one.said for one in found)
