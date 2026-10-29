@@ -672,6 +672,38 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1738,
+   "merged_at": "2026-10-29",
+   "commit": "015e9f8838201ee5b25f5795ffdd515141edadf4",
+   "touched": [
+    ".rules/proposals.json",
+    "changelog.d/quoted-visible-mark-break.fixed.md",
+    "scripts/check_action_pins.py",
+    "scripts/feedback_registry.py",
+    "tests/test_family_gates.py",
+    "tests/test_feedback_registry.py"
+   ],
+   "added": [
+    "changelog.d/quoted-visible-mark-break.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "propose-a-rule",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "a-task-before-the-work",
+    "close-a-finding",
+    "propose-a-rule"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
