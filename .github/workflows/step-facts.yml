@@ -353,7 +353,7 @@ jobs:
           cp "$RUNNER_TEMP/facts/facts.json" .github/badges/facts.json
           if [ -f "$RUNNER_TEMP/facts/contracts.json" ]; then
             cp "$RUNNER_TEMP/facts/contracts.json" .github/badges/contracts.json
-          elif git fetch --quiet --depth=1 origin badges 2>/dev/null \
+          elif git fetch --quiet origin badges 2>/dev/null \
             && git show FETCH_HEAD:.github/badges/contracts.json >.github/badges/contracts.json 2>/dev/null; then
             echo "манифест семьи — опубликованный на ветке badges"
           else

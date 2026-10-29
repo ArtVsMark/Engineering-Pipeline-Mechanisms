@@ -1210,7 +1210,10 @@ def job_pythons(path: Path, job: str) -> tuple[list[str], str]:
     try:
         return matrix_axis(path, job, "python")
     except BadPolicy as missing:
-        said = resolved_job(path, job)
+        try:
+            said = resolved_job(path, job)
+        except BadPolicy as exc:
+            raise BadPolicy(f"{path}: ось версий джоба «{job}» не прочитана ({exc})") from exc
         found: list[str] = []
         for step in said.get("steps") or []:
             if isinstance(step, dict) and str(step.get("uses") or "").startswith(SETUP_PYTHON):
@@ -1219,8 +1222,8 @@ def job_pythons(path: Path, job: str) -> tuple[list[str], str]:
                 found += [str(version)] if isinstance(version, (str, int, float)) else []
         if not found:
             raise BadPolicy(
-                f"{path}: у джоба «{job}» нет ни оси matrix.python, ни python-version"
-                f" у actions/setup-python ({missing})"
+                f"{path}: ось версий джоба «{job}» не прочитана — нет ни matrix.python,"
+                f" ни python-version у actions/setup-python ({missing})"
             ) from missing
         return found, str(said.get("runs-on") or "")
 
