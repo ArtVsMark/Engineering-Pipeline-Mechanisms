@@ -623,6 +623,30 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1736,
+   "merged_at": "2026-10-29",
+   "commit": "e32f99799b8e3e2db89a8cc61997625d752c59a0",
+   "touched": [
+    ".github/workflows/work-plan.yml",
+    "changelog.d/work-plan-after-sweep.fixed.md",
+    "scripts/work_plan.py",
+    "tests/test_work_plan.py"
+   ],
+   "added": [],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "build-a-gate",
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
