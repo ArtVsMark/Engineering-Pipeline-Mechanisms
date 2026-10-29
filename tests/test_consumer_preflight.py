@@ -450,3 +450,5 @@ def test_a_floor_without_yaml_does_not_displace_python3(tmp_path: Path) -> None:
     done = launch(tree, tmp_path, "work_plan.py", env_over=interpreters(tmp_path, False))
     assert done.returncode == 0, done.stderr
     assert "через: python3 yaml" in done.stdout, done.stdout
+    # Планка найдена без `yaml` — это сказано, а не взято молча (взгляд на #1777).
+    assert "планка python9.97 найдена, но без yaml" in done.stderr, done.stderr
