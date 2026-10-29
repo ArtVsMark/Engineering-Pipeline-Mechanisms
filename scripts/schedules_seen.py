@@ -23,7 +23,8 @@
 расходится с первым молча.
 
 Исходы (правило 039): ``0`` все заходы на месте · ``1`` есть пропуски или
-падения · ``2`` заход не отработал.
+падения · ``2`` заход не отработал или не досчитал расписание, чью форму
+не разбирает (реестр при этом записан).
 """
 
 import argparse
@@ -82,6 +83,10 @@ class Seen:
     expected: int
     happened: int
     fell: int
+    #: Почему расписание не сосчитано; пусто — сосчитано. Неразобранная форма
+    #: и прогон, неизвестный площадке, — отказ ЭТОГО расписания, а не всего
+    #: обхода (#1768, взгляд на #1773, 039).
+    uncounted: str = ""
 
     @property
     def missed(self) -> int:
@@ -94,11 +99,19 @@ class Seen:
 
     @property
     def loud(self) -> bool:
-        """Есть ли о чём говорить: пропусков сверх терпимого или падения."""
-        return self.missed > TOLERATED or self.fell > 0
+        """Есть ли о чём говорить: несосчитанное, пропусков сверх терпимого или падения."""
+        return bool(self.uncounted) or self.missed > TOLERATED or self.fell > 0
 
     def said(self) -> str:
         """Строка реестра: что за прогон и что с ним."""
+        if self.uncounted:
+            # Cron называет сама причина, когда дело в форме; «упало» — и здесь:
+            # падения несосчитанного прогона реестр обязан показывать тоже
+            # (взгляд на #1773).
+            about = f"не сосчитано: {self.uncounted}; случилось {self.happened}"
+            if self.fell:
+                about += f", упало {self.fell}"
+            return f"- `{self.name}` — {about}"
         about = f"ожидалось {self.expected}, случилось {self.happened}"
         if self.missed:
             about += f", пропущено {self.missed}"
@@ -123,6 +136,27 @@ def declared(where: Path | None = None) -> dict[str, str]:
     return {str(name): str((one or {}).get("cron") or "") for name, one in runs.items()}
 
 
+#: Границы чисел полей cron, которые разбираются: час и день недели. Воскресенье
+#: в cron — и ``0``, и ``7`` (crontab(5)), поэтому граница дня недели — семь.
+HOURS: Final = range(24)
+WEEKDAYS: Final = range(8)
+
+
+def listed(cron: str, field: str, allowed: range, what: str) -> frozenset[int] | None:
+    """Поле cron: ``*`` — любое (``None``), число или список чисел через запятую — множество.
+
+    Остальное — шаги ``*/n``, диапазоны ``a-b``, имена дней — отказ: в дереве
+    поставщика и семьи их нет, и угадывать их счёт значило бы выдать
+    приблизительное за точное (045).
+    """
+    if field == "*":
+        return None
+    parts = field.split(",")
+    if not all(part.isdigit() and int(part) in allowed for part in parts):
+        raise NotRun(f"расписание «{cron}»: {what} «{field}» — форма не поддержана (045)")
+    return frozenset(int(part) for part in parts)
+
+
 def expected_between(cron: str, since: datetime, until: datetime) -> int:
     """Сколько раз расписание обязано было сработать в окне.
 
@@ -130,30 +164,37 @@ def expected_between(cron: str, since: datetime, until: datetime) -> int:
     Приблизительный ответ, выданный за точный, здесь хуже отсутствующего: он
     объявил бы «пропусков нет» там, где их не считали
     ([045](https://github.com/ArtVsMark/Engineering-Incidents-Playbook/blob/main/rules/ru/045-no-silent-fallback.md)).
-    Разбираются ровно те формы, что у нас есть: «минута час * * *» (ежедневно)
-    и «минута * * * *» (ежечасно).
+    Разбираются формы, что есть в дереве поставщика и семьи (#1768): минута
+    числом; час — ``*``, число или список (``5,17``); день недели — ``*``,
+    число или список; день месяца и месяц — только ``*``.
+
+    СЧЁТ — ПЕРЕБОРОМ ЧАСОВ ОКНА, а не формулой: каждый час в минуту расписания
+    сверяется с часом и днём недели. Неделя — 168 проверок; формула на каждое
+    сочетание полей была бы вторым разбором того же.
     """
     fields = cron.split()
     if len(fields) != 5:
         raise NotRun(f"расписание «{cron}» не вида из пяти полей — считать нечем")
     minute, hour, day, month, weekday = fields
-    if (day, month, weekday) != ("*", "*", "*"):
-        raise NotRun(f"расписание «{cron}»: разбор дней не сделан — форма не поддержана (045)")
-    if not minute.isdigit():
+    if (day, month) != ("*", "*"):
+        raise NotRun(
+            f"расписание «{cron}»: разбор дня месяца и месяца не сделан — форма не поддержана (045)"
+        )
+    if not minute.isdigit() or int(minute) > 59:
         raise NotRun(f"расписание «{cron}»: минута не числом — форма не поддержана (045)")
-    step = timedelta(days=1) if hour.isdigit() else timedelta(hours=1)
-    if not hour.isdigit() and hour != "*":
-        raise NotRun(f"расписание «{cron}»: час не числом и не «*» — форма не поддержана (045)")
+    hours = listed(cron, hour, HOURS, "час")
+    days = listed(cron, weekday, WEEKDAYS, "день недели")
+    # Воскресенье в cron — 0 и 7, у `datetime.weekday` понедельник — 0.
+    days = None if days is None else frozenset(one % 7 for one in days)
 
-    at = since.replace(minute=int(minute), second=0, microsecond=0)
-    if step == timedelta(days=1):
-        at = at.replace(hour=int(hour))
-    while at < since:
-        at += step
+    at = since.astimezone(UTC).replace(minute=int(minute), second=0, microsecond=0)
+    if at < since:
+        at += timedelta(hours=1)
     count = 0
     while at <= until:
-        count += 1
-        at += step
+        if (hours is None or at.hour in hours) and (days is None or (at.weekday() + 1) % 7 in days):
+            count += 1
+        at += timedelta(hours=1)
     return count
 
 
@@ -228,8 +269,20 @@ def sweep(repo: str, token: str, now: datetime, days: int = WINDOW_DAYS) -> list
         # про который не удалось спросить (045).
         appeared = born(repo, name, token)
         since = max(window, appeared) if appeared else window
-        happened, fell = fired(repo, name, token, since)
-        seen.append(Seen(name, cron, expected_between(cron, since, now), happened, fell))
+        # ОТКАЗ ПО ОДНОМУ РАСПИСАНИЮ — ЕГО СТРОКА, а не падение обхода (#1768,
+        # взгляд на #1773): прежде первое же такое расписание — неразобранная
+        # форма или прогон, неизвестный площадке, — обрывало счёт остальных.
+        try:
+            happened, fell = fired(repo, name, token, since)
+        except NotRun as exc:
+            seen.append(Seen(name, cron, 0, 0, 0, uncounted=str(exc)))
+            continue
+        try:
+            expected = expected_between(cron, since, now)
+        except NotRun as exc:
+            seen.append(Seen(name, cron, 0, happened, fell, uncounted=str(exc)))
+            continue
+        seen.append(Seen(name, cron, expected, happened, fell))
     return seen
 
 
@@ -306,7 +359,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"обход не отработал: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
 
-    loud = [item for item in seen if item.loud]
+    # НЕСОСЧИТАННОЕ — ТРЕТИЙ ИСХОД, НО ПОСЛЕ ЗАПИСИ РЕЕСТРА: остальные
+    # расписания досчитаны и записаны, а «пропусков нет» про несосчитанное
+    # сказать нельзя (039, 045).
+    uncounted = [item for item in seen if item.uncounted]
+    loud = [item for item in seen if item.loud and not item.uncounted]
+    if uncounted:
+        # ИСХОД 2 НЕ ПРЯЧЕТ ПРОПУСКОВ (взгляд на #1773): осечки досчитанных
+        # расписаний названы и здесь, а не только в реестре.
+        if loud:
+            print(f"требуют взгляда среди досчитанных: {len(loud)} из {len(seen) - len(uncounted)}")
+        print(
+            f"обход не досчитал: {len(uncounted)} из {len(seen)} расписаний — причина в их строках",
+            file=sys.stderr,
+        )
+        return EXIT_BROKEN
     if not loud:
         print(f"все объявленные заходы на месте: расписаний {len(seen)}, окно {args.days} сут.")
         return EXIT_OK
