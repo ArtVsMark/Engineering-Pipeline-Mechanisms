@@ -1712,9 +1712,35 @@ def test_awaiting_the_look_asks_the_review_record_of_the_head(
         return iter([{"name": "review / review", "status": "in_progress"}])
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"name": "review.yml"})
     item = change(1, "automerge")
     assert module.awaits_look("o/r", item, "token") is True
     assert asked == [f"repos/o/r/commits/{item.head}/check-runs?filter=latest"]
+
+
+def test_a_look_without_the_review_run_in_the_base_is_not_awaited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """В базе нет `review.yml` — вердикта не будет, и идущий взгляд не ждётся (#1759).
+
+    Первое изменение подключения: действие взгляда пропускает работу, а
+    `workflow_run` очередь до слияния не будит — ожидание стояло бы вечно.
+    """
+    asked: list[str] = []
+
+    def request(method: str, path: str, *_: Any, **__: Any) -> Any:
+        asked.append(path)
+        raise module.ghrest.NotFound(f"{method} {path} → 404")
+
+    monkeypatch.setattr(
+        module.ghrest,
+        "paginate",
+        lambda *a, **k: iter([{"name": "review / review", "status": "in_progress"}]),
+    )
+    monkeypatch.setattr(module.ghrest, "request", request)
+    item = change(1, "automerge")
+    assert module.awaits_look("o/r", item, "token") is False
+    assert asked == [f"repos/o/r/contents/.github/workflows/review.yml?ref={item.base}"]
 
 
 def test_a_head_behind_the_base_waits_for_its_running_look(platform: dict[str, Any]) -> None:
