@@ -31,8 +31,22 @@ OWN = "ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows"
             "ArtVsMark/Engineering-Pipeline-Mechanisms",
             "1.6.0",
         ),
+        (
+            "build(deps): Bump anthropics/claude-code-action from 1.0.262 to 1.0.263",
+            "anthropics/claude-code-action",
+            "1.0.263",
+        ),
+        ("chore: Bump actions/checkout from 7.0.1 to 7.1.0", "actions/checkout", "7.1.0"),
+        ("build(deps): bump actions/checkout from 7.0.1 to 7.1.0", "actions/checkout", "7.1.0"),
     ],
-    ids=["пин-по-sha", "действие-с-путём", "своя-семья"],
+    ids=[
+        "пин-по-sha",
+        "действие-с-путём",
+        "своя-семья",
+        "приставка-с-областью",
+        "приставка",
+        "строчная-bump",
+    ],
 )
 def test_the_signal_is_read_from_the_title_only(title: str, dep: str, new: str) -> None:
     """Из изменения бота берётся одно: что и до какой версии — по заголовку."""
@@ -44,11 +58,13 @@ def test_the_signal_is_read_from_the_title_only(title: str, dep: str, new: str) 
     "title",
     [
         "Bump the actions group with 3 updates",
+        "build(deps): Bump the actions group with 3 updates",
+        "build(deps): bump the actions group with 3 updates",
         "Bump actions/checkout from 7.0.1 to main",
         "Обновить всё",
         "",
     ],
-    ids=["группа", "не-версия", "чужая-форма", "пусто"],
+    ids=["группа", "группа-с-приставкой", "группа-строчная", "не-версия", "чужая-форма", "пусто"],
 )
 def test_a_signal_of_another_form_is_refused_by_name(title: str) -> None:
     """Иная форма заголовка — отказ с причиной: угадывать подъём нельзя."""
