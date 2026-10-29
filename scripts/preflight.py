@@ -26,6 +26,7 @@
 """
 
 import argparse
+import dataclasses
 import hashlib
 import os
 import platform
@@ -49,6 +50,7 @@ import gitcall
 import journal
 import main_guard
 import paths
+import pipeline_checks
 import report
 import scope
 import yaml
@@ -137,6 +139,11 @@ class Step:
     #: написана; пусто — джоб ничего не ставит. Нужна шагу типов: `mypy`
     #: видит пакеты окружения, а не только код, и их состав решает вердикт.
     installs: str = ""
+    #: Имена записей проверок, которые даст площадка: `<джоб> / <вызванный джоб>`
+    #: у вызова, имя джоба у своего. По ним читается класс из `.pipeline.yml`
+    #: (#1745). Команда, стоящая в нескольких джобах, гоняется один раз и несёт
+    #: имена всех (взгляд на #1748, `8557b34`). Пусто — шаг вне `ci.yml`.
+    checks: tuple[str, ...] = ()
 
 
 #: Шаг, которому важен СОСТАВ окружения, а не только версии инструментов (#1069).
@@ -212,7 +219,7 @@ SUPPLIER_CALL: Final = re.compile(
 
 def _jobs_of(
     job: dict[str, Any], caller: Path, supplier: Path | None = None, supplier_repo: str = ""
-) -> list[list[dict[str, Any]]]:
+) -> list[tuple[str, list[dict[str, Any]]]]:
     """Шаги джоба — свои либо шаги прогона, который он зовёт, ПО ДЖОБАМ.
 
     Вызванный прогон отдаёт свои джобы порознь, а не одним списком: строка
@@ -227,7 +234,7 @@ def _jobs_of(
     """
     said = str(job.get("uses") or "")
     if not said:
-        return [list(job.get("steps") or [])]
+        return [("", list(job.get("steps") or []))]
     if not said.startswith(OUR_CALL):
         # ВЫЗОВ ПОСТАВЩИКА РАСКРЫВАЕТСЯ ПО ЕГО ВЫКАЧКЕ (#1553). У потребителя шаги
         # лежат в механизмах, и загрузчик окна кладёт их выкачку по тегу из этих
@@ -258,8 +265,8 @@ def _jobs_of(
     return _called_jobs(where, said)
 
 
-def _called_jobs(where: Path, said: str) -> list[list[dict[str, Any]]]:
-    """Шаги вызванного прогона по джобам; прогона нет или он не разбирается — отказ."""
+def _called_jobs(where: Path, said: str) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Шаги вызванного прогона по джобам с их именами; прогона нет или он не разбирается — отказ."""
     if not where.is_file():
         raise NotRun(f"вызов «{said}» указывает на прогон, которого в дереве нет (075)")
     try:
@@ -268,7 +275,10 @@ def _called_jobs(where: Path, said: str) -> list[list[dict[str, Any]]]:
         raise NotRun(f"{where}: вызываемый прогон не прочитан: {exc}") from exc
     if not isinstance(called, dict):
         raise NotRun(f"{where}: вызываемый прогон не разбирается")
-    return [list((inner or {}).get("steps") or []) for inner in (called.get("jobs") or {}).values()]
+    return [
+        (str((inner or {}).get("name") or key), list((inner or {}).get("steps") or []))
+        for key, inner in (called.get("jobs") or {}).items()
+    ]
 
 
 def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = "") -> list[Step]:
@@ -307,13 +317,21 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
     # Чтение начинается с чистого листа: отложенное относится к ЭТОМУ дереву.
     UNRUNNABLE.clear()
     found: list[Step] = []
-    seen: set[str] = set()
+    #: Команда → её место в `found`: повтор команды добавляет шагу имя записи.
+    seen: dict[str, int] = {}
+    # ИМЯ ЗАПИСИ — КАК ЕГО ДАСТ ПЛОЩАДКА: у вызова составное `<джоб> / <вызванный>`
+    # (договор, «имя записи составное»), у своего джоба — его имя (#1745).
+    # ГРАНИЦА НАЗВАНА (взгляд на #1748, `d95a583`): у матричного джоба площадка
+    # дописывает к имени значения ячейки (`test (3.14)`), а имя с `${{ }}`
+    # раскрывает сама — такая запись с ответом `.pipeline.yml` не совпадёт, и
+    # красное её шага считается обязательным: ошибка в сторону «держит».
     jobs = [
-        inner
-        for job in (document.get("jobs") or {}).values()
-        for inner in _jobs_of(job or {}, path, supplier, supplier_repo)
+        (f"{caller} / {inner}" if inner else caller, job_steps)
+        for key, job in (document.get("jobs") or {}).items()
+        for caller in [str((job or {}).get("name") or key)]
+        for inner, job_steps in _jobs_of(job or {}, path, supplier, supplier_repo)
     ]
-    for job_steps in jobs:
+    for check, job_steps in jobs:
         # Строка установки — ПОСЛЕДНЯЯ перед шагом в его джобе: так её видит
         # площадка, ставящая окружение раньше команд (#1069). Джобы вызванного
         # прогона приходят порознь (`_jobs_of`), и строка одного не достаётся
@@ -324,7 +342,12 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
             name = str((step or {}).get("name") or "").strip()
             if INSTALL in command:
                 installs = command
-            if not command or command in seen:
+            if not command:
+                continue
+            if command in seen:
+                at = seen[command]
+                if check not in found[at].checks:
+                    found[at] = dataclasses.replace(found[at], checks=(*found[at].checks, check))
                 continue
             lines = [plain(line) for line in command.splitlines()]
             # Пробел дописывается к строке: голый `mypy` — тоже вызов (#992).
@@ -341,8 +364,8 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
                 # молча (046) — такие шаги перечисляет `report_gaps`.
                 UNRUNNABLE[name or command] = "в команде подстановка площадки"
                 continue
-            seen.add(command)
-            found.append(Step(name or command.splitlines()[0], command, installs))
+            seen[command] = len(found)
+            found.append(Step(name or command.splitlines()[0], command, installs, (check,)))
 
     if not found:
         raise NotRun(f"{path}: ни одной выполнимой команды не нашлось — предмет не найден (075)")
@@ -371,7 +394,7 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
             continue
         if not choice.tests:
             said = f"судить нечего: сценарий {choice.scenario}, тестов не задето"
-            out.append(Step(step.name, f"echo {shlex.quote(said)}", step.installs))
+            out.append(Step(step.name, f"echo {shlex.quote(said)}", step.installs, step.checks))
             continue
         # ВЫБОР ВСТАЁТ СРАЗУ ПОСЛЕ `pytest`, А НЕ В ХВОСТ СТРОКИ (#1749). Строка
         # шага кончается `|| rc=$?`, и хвост уходил за него: `pytest` шёл без
@@ -381,7 +404,7 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
         for n in at:
             start = lines[n].index(PYTEST) + len(PYTEST)
             lines[n] = f"{lines[n][:start]}{picked} {lines[n][start:]}"
-        out.append(Step(step.name, "\n".join(lines), step.installs))
+        out.append(Step(step.name, "\n".join(lines), step.installs, step.checks))
     return out
 
 
@@ -941,6 +964,22 @@ def environment_gap(root: Path) -> list[str]:
         return []
 
 
+def switched_off(root: Path, supplier: Path | None = None) -> frozenset[str]:
+    """Проверки с классом `off` в ответе проекта; ответ не прочитан — ни одной, и это сказано.
+
+    Непрочитанный ответ не выключает ничего: молча посчитать красное
+    выключенным значило бы пропустить ровно то, что держит слияние (045).
+    """
+    try:
+        # Выкачка поставщика — явно: у потребителя пути ответа бывают её путями, а
+        # `$MECHANISMS` в процессе предполётной не задан (взгляд на #1748, `ca798c2`).
+        checks = pipeline_checks.load(root / pipeline_checks.DEFAULT_PATH, supplier)
+    except pipeline_checks.BadPolicy as exc:
+        print(f"классы проверок не прочитаны — выключенных не считаю: {report.cut(str(exc))}")
+        return frozenset()
+    return frozenset(name for name, one in checks.items() if one.klass == pipeline_checks.OFF)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Точка входа: прогоняет проверки дерева и объявляет исход."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1021,6 +1060,19 @@ def main(argv: list[str] | None = None) -> int:
             print(output.rstrip())
 
     report_gaps()
+    # ВЫКЛЮЧЕННАЯ ПРОВЕРКА ТОЛЧОК НЕ ДЕРЖИТ (#1745). Класс `off` в `.pipeline.yml`
+    # — решение потребителя с причиной; площадка запустит джоб, но сводный гейт
+    # его не опросит. Красное такой проверки не прячется, а называется своей
+    # строкой — и исход предполётной не красит.
+    off = switched_off(args.root, args.mechanisms)
+    # Выключенным считается шаг, у которого выключены ВСЕ его записи: та же
+    # команда в обязательном джобе держит толчок (`8557b34`).
+    quiet = [step for step in red if step.checks and all(one in off for one in step.checks)]
+    red = [step for step in red if step not in quiet]
+    if quiet:
+        print(f"\nкрасное выключенных проверок: {len(quiet)} — не держит, класс off:")
+        for step in quiet:
+            print(f"  {', '.join(step.checks)}: {step.name}")
     if red:
         print(f"\nкрасных проверок: {len(red)} — толкать рано, чинится здесь:")
         for step in red:

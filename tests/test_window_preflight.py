@@ -1647,3 +1647,111 @@ def test_the_choice_reaches_pytest_in_the_real_test_step(tmp_path: Path) -> None
     assert "tests/test_a.py tests/test_b.py" in said, said
     assert done.returncode == 3, (done.returncode, said)
     assert "Permission denied" not in said and "not found" not in said, said
+
+
+@pytest.mark.parametrize(
+    ("check", "expect"),
+    [("lint / lint", preflight.EXIT_OK), ("pipeline / pipeline", preflight.EXIT_RED)],
+    ids=["выключенная", "обязательная"],
+)
+def test_a_switched_off_check_does_not_hold_the_push(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    check: str,
+    expect: int,
+) -> None:
+    """Красное проверки с классом `off` названо, но исход не красит; прочее — красит (#1745)."""
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": [])
+    monkeypatch.setattr(
+        preflight, "BEFORE_PUSH", [preflight.Step("красный", "false", "", (check,))]
+    )
+    monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (1, "красное"))
+    monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
+    monkeypatch.setattr(
+        preflight, "switched_off", lambda root, supplier=None: frozenset({"lint / lint"})
+    )
+    assert preflight.main([]) == expect
+    said = capsys.readouterr().out
+    assert ("класс off" in said) is (expect == preflight.EXIT_OK)
+
+
+@pytest.mark.parametrize("written", ["off", '"off"'], ids=["булево-yaml", "строкой"])
+def test_switched_off_reads_the_answer(tmp_path: Path, written: str) -> None:
+    """Класс `off` читается из `.pipeline.yml` в обеих формах: YAML 1.1 даёт `off` булевым."""
+    (tmp_path / ".pipeline.yml").write_text(
+        "schema: 4\n"
+        'contract: ">=0.14,<0.15"\n'
+        "checks:\n"
+        '  "pipeline / pipeline": required\n'
+        '  "lint / lint":\n'
+        f"    class: {written}\n"
+        "    why: своего кода на Python нет\n",
+        encoding="utf-8",
+    )
+    assert preflight.switched_off(tmp_path) == frozenset({"lint / lint"})
+
+
+def test_an_unread_answer_switches_nothing_off(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ответ не прочитан — выключенных нет, и это сказано: красное не прячется (045)."""
+    (tmp_path / ".pipeline.yml").write_text("checks: [", encoding="utf-8")
+    assert preflight.switched_off(tmp_path) == frozenset()
+    assert "не прочитаны" in capsys.readouterr().out
+
+
+def test_a_step_knows_the_record_its_check_gets(tmp_path: Path) -> None:
+    """Имя записи шага — как у площадки: `<джоб> / <вызванный джоб>`, у своего — имя джоба."""
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "step-x.yml").write_text(
+        "on: workflow_call\njobs:\n  inner:\n    name: lint\n    steps:\n      - run: ruff check\n",
+        encoding="utf-8",
+    )
+    (flows / "ci.yml").write_text(
+        "on: push\njobs:\n"
+        "  outer:\n    name: lint\n    uses: ./.github/workflows/step-x.yml\n"
+        "  own:\n    steps:\n      - run: pytest -q\n",
+        encoding="utf-8",
+    )
+    found = {step.command: step.checks for step in preflight.steps(flows / "ci.yml")}
+    assert found == {"ruff check": ("lint / lint",), "pytest -q": ("own",)}
+
+
+def test_a_command_in_a_required_job_too_holds_the_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Команда в выключенном и в обязательном джобе: красное держит толчок (`8557b34`)."""
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "ci.yml").write_text(
+        "on: push\njobs:\n"
+        "  lint:\n    steps:\n      - run: ruff check\n"
+        "  must:\n    steps:\n      - run: ruff check\n",
+        encoding="utf-8",
+    )
+    found = preflight.steps(flows / "ci.yml")
+    assert [step.checks for step in found] == [("lint", "must")]
+    monkeypatch.setattr(preflight, "steps", lambda path, supplier=None, repo="": found)
+    monkeypatch.setattr(preflight, "BEFORE_PUSH", [])
+    monkeypatch.setattr(preflight, "run", lambda step, root, supplier=None: (1, "красное"))
+    monkeypatch.setattr(preflight, "report_gaps", lambda: None)
+    monkeypatch.setattr(preflight, "environment_gap", lambda root: [])
+    monkeypatch.setattr(preflight, "switched_off", lambda root, supplier=None: frozenset({"lint"}))
+    assert preflight.main([]) == preflight.EXIT_RED
+
+
+def test_switched_off_reads_the_supplier_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Выкачка поставщика доходит до чтения ответа явно, а не через `$MECHANISMS` (`ca798c2`)."""
+    seen: list[object] = []
+
+    def load(path: Path, supplier: Path | None = None) -> dict[str, object]:
+        seen.append(supplier)
+        return {}
+
+    monkeypatch.setattr(preflight.pipeline_checks, "load", load)
+    preflight.switched_off(tmp_path, tmp_path / "выкачка")
+    assert seen == [tmp_path / "выкачка"]
