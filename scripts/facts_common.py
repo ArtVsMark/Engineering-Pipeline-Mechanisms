@@ -342,9 +342,9 @@ def ci_facts(
     # Python (EPL, проба #1558): причина своя, без предупреждения на каждом
     # заходе. У проекта с `pyproject.toml` пропавший джоб — поломка
     # (переименован, удалён): «не прочитана» с предупреждением, а не тихое
-    # «матрицы нет» (045). Свой Python — корневой `pyproject.toml` или пакет
-    # `packages/*/pyproject.toml`, который сверяет и `check_env.py` (взгляд
-    # на #1776, 195).
+    # «матрицы нет» (045). Свой Python — корневой файл `PYTHON_MARKERS` или
+    # пакет `packages/*/pyproject.toml`, который сверяет и `check_env.py`
+    # (взгляд на #1776, 195).
     try:
         listed = policy.run_of(flow).get("jobs") or {}
     except policy.BadPolicy as exc:
@@ -362,9 +362,18 @@ def ci_facts(
     return run, {}
 
 
+#: Корневые файлы, по которым у дерева свой Python (взгляд на #1776, 195):
+#: манифест пакета любой из трёх форм упаковки или список зависимостей. Без
+#: `setup.py`, `setup.cfg` и `requirements.txt` переименованный джоб матрицы
+#: у такого проекта тихо становился «матрицы нет».
+PYTHON_MARKERS: Final = ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
+
+
 def own_python(root: Path) -> bool:
-    """Есть ли у дерева свой Python: корневой `pyproject.toml` или пакет в `packages/`."""
-    return (root / "pyproject.toml").is_file() or any((root / "packages").glob("*/pyproject.toml"))
+    """Есть ли у дерева свой Python: корневой файл `PYTHON_MARKERS` или пакет в `packages/`."""
+    return any((root / name).is_file() for name in PYTHON_MARKERS) or any(
+        (root / "packages").glob("*/pyproject.toml")
+    )
 
 
 def taken_from(origin: str, supplier: str) -> bool:

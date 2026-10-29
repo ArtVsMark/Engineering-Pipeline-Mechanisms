@@ -1199,7 +1199,13 @@ def matrix_axis(path: Path, job: str, axis: str) -> tuple[list[str], str]:
         # Джоб-вызов — телом вызванного шага: образ у него, а матрица у
         # вызывающего (#1556).
         said = resolved_job(path, job)
-        values = [version_text(one, f"{path}:{job}") for one in said["strategy"]["matrix"][axis]]
+        listed = said["strategy"]["matrix"][axis]
+        # ОСЬ — СПИСОК, А НЕ СТРОКА (взгляд на #1786): выражение на самой оси
+        # (`python: ${{ fromJSON(…) }}`) — строка, и обход по ней давал версии
+        # посимвольно.
+        if not isinstance(listed, list):
+            raise BadPolicy(f"ось — не список значений, а «{listed}»")
+        values = [version_text(one, f"{path}:{job}") for one in listed]
         image = str(said["runs-on"])
     except (BadPolicy, KeyError, TypeError) as exc:
         raise BadPolicy(f"{path}: ось «{axis}» джоба «{job}» не прочитана ({exc!r})") from exc

@@ -55,8 +55,11 @@ PICTURE: Final = PUBLISHES[1]
 #: отличить от живого (та же беда, от которой prune держит значки, #1198).
 FAMILY_CHECK: Final = PUBLISHES[2]
 #: Манифест семьи потребителя (#1766): едет с фактами, а не со значком — его
-#: собирает шаг фактов, и от рисунка он не зависит. Нет рядом — на ветке
-#: остаётся прежний, и это сказано.
+#: собирает шаг фактов, и от рисунка он не зависит. Нет рядом у поставщика —
+#: на ветке остаётся прежний: его пишет свой прогон значков. Нет рядом у
+#: потребителя (`own_manifest`: писатель — этот шаг, и сборка упала) — прежний
+#: снимается, как разбор без значка: по адресу устаревший неотличим от
+#: живого, и соседи судили бы им семью (взгляд на #1776).
 MANIFEST: Final = PUBLISHES[3]
 #: Что кладётся, только если лежит рядом с фактами, — выход действия каталога.
 BESIDE: Final = (PICTURE, FAMILY_CHECK)
@@ -164,13 +167,21 @@ def targets(source: Path, *, archive: bool) -> tuple[str, ...]:
     return tuple(said)
 
 
-def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> bool:
+def publish(
+    source: Path,
+    workdir: Path,
+    *,
+    sha: str,
+    archive: bool = False,
+    own_manifest: bool = False,
+) -> bool:
     """Кладёт `source` и его соседей по `targets` и толкает; ``False`` — изменений нет.
 
     `source` — собранный `facts.json`, первая запись перечня; остальные файлы
     берутся РЯДОМ с ним по имени. Сам `source` по имени не ищется: иначе
     названный, но несуществующий файл подменил бы соседний `facts.json`
-    молча. Нет фактов — отказ, а не публикация части (045).
+    молча. Нет фактов — отказ, а не публикация части (045). `own_manifest` —
+    манифест пишет этот вызов, и его отсутствие снимает прежний (`MANIFEST`).
     """
     # АРХИВА ИЛИ ЗНАЧКА НЕТ — ФАКТЫ ВСЁ РАВНО ЕДУТ (взгляды на #1423, #1422).
     # Первый заход без прежнего архива и с упавшим дописыванием архива не
@@ -178,9 +189,17 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
     # из-за них оставил бы витрину со вчерашними фактами. Пропуск называется,
     # а краснеет на нём свой шаг.
     chosen = targets(source, archive=archive)
-    stale = (FAMILY_CHECK,) if PICTURE in chosen and FAMILY_CHECK not in chosen else ()
+    stale: tuple[str, ...] = (
+        (FAMILY_CHECK,) if PICTURE in chosen and FAMILY_CHECK not in chosen else ()
+    )
+    stale += (MANIFEST,) if own_manifest and MANIFEST not in chosen else ()
     for wanted in (MANIFEST, *BESIDE, *([ARCHIVE] if archive else [])):
-        if wanted in stale:
+        if wanted == MANIFEST and wanted in stale:
+            print(
+                f"::warning::{Path(wanted).name} не собран — прежний манифест снимается: "
+                "по адресу его не отличить от живого"
+            )
+        elif wanted in stale:
             print(
                 f"::warning::значок собран без {Path(wanted).name} — прежний разбор снимается: "
                 "по адресу его не отличить от живого"
@@ -219,7 +238,7 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
     if stale:
         removed = git("rm", "-q", "--ignore-unmatch", "--", *stale, cwd=workdir)
         if removed.returncode != 0:
-            raise NotPublished(f"git rm прежнего разбора отказал: {reason(removed)}")
+            raise NotPublished(f"git rm прежних файлов отказал: {reason(removed)}")
     staged = git("diff", "--cached", "--quiet", cwd=workdir)
     if staged.returncode == 0:
         return False
@@ -246,9 +265,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--archive", action="store_true", help="положить и архив находок рядом с фактами"
     )
+    parser.add_argument(
+        "--own-manifest",
+        action="store_true",
+        help="манифест семьи пишет этот вызов: нет рядом — прежний снимается",
+    )
     args = parser.parse_args(argv)
     try:
-        changed = publish(args.source, args.workdir, sha=args.sha, archive=args.archive)
+        changed = publish(
+            args.source,
+            args.workdir,
+            sha=args.sha,
+            archive=args.archive,
+            own_manifest=args.own_manifest,
+        )
     except NotPublished as exc:
         print(f"::error::факты не опубликованы: {exc}")
         return EXIT_BROKEN

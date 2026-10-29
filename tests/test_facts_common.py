@@ -620,6 +620,13 @@ def test_own_python_is_a_root_manifest_or_a_package(tmp_path: Path) -> None:
     assert module.own_python(tmp_path)
 
 
+@pytest.mark.parametrize("name", ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"])
+def test_own_python_is_any_root_packaging_form(tmp_path: Path, name: str) -> None:
+    """Корневые `setup.py`, `setup.cfg`, `requirements.txt` — тоже свой Python (взгляд на #1776)."""
+    (tmp_path / name).write_text("", encoding="utf-8")
+    assert module.own_python(tmp_path)
+
+
 CI_BY_JOBS = """\
 jobs:
   catalogue:
@@ -677,6 +684,18 @@ def test_a_matrix_with_another_axis_is_unread_not_an_expression(tmp_path: Path) 
         encoding="utf-8",
     )
     with pytest.raises(module.policy.BadPolicy, match="не прочитана"):
+        module.policy.job_pythons(flow, "test")
+
+
+def test_an_axis_given_as_an_expression_is_unread_not_letters(tmp_path: Path) -> None:
+    """Ось `python: ${{ fromJSON(…) }}` — строка: «не прочитана», а не версии по букве (#1786)."""
+    flow = tree(tmp_path) / ".github" / "workflows" / "ci.yml"
+    flow.write_text(
+        "jobs:\n  test:\n    runs-on: x\n    strategy:\n      matrix:\n"
+        "        python: ${{ fromJSON(needs.a.outputs.v) }}\n    steps: []\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(module.policy.BadPolicy, match="не список"):
         module.policy.job_pythons(flow, "test")
 
 
