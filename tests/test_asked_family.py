@@ -272,15 +272,25 @@ THIN = (
         ("scripts/check_mine.py", SIGN.format("o/свой") + '"""Гейт."""\n', True),
         (".github/workflows/ci.yml", THIN.format("o/поставщик"), False),
         (".github/workflows/ci.yml", THIN.format("o/свой"), True),
+        (".github/workflows/ci.yml", THIN.format("o/сторонний"), True),
         (".github/workflows/own.yml", "on: push\njobs:\n  a:\n    steps:\n      - run: x\n", True),
     ],
-    ids=["подпись-поставщика", "своя-подпись", "тонкий-вызов", "вызов-своего", "свой-прогон"],
+    ids=[
+        "подпись-поставщика",
+        "своя-подпись",
+        "тонкий-вызов",
+        "вызов-своего",
+        "вызов-стороннего",
+        "свой-прогон",
+    ],
 )
 def test_a_mechanism_connected_ready_is_not_asked(
     repo: Path, path: str, text: str, asked: bool
 ) -> None:
     """Заготовка поставщика — ответ 162 подписью или тонким вызовом; своё судится (#1743)."""
     _git(repo, "remote", "add", "origin", "https://github.com/o/свой.git")
+    # Ответ проекта подписан поставщиком — так его кладёт заход.
+    (repo / ".pipeline.yml").write_text(SIGN.format("o/поставщик") + "schema: 4\n", "utf-8")
     where = repo / path
     where.parent.mkdir(parents=True, exist_ok=True)
     where.write_text(text, encoding="utf-8")
@@ -301,14 +311,14 @@ def test_an_unknown_self_lets_nothing_through(repo: Path, monkeypatch: pytest.Mo
     ("text", "said"),
     [
         (THIN.format("o/поставщик"), True),
-        (THIN.format("o/свой"), False),
+        (THIN.format("o/сторонний"), False),
         ("on: push\njobs:\n  a:\n    uses: ./.github/workflows/x.yml\n", False),
         ("on: push\njobs: {}\n", False),
         ("jobs: [", False),
     ],
-    ids=["чужой-вызов", "вызов-своего", "свой-путь", "без-джобов", "не-разбирается"],
+    ids=["вызов-поставщика", "вызов-стороннего", "свой-путь", "без-джобов", "не-разбирается"],
 )
 def test_calls_only_knows_a_thin_caller(tmp_path: Path, text: str, said: bool) -> None:
     """Тонкий вызов — каждый джоб зовёт чужой переиспользуемый прогон; прочее — нет."""
     (tmp_path / "ci.yml").write_text(text, encoding="utf-8")
-    assert module.calls_only(tmp_path, "ci.yml", "o/свой") is said
+    assert module.calls_only(tmp_path, "ci.yml", frozenset({"o/поставщик"})) is said

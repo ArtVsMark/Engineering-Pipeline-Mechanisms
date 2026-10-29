@@ -107,6 +107,7 @@ import check_workflow_forms as forms
 import gitcall
 import main_guard
 import onboard
+import paths
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -235,8 +236,12 @@ def supplier_of(path: str, text: str) -> str:
     return said[1] if said else ""
 
 
-def calls_only(root: Path, path: str, own: str) -> bool:
-    """Прогон, каждый джоб которого — вызов чужого переиспользуемого прогона: тонкий вызов.
+def calls_only(root: Path, path: str, suppliers: frozenset[str]) -> bool:
+    """Прогон, каждый джоб которого — вызов переиспользуемого прогона ПОСТАВЩИКА: тонкий вызов.
+
+    Поставщик — тот, чья подпись стоит на заготовке (`suppliers`), а не любой
+    чужой репозиторий: новый прогон потребителя со сторонним вызовом судится
+    как прежде (взгляд на #1748, `51f95e5`).
 
     Разбор прогона — общий (`check_workflow_forms`), а не свой: второй разбор
     того же файла разошёлся бы с первым молча (214). Не разобран — не тонкий.
@@ -251,12 +256,14 @@ def calls_only(root: Path, path: str, own: str) -> bool:
     for job in jobs.values():
         uses = str(job.get("uses") or "")
         caller = "/".join(uses.split("@", 1)[0].split("/")[:2])
-        if not uses or uses.startswith("./") or caller.lower() == own.lower():
+        if not uses or uses.startswith("./") or caller.lower() not in suppliers:
             return False
     return True
 
 
-def connected(root: Path, path: str, text: str, own: str) -> bool:
+def connected(
+    root: Path, path: str, text: str, own: str, suppliers: frozenset[str] = frozenset()
+) -> bool:
     """Механизм подключён готовым у поставщика — заход положил его, а не проект написал.
 
     ПОДКЛЮЧЁННОЕ ГОТОВЫМ — ТОЖЕ ОТВЕТ 162, и написан он подписью, а не абзацем
@@ -274,20 +281,31 @@ def connected(root: Path, path: str, text: str, own: str) -> bool:
     signed = supplier_of(path, text)
     if signed:
         return signed.lower() != own.lower()
-    return path.endswith((".yml", ".yaml")) and calls_only(root, path, own)
+    return path.endswith((".yml", ".yaml")) and calls_only(root, path, suppliers)
 
 
-def silent(paths: list[str], root: Path) -> tuple[list[str], list[str]]:
+def silent(added: list[str], root: Path) -> tuple[list[str], list[str]]:
     """Добавленные механизмы без записи о семье и подключённые готовыми у поставщика."""
     own = gitcall.own_repo(root)
-    quiet: list[str] = []
-    ready: list[str] = []
-    for one in paths:
+    texts: dict[str, str] = {}
+    for one in added:
         try:
-            text = (root / one).read_text(encoding="utf-8")
+            texts[one] = (root / one).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise neighbour.NotRun(f"механизм {one} не прочитан: {exc}") from exc
-        if connected(root, one, text, own):
+    # Поставщик тонкого вызова — по подписям: добавленных файлов и ответа проекта
+    # `.pipeline.yml`, который кладёт тот же заход. Свой адрес поставщиком не бывает.
+    answer = root / paths.PIPELINE
+    signed = [*texts.items()]
+    if answer.is_file():
+        signed.append((paths.PIPELINE.as_posix(), answer.read_text(encoding="utf-8")))
+    suppliers = frozenset(
+        name.lower() for one, text in signed if (name := supplier_of(one, text))
+    ) - {own.lower()}
+    quiet: list[str] = []
+    ready: list[str] = []
+    for one, text in texts.items():
+        if connected(root, one, text, own, suppliers):
             ready.append(one)
         elif not recorded(text):
             quiet.append(one)
