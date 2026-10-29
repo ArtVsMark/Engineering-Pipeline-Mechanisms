@@ -629,13 +629,22 @@ def facts_to_family_block() -> str:
     )
 
 
-@pytest.mark.parametrize("manifest", [True, False], ids=["манифест-прогона", "манифеста-нет"])
+@pytest.mark.parametrize(
+    ("manifest", "repo", "said"),
+    [
+        (True, "someone/consumer", ""),
+        (False, "someone/consumer", "прошлый с ветки badges не берётся"),
+        (False, "ArtVsMark/Engineering-Pipeline-Mechanisms", "ветка badges не выкачана"),
+    ],
+    ids=["манифест-прогона", "потребитель-без-манифеста", "поставщик-без-ветки"],
+)
 def test_the_family_check_finds_this_runs_facts_and_manifest(
-    tmp_path: Path, manifest: bool
+    tmp_path: Path, manifest: bool, repo: str, said: str
 ) -> None:
     """Сверка семьи получает факты прогона и манифест там, где их ищет (#1780).
 
-    Манифеста нет ни в прогоне, ни на ветке `badges` — предупреждение, а не отказ.
+    Запасной путь с ветки `badges` — только поставщику; у потребителя без
+    манифеста прошлый файл не берётся (взгляд на #1786). Нет — предупреждение.
     """
     temp = tmp_path / "temp" / "facts"
     temp.mkdir(parents=True)
@@ -645,10 +654,16 @@ def test_the_family_check_finds_this_runs_facts_and_manifest(
     tree = tmp_path / "tree"
     tree.mkdir()
     subprocess.run(["git", "init", "-q", str(tree)], check=True, timeout=60)
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path / "temp"),
+        "GITHUB_REPOSITORY": repo,
+        "SUPPLIER": "ArtVsMark/Engineering-Pipeline-Mechanisms",
+    }
     done = subprocess.run(
         ["bash", "-e", "-c", facts_to_family_block()],
         cwd=tree,
-        env={**os.environ, "RUNNER_TEMP": str(tmp_path / "temp")},
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -658,5 +673,5 @@ def test_the_family_check_finds_this_runs_facts_and_manifest(
     assert done.returncode == 0, done
     assert (tree / ".github/badges/facts.json").read_text(encoding="utf-8") == '{"schema": "2.1"}'
     assert (tree / ".github/badges/contracts.json").is_file() is manifest
-    if not manifest:
-        assert "::warning::манифест семьи не найден" in done.stdout, done
+    if said:
+        assert said in done.stdout, done

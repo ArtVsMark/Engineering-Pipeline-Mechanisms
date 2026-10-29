@@ -664,3 +664,45 @@ def test_job_pythons_and_pythons_of_read_each_named_job(tmp_path: Path) -> None:
     assert module.policy.job_pythons(flow, "catalogue") == (["3.14"], "ubuntu-26.04")
     versions, images = module.pythons_of(flow, "catalogue, catalogue-next-stable,catalogue")
     assert versions == ["3.14", "3.15"] and images == {"ubuntu-26.04"}
+
+
+def test_a_matrix_with_another_axis_is_unread_not_an_expression(tmp_path: Path) -> None:
+    """Матрица с осью не `python` — «не прочитана», а не `${{ matrix.… }}` (взгляд на #1786)."""
+    flow = tree(tmp_path) / ".github" / "workflows" / "ci.yml"
+    flow.write_text(
+        "jobs:\n  test:\n    runs-on: x\n    strategy:\n      matrix:\n"
+        '        python-version: ["3.14"]\n    steps:\n'
+        "      - uses: actions/setup-python@abc\n        with:\n"
+        "          python-version: ${{ matrix.python-version }}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(module.policy.BadPolicy, match="не прочитана"):
+        module.policy.job_pythons(flow, "test")
+
+
+@pytest.mark.parametrize(("version", "ok"), [("3.10", False), ("3.12", True), ('"3.10"', True)])
+def test_a_version_written_as_an_ambiguous_number_is_refused(
+    tmp_path: Path, version: str, ok: bool
+) -> None:
+    """`3.10` без кавычек YAML читает как 3.1 — отказ, а не другая версия (взгляд на #1786)."""
+    flow = tree(tmp_path) / ".github" / "workflows" / "ci.yml"
+    flow.write_text(
+        "jobs:\n  one:\n    runs-on: x\n    steps:\n"
+        "      - uses: actions/setup-python@abc\n        with:\n"
+        f"          python-version: {version}\n",
+        encoding="utf-8",
+    )
+    if ok:
+        assert module.policy.job_pythons(flow, "one")[0] == [version.strip('"')]
+    else:
+        with pytest.raises(module.policy.BadPolicy, match="неоднозначна"):
+            module.policy.job_pythons(flow, "one")
+
+
+def test_version_text_refuses_an_ambiguous_number_and_an_expression() -> None:
+    """`version_text`: 3.12 числом — строка, 3.1 числом и `${{ … }}` — отказ (взгляд на #1786)."""
+    assert module.policy.version_text(3.12, "ci.yml:x") == "3.12"
+    assert module.policy.version_text("3.10", "ci.yml:x") == "3.10"
+    for bad in (3.1, "${{ matrix.python }}"):
+        with pytest.raises(module.policy.BadPolicy):
+            module.policy.version_text(bad, "ci.yml:x")

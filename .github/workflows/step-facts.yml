@@ -346,19 +346,37 @@ jobs:
       # прогона; манифест — собранный выше у потребителя, а у поставщика —
       # опубликованный на `badges` его прогоном значков. Не прочитан —
       # предупреждение, а не отказ: значок без зоны лучше, чем без значка (084).
+      # ЗАПАСНОЙ ПУТЬ С `badges` — ТОЛЬКО ПОСТАВЩИКУ (взгляд на #1786): у
+      # потребителя, чья сборка манифеста выше упала, прошлый файл с ветки
+      # судил бы семью устаревшим. «Нет на ветке» и «не прочитан» разведены
+      # `ls-tree`, как у архива ниже (взгляд на #791).
       - name: факты и манифест — к сверке семьи
+        env:
+          SUPPLIER: ${{ job.workflow_repository }}
         run: |
           set -uo pipefail
           mkdir -p .github/badges
           cp "$RUNNER_TEMP/facts/facts.json" .github/badges/facts.json
+          rm -f .github/badges/contracts.json
           if [ -f "$RUNNER_TEMP/facts/contracts.json" ]; then
             cp "$RUNNER_TEMP/facts/contracts.json" .github/badges/contracts.json
-          elif git fetch --quiet origin badges 2>/dev/null \
-            && git show FETCH_HEAD:.github/badges/contracts.json >.github/badges/contracts.json 2>/dev/null; then
-            echo "манифест семьи — опубликованный на ветке badges"
+          elif [ "${GITHUB_REPOSITORY,,}" != "${SUPPLIER,,}" ]; then
+            echo "::warning::манифест семьи этого прогона не собран — зона gives будет «?», прошлый с ветки badges не берётся"
+          elif ! git fetch --quiet origin badges; then
+            echo "::warning::ветка badges не выкачана — манифест поставщика не прочитан, зона gives будет «?»"
           else
-            rm -f .github/badges/contracts.json
-            echo "::warning::манифест семьи не найден ни в прогоне, ни на ветке badges — зона gives будет «?»"
+            listed=0
+            found=$(git ls-tree -z --name-only FETCH_HEAD -- .github/badges/contracts.json | tr -d "\0") || listed=$?
+            if [ "$listed" -ne 0 ]; then
+              echo "::warning::дерево ветки badges не прочитано (ls-tree код $listed) — зона gives будет «?»"
+            elif [ -z "$found" ]; then
+              echo "::warning::манифеста поставщика на ветке badges нет — зона gives будет «?»"
+            elif git show FETCH_HEAD:.github/badges/contracts.json >.github/badges/contracts.json; then
+              echo "манифест семьи — опубликованный на ветке badges"
+            else
+              rm -f .github/badges/contracts.json
+              echo "::warning::манифест поставщика на ветке badges есть, но не прочитан — зона gives будет «?»"
+            fi
           fi
       # Вход `pypi` не задаётся: шаг не знает имени пакета потребителя, и зона
       # «release / PyPI» показывает выпуск площадки. Чужое число по совпадению
