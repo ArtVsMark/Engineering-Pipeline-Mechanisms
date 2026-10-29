@@ -842,6 +842,30 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1752,
+   "merged_at": "2026-10-29",
+   "commit": "eaca187cb5db2e96d8b355673aebfe8decfa33e7",
+   "touched": [
+    ".github/dependabot.yml",
+    "changelog.d/deps-intercept-prefix.fixed.md",
+    "kit/data/.github/dependabot.yml",
+    "scripts/deps_intercept.py",
+    "tests/test_deps_intercept.py"
+   ],
+   "added": [
+    "changelog.d/deps-intercept-prefix.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
