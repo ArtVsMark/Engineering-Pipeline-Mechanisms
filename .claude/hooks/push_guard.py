@@ -171,6 +171,12 @@ REDIRECTS: Final = (
     ">",
     "<",
 )
+#: Служебное слово сегмента, которым `unwrap` передаёт «дерево не узнать»
+#: (#1746): обёртка или присваивание уводят git в другое дерево, а сам
+#: сегмент с этим знаком командой не бывает — в слове есть пробел.
+LOST_TREE: Final = "<дерево не узнать>"
+#: Переменные окружения, уводящие git в другое дерево — как `--git-dir`.
+TREE_VARIABLES: Final = ("GIT_DIR=", "GIT_WORK_TREE=")
 #: Присваивание переменной перед командой: имя по правилу оболочки, затем `=`.
 ASSIGNMENT: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 #: Глобальные ключи самого git со значением: `git -C путь push`. Отделять их
@@ -394,7 +400,13 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
     # значение с косой чертой (`FOO=a/b git push origin main`) давало хвост
     # без `=`, и толчок в общую ветку проходил, не узнанный толчком вовсе.
     if ASSIGNMENT.match(segment[0]) and len(segment) > 1:
-        return unwrap(segment[1:], depth - 1)
+        after, blind = unwrap(segment[1:], depth - 1)
+        if segment[0].startswith(TREE_VARIABLES):
+            return [
+                [LOST_TREE, f"«{cut(segment[0])}» уводит git в другое дерево"],
+                *after,
+            ], blind
+        return after, blind
     if first in SHELLS:
         script, blind = script_of(segment)
         if blind:
@@ -442,8 +454,36 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
             return [], blind
         # Внутри обёртки может стоять другая обёртка или оболочка — снятие идёт
         # по кругу, а не один раз.
-        return unwrap(rest, depth - 1)
+        wrapped, blind = unwrap(rest, depth - 1)
+        # СМЕНА ДЕРЕВА ВНУТРИ ОБЁРТКИ НЕ ТЕРЯЕТСЯ (взгляд на #1747): `env -C X`
+        # и `env --chdir X` — тот же `cd X`, а присваивание `GIT_DIR=` после
+        # `env` — то же, что на верхнем уровне. Отдаются служебными сегментами
+        # перед командой, и `push_targets` ведёт их так же.
+        moves = tree_moves(first, segment[1 : len(segment) - len(rest)])
+        return [*moves, *wrapped], blind
     return [segment], ""
+
+
+def tree_moves(name: str, options: list[str]) -> list[list[str]]:
+    """Смены дерева в ключах обёртки: `cd`-сегменты и знак «дерево не узнать»."""
+    if name != "env":
+        return []
+    moves: list[list[str]] = []
+    place = 0
+    while place < len(options):
+        word = options[place]
+        if word in ("-C", "--chdir") and place + 1 < len(options):
+            moves.append(["cd", options[place + 1]])
+            place += 2
+            continue
+        if word.startswith("--chdir="):
+            moves.append(["cd", word.partition("=")[2]])
+        elif word.startswith("-C") and len(word) > 2:
+            moves.append(["cd", word[2:]])
+        elif word.startswith(TREE_VARIABLES):
+            moves.append([LOST_TREE, f"«{cut(word)}» уводит git в другое дерево"])
+        place += 1
+    return moves
 
 
 def commands_of(text: str) -> list[list[str]]:
@@ -615,30 +655,32 @@ def push_targets(command: str, start: str = "") -> Look:
     # которое ведёт два репозитория, толкает второй через `cd` или `git -C`, а
     # голова читалась в дереве проекта — и толчок в свою ветку второго
     # репозитория отвергался всегда. Начало — каталог события (`cwd`), затем
-    # каждое `cd`/`pushd` строки и каждый `-C` толчка. Каталог, который не узнать
-    # (`cd -`, переменная, `--git-dir`, `GIT_DIR=`), — слепота при толчке, а не каталог
+    # каждое `cd`/`pushd` строки, `cd` скрипта и `env -C`, каждый `-C` толчка.
+    # Каталог, который не узнать (`cd -`, `popd`, переменная, `--git-dir`,
+    # `GIT_DIR=`), — слепота при толчке, а не каталог
     # сторожа (045). ПРЕДЕЛ НАЗВАН: подоболочка `( cd … )` разбором не
     # отличается от `cd … ;`, и её `cd` считается действующим.
     where, lost = start, ""
     for part in parts:
-        if part and part[0] in ("cd", "pushd"):
-            where, lost = moved(where, lost, part[1:])
+        if part and part[0] in DIRECTORY_MOVES:
+            where, lost = moved_by(part, where, lost)
             continue
-        if not lost:
-            # Переменные `GIT_DIR` и `GIT_WORK_TREE` уводят git в другое дерево
-            # так же, как `--git-dir`, — где бы они ни стояли в строке.
-            moving = [
-                one for one in part if one.startswith(("GIT_DIR=", "GIT_WORK_TREE="))
-            ]
-            if moving:
-                lost = f"«{cut(moving[0])}» уводит git в другое дерево"
         found, blind = unwrap(part, DEPTH)
         if blind:
             return Look(blind=blind)
+        # Внутри скрипта оболочки и обёртки каталог ведётся своим счётом: после
+        # `bash -c "cd X …"` внешний каталог прежний (взгляд на #1747).
+        inner, unknown_inner = where, lost
         for segment in found:
+            if segment and segment[0] == LOST_TREE:
+                unknown_inner = unknown_inner or segment[1]
+                continue
+            if segment and segment[0] in DIRECTORY_MOVES:
+                inner, unknown_inner = moved_by(segment, inner, unknown_inner)
+                continue
             if not segment or not is_git(segment[0]):
                 continue
-            here, unknown = where, lost
+            here, unknown = inner, unknown_inner
             rest = segment[1:]
             while rest and rest[0].startswith("-"):
                 if rest[0] == "-C" and len(rest) > 1:
@@ -658,6 +700,19 @@ def push_targets(command: str, start: str = "") -> Look:
                     targets=tuple(named_branches(rest[1:])), push=True, where=here
                 )
     return Look()
+
+
+#: Команды смены каталога, которые сторож ведёт по строке.
+DIRECTORY_MOVES: Final = ("cd", "pushd", "popd")
+
+
+def moved_by(command: list[str], where: str, lost: str) -> tuple[str, str]:
+    """Каталог после `cd`/`pushd`/`popd`; `popd` возвращает в каталог, которого сторож не ведёт."""
+    if command[0] == "popd":
+        # Стек каталогов сторож не ведёт: после `popd` каталог не узнать, и
+        # толчок дальше — отказ, а не голова последнего `pushd` (взгляд на #1747).
+        return where, lost or "«popd» возвращает в каталог, которого сторож не ведёт"
+    return moved(where, lost, command[1:])
 
 
 def moved(where: str, lost: str, arguments: list[str]) -> tuple[str, str]:

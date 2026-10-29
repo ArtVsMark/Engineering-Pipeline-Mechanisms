@@ -1422,6 +1422,14 @@ def two_trees(tmp_path: Path) -> tuple[Path, Path]:
         ("git --git-dir={второй}/.git push origin agent/второй", "", 2),
         ("pushd {второй} && git push origin agent/второй", "", 0),
         ("GIT_DIR={второй}/.git git push origin agent/второй", "", 2),
+        # Взгляд на #1747: смена каталога внутри обёртки и скрипта, и `popd`.
+        ("pushd {второй} && popd && git push origin agent/второй", "", 2),
+        ("env -C {второй} git push origin agent/второй", "", 0),
+        ("env --chdir={второй} git push origin agent/второй", "", 0),
+        ("env -C {второй} git push origin agent/чужая", "", 2),
+        ('bash -c "cd {второй} && git push origin agent/второй"', "", 0),
+        ('bash -c "cd {второй}" && git push origin agent/второй', "", 2),
+        ("env GIT_DIR={второй}/.git git push origin agent/второй", "", 2),
     ],
     ids=[
         "ключ-C",
@@ -1435,6 +1443,13 @@ def two_trees(tmp_path: Path) -> tuple[Path, Path]:
         "git-dir-не-судится",
         "pushd-в-строке",
         "переменная-GIT_DIR-не-судится",
+        "popd-не-узнан",
+        "env-C",
+        "env-chdir",
+        "env-C-чужая-ветка",
+        "cd-в-скрипте-оболочки",
+        "cd-скрипта-не-выходит-наружу",
+        "env-GIT_DIR-не-судится",
     ],
 )
 def test_the_head_is_read_in_the_pushed_tree(
