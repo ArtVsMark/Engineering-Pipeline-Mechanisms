@@ -389,7 +389,39 @@ def test_the_tools_come_from_the_running_interpreter(tmp_path: Path) -> None:
     ровно так этот механизм и упал в первом же заходе.
     """
     room = preflight.environment()
-    assert room["PATH"].startswith(str(Path(preflight.sys.executable).parent))
+    first, tools, *_ = room["PATH"].split(preflight.os.pathsep)
+    assert first == str(preflight.shims(preflight.sys.executable))
+    assert tools == str(Path(preflight.sys.executable).parent)
+
+
+def test_a_bare_python_in_a_step_is_the_running_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Голый `python` блока шага — интерпретатор запуска, а не сосед по папке (#1767).
+
+    У потребителя запускатель зовёт `/usr/bin/python3.14`, а `/usr/bin/python`
+    рядом — системный, ниже планки: блоки шагов падали ложным `SyntaxError`.
+    Здесь сосед — подделка, говорящая «чужой».
+    """
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    running = folder / "python3.99"
+    running.write_text(f'#!/bin/sh\nexec "{preflight.sys.executable}" "$@"\n', encoding="utf-8")
+    stranger = folder / "python"
+    stranger.write_text("#!/bin/sh\necho чужой\nexit 3\n", encoding="utf-8")
+    for one in (running, stranger):
+        one.chmod(0o755)
+    monkeypatch.setattr(preflight.sys, "executable", str(running))
+    done = subprocess.run(
+        ["bash", "-c", "python -c 'print(\"свой\")' && python3 -c 'print(\"свой\")'"],
+        env=preflight.environment(),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0 and done.stdout.split() == ["свой", "свой"], done
 
 
 # --- команда берётся блоком, а не строкой из середины -------------------------
