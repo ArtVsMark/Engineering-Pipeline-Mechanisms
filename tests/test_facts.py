@@ -1616,3 +1616,25 @@ def test_the_shared_step_writes_the_manifest_only_for_a_consumer(
     )
     assert done.returncode == 0, done.stderr
     assert (tmp_path / "facts" / "contracts.json").is_file() is written
+
+
+@pytest.mark.parametrize("why", ["shallow", "unfetched", "unasked"])
+def test_an_unproven_absence_is_not_said_to_be_no_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, why: str
+) -> None:
+    """Тега не видно, отсутствие не доказано — `NotRun`, а не `release: null` (взгляд на #1776)."""
+    monkeypatch.setattr(facts.version, "release_tag", lambda _root: None)
+    monkeypatch.setattr(facts.version, "absence", lambda _root: why)
+    with pytest.raises(facts.NotRun, match=why):
+        facts.proven_release(tmp_path)
+
+
+def test_an_unread_tag_commit_is_not_said_to_be_no_release(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Тег есть, а его коммит не прочитан — `NotRun`, а не «выпусков нет» (взгляд на #1776)."""
+    monkeypatch.setattr(facts.version, "release_tag", lambda _root: "v1.0.0")
+    monkeypatch.setattr(facts.version, "git", lambda *a, **k: None)
+    assert facts.release_of(tmp_path) is None, "прежний путь значков поставщика не тронут"
+    with pytest.raises(facts.NotRun, match=r"v1\.0\.0"):
+        facts.proven_release(tmp_path)

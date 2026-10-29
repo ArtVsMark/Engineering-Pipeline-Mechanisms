@@ -609,3 +609,12 @@ def test_release_absent_says_none_only_when_proven(
     assert (said == module.NO_RELEASE) is absent, said
     if not absent:
         assert why in said
+
+
+def test_own_python_is_a_root_manifest_or_a_package(tmp_path: Path) -> None:
+    """Свой Python — корневой `pyproject.toml` или пакет `packages/*` (взгляд на #1776, 195)."""
+    assert not module.own_python(tmp_path)
+    package = tmp_path / "packages" / "core"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text("[project]\nname = 'core'\n", encoding="utf-8")
+    assert module.own_python(tmp_path)

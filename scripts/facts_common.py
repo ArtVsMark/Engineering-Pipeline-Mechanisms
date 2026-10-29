@@ -328,13 +328,15 @@ def ci_facts(
     # Python (EPL, проба #1558): причина своя, без предупреждения на каждом
     # заходе. У проекта с `pyproject.toml` пропавший джоб — поломка
     # (переименован, удалён): «не прочитана» с предупреждением, а не тихое
-    # «матрицы нет» (045). Признак тот же, что у `check_env.py` (#1763).
+    # «матрицы нет» (045). Свой Python — корневой `pyproject.toml` или пакет
+    # `packages/*/pyproject.toml`, который сверяет и `check_env.py` (взгляд
+    # на #1776, 195).
     try:
         listed = policy.run_of(flow).get("jobs") or {}
     except policy.BadPolicy as exc:
         print(f"warning: {exc}", file=sys.stderr)
         return run, {"python": UNREAD_MATRIX.format(flow.name)}
-    if job not in listed and not (root / "pyproject.toml").is_file():
+    if job not in listed and not own_python(root):
         return run, {"python": NO_MATRIX_JOB.format(flow.name, job)}
     later, later_job = matrix_at(root, python_next) if python_next else (None, "")
     try:
@@ -343,6 +345,11 @@ def ci_facts(
         print(f"warning: {exc}", file=sys.stderr)
         return run, {"python": UNREAD_MATRIX.format(flow.name)}
     return run, {}
+
+
+def own_python(root: Path) -> bool:
+    """Есть ли у дерева свой Python: корневой `pyproject.toml` или пакет в `packages/`."""
+    return (root / "pyproject.toml").is_file() or any((root / "packages").glob("*/pyproject.toml"))
 
 
 def taken_from(origin: str, supplier: str) -> bool:

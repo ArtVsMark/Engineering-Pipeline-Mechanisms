@@ -370,6 +370,29 @@ def release_of(root: Path) -> dict[str, str] | None:
     return {"tag": tag, "sha": sha} if tag and sha else None
 
 
+def proven_release(root: Path) -> dict[str, str] | None:
+    """`release_of`, у которого `None` — только ДОКАЗАННОЕ отсутствие (взгляд на #1776, 045).
+
+    `version.git` глотает сбой git, и непрочитанные теги или упавший
+    `rev-list` уходили бы соседям в манифесте потребителя как «выпусков нет».
+    Отсутствие доказывает `version.absence`; не доказано или коммит тега не
+    прочитан — `NotRun` с причиной, и манифест не собирается.
+    """
+    release = release_of(root)
+    if release is not None:
+        return release
+    tag = version.release_tag(root)
+    if tag:
+        raise NotRun(f"коммит тега выпуска {tag} не прочитан")
+    try:
+        why = version.absence(root)
+    except version.NotRun as exc:
+        raise NotRun(f"выпуск не прочитан: {exc}") from exc
+    if why != version.ABSENCE_NONE:
+        raise NotRun(f"выпуск не прочитан: отсутствие тега не доказано ({why})")
+    return None
+
+
 def manifest_facts(root: Path) -> dict[str, Any]:
     """Выпуск (тег и его коммит) и отдаваемые контракты — из дерева `root`.
 
@@ -425,7 +448,7 @@ def consumer_manifest(root: Path, repo: str) -> str:
     doc: dict[str, Any] = {
         "schema": FAMILY_SCHEMA,
         "project": repo,
-        "release": release_of(root),
+        "release": proven_release(root),
         "gives": {},
         "takes": [],
     }
