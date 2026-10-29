@@ -325,10 +325,13 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
     # дописывает к имени значения ячейки (`test (3.14)`), а имя с `${{ }}`
     # раскрывает сама — такая запись с ответом `.pipeline.yml` не совпадёт, и
     # красное её шага считается обязательным: ошибка в сторону «держит».
+    # Имя собирает `pipeline_checks` — тот же разбор, что читает ответ
+    # `.pipeline.yml`: второй разбор с литералом разошёлся бы молча, и `off`
+    # перестал бы действовать (214, взгляд на #1748).
     jobs = [
-        (f"{caller} / {inner}" if inner else caller, job_steps)
+        (pipeline_checks.composed(caller, inner) if inner else caller, job_steps)
         for key, job in (document.get("jobs") or {}).items()
-        for caller in [str((job or {}).get("name") or key)]
+        for caller in [pipeline_checks.own_name(str(key), job or {})]
         for inner, job_steps in _jobs_of(job or {}, path, supplier, supplier_repo)
     ]
     for check, job_steps in jobs:
@@ -386,19 +389,36 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
     if choice is None or choice.tests is None:
         return found
     out: list[Step] = []
+    took = False
     for step in found:
         lines = step.command.splitlines()
         at = [n for n, line in enumerate(lines) if plain(line).startswith(PYTEST)]
         if not at:
             out.append(step)
             continue
+        took = True
         if not choice.tests:
             said = f"судить нечего: сценарий {choice.scenario}, тестов не задето"
             out.append(Step(step.name, f"echo {shlex.quote(said)}", step.installs, step.checks))
             continue
+        # ВЫБОР ВСТАЁТ СРАЗУ ПОСЛЕ `pytest`, А НЕ В ХВОСТ СТРОКИ (#1749). Строка
+        # шага кончается `|| rc=$?`, и хвост уходил за него: `pytest` шёл без
+        # списка — весь набор, — а при красном оболочка исполняла первый
+        # тест-файл как программу. Доводы pytest принимает в любом месте.
+        picked = " ".join(shlex.quote(one) for one in choice.tests)
         for n in at:
-            lines[n] = f"{lines[n]} {' '.join(shlex.quote(one) for one in choice.tests)}"
+            start = lines[n].index(PYTEST) + len(PYTEST)
+            lines[n] = f"{lines[n][:start]}{picked} {lines[n][start:]}"
         out.append(Step(step.name, "\n".join(lines), step.installs, step.checks))
+    # СОСЕДНИЙ СЛУЧАЙ НАЗВАН (195, взгляд на #1750): строка тестов начинается
+    # не с `pytest ` — `python -m pytest`, `timeout 600 pytest`, — и выбор не
+    # лёг никуда. Набор тогда полный, и строка «тест-файлов: N» без этого слова
+    # обещала бы сужение, которого не было (045).
+    if not took:
+        print(
+            "выбор тестов не применён: ни одна строка шагов не начинается"
+            f" с `{PYTEST.strip()}` — полный набор"
+        )
     return out
 
 
@@ -1072,7 +1092,9 @@ def main(argv: list[str] | None = None) -> int:
         for step in red:
             print(f"  {step.name}: {step.command}")
         return EXIT_RED
-    print(f"\nзелено: {len(found)} проверок дерева прошли")
+    # Выключенные красные в «прошли» не входят: число сходится с перечнем
+    # выше (взгляд на #1748, `14e8da8`).
+    print(f"\nзелено: {len(found) - len(quiet)} проверок дерева прошли")
     if args.push:
         return push_branch(args.root)
     return EXIT_OK
