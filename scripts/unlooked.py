@@ -718,7 +718,21 @@ def onboarded_at(repo: str, token: str, by: datetime | None = None) -> datetime 
     if by is not None:
         stamp = by.strftime("%Y-%m-%dT%H:%M:%SZ")
         near = ghrest.request("GET", f"{path}&until={stamp}&per_page=1", token) or []
-        found = [one for one in near if isinstance(one, dict)]
+        # ОТВЕТ СВЕРЯЕТСЯ С `by` (взгляд на #1760, 044): фильтр `until` площадки
+        # может идти по дате автора, а читается дата коммиттера — у слияний
+        # перебазированием они расходятся. Позже `by` — ответа нет, и история
+        # читается целиком, а не отсевает слияния окна по чужой дате.
+        found = [
+            one
+            for one in near
+            if isinstance(one, dict)
+            and (
+                when := ghrest.moment(
+                    ((one.get("commit") or {}).get("committer") or {}).get("date")
+                )
+            )
+            and when <= by
+        ]
     else:
         found = []
     if not found:
@@ -1103,7 +1117,9 @@ def main(argv: list[str] | None = None) -> int:
         # за окно, остаётся. По дате записи её не снять: граница выше точна
         # лишь для окна — за ним она может быть позже настоящей.
         stamps = [stamp for item in merged if (stamp := ghrest.moment(item.get("merged_at")))]
-        edge = onboarded_at(args.repo, token, min(stamps, default=None))
+        # ПУСТОЕ ОКНО — ГРАНИЦА НЕ НУЖНА (взгляд на #1760): отсевать нечего, а
+        # без `by` спросилась бы вся история `review.yml` на каждом заходе.
+        edge = onboarded_at(args.repo, token, min(stamps)) if stamps else None
         early = [item for item in merged if before_onboarding(item, edge)]
         if early:
             merged = [item for item in merged if not before_onboarding(item, edge)]

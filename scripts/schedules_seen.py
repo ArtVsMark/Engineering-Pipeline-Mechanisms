@@ -87,6 +87,9 @@ class Seen:
     #: и прогон, неизвестный площадке, — отказ ЭТОГО расписания, а не всего
     #: обхода (#1768, взгляд на #1773, 039).
     uncounted: str = ""
+    #: Прочитаны ли заходы. Отказал сам `fired` — «случилось 0» было бы числом,
+    #: которого никто не мерил (взгляд на #1773, 045).
+    read: bool = True
 
     @property
     def missed(self) -> int:
@@ -108,6 +111,8 @@ class Seen:
             # Cron называет сама причина, когда дело в форме; «упало» — и здесь:
             # падения несосчитанного прогона реестр обязан показывать тоже
             # (взгляд на #1773).
+            if not self.read:
+                return f"- `{self.name}` — не сосчитано: {self.uncounted}; заходы не прочитаны"
             about = f"не сосчитано: {self.uncounted}; случилось {self.happened}"
             if self.fell:
                 about += f", упало {self.fell}"
@@ -272,10 +277,12 @@ def sweep(repo: str, token: str, now: datetime, days: int = WINDOW_DAYS) -> list
         # ОТКАЗ ПО ОДНОМУ РАСПИСАНИЮ — ЕГО СТРОКА, а не падение обхода (#1768,
         # взгляд на #1773): прежде первое же такое расписание — неразобранная
         # форма или прогон, неизвестный площадке, — обрывало счёт остальных.
+        # Отказ площадки по заходам одного прогона (5xx, 403) — тоже его строка,
+        # как у `born` (взгляд на #1773, 195).
         try:
             happened, fell = fired(repo, name, token, since)
-        except NotRun as exc:
-            seen.append(Seen(name, cron, 0, 0, 0, uncounted=str(exc)))
+        except (NotRun, ghrest.TransportError) as exc:
+            seen.append(Seen(name, cron, 0, 0, 0, uncounted=report.cut(str(exc)), read=False))
             continue
         try:
             expected = expected_between(cron, since, now)

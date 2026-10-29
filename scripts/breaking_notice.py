@@ -343,7 +343,12 @@ def owner_of(token: str) -> str:
     """Логин владельца токена — у площадки; пустая строка — токена нет."""
     if not token:
         return ""
-    said = ghrest.request("GET", "user", token)
+    # Не-JSON ответ (`ValueError` из `ghrest.request`) — отказ ЭТОГО вызова, а не
+    # всего шага: `main` больше не ловит `ValueError` целиком (взгляд на #1741).
+    try:
+        said = ghrest.request("GET", "user", token)
+    except ValueError as exc:
+        raise NotRun(f"владелец токена не прочитан — ответ площадки не JSON: {exc}") from exc
     login = said.get("login") if isinstance(said, dict) else None
     if not isinstance(login, str) or not login:
         raise NotRun(f"площадка не назвала владельца токена — от чьего имени оповещать: {said!r}")
@@ -419,11 +424,12 @@ def main(argv: list[str] | None = None) -> int:
         consumers.NotRun,
         family_uptake.NotRun,
         ghrest.TransportError,
-        # Не-JSON ответ площадки (`ValueError` из `ghrest.request`) — «не
-        # отработало», а не трасса (039). Перечень вызовов площадки у шага:
-        # `seen`, `window_of`, `owner_of` здесь, `notified`/`notify` в цикле ниже —
-        # каждый ловит его (взгляд на ArtVsMark/Engineering-Pipeline-Mechanisms#1741).
-        ValueError,
+        # НЕ-JSON ОТВЕТ ПЛОЩАДКИ ЛОВИТ САМ ВЫЗОВ, А НЕ ЭТОТ БЛОК (взгляд на #1741):
+        # `ValueError` здесь поймал бы и ошибку своего кода (`jump`, `changes`,
+        # `consumers.registry`, `release.contract_at`), и трасса пропала бы.
+        # Вызовы площадки шага: `owner_of` здесь — отдаёт `NotRun`;
+        # `family_uptake.sweep` ловит свой сам; `window_of`, `notified` и
+        # `notify` — в цикле ниже, каждый со своим `except`.
     ) as exc:
         print(f"оповещение не отработало: {report.cut(str(exc))}", file=sys.stderr)
         return EXIT_BROKEN
