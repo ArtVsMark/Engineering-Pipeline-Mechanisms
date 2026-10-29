@@ -97,7 +97,7 @@ def test_every_form_of_an_old_pin_is_refused(
         ({"a.yml": run_file(OLD, UP)}, {"a.yml": run_file(OLD, UP), "b.yml": run_file(UP)}),
         # Действие семьи судит гейт заготовки (155), не этот.
         ({"a.yml": run_file(FAMILY.replace("v1.0.0", "v2.0.0"))}, {"a.yml": run_file(FAMILY)}),
-        # Действия в базе нет — сравнивать не с чем.
+        # Новое действие одной версией: рядом стоит только оно само, ниже нечего.
         ({"a.yml": run_file()}, {"a.yml": run_file(OLD)}),
         # Откат во всех строках: старшей версии рядом не осталось (`7ca7778`).
         (
@@ -145,6 +145,22 @@ def test_another_old_line_beside_an_old_drift_is_refused(
     )
     done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
     assert done.code == pins.EXIT_FOUND, done.out + done.err
+
+
+def test_a_new_action_in_two_versions_is_refused_on_the_lower(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Новое действие сразу двумя версиями — отказ на младшей: старшая уже стоит рядом.
+
+    Рядом стоящее читается в голове вместе с самим приростом (взгляд на
+    ArtVsMark/Engineering-Pipeline-Mechanisms#1741): изменение, которое пишет
+    `v4` при `v7.0.1` в соседнем файле, ничего не решает заново, будь `v7.0.1` в
+    базе или в нём же.
+    """
+    repo = change(tmp_path, {"a.yml": run_file()}, {"a.yml": run_file(OLD), "b.yml": run_file(UP)})
+    done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
+    assert done.code == pins.EXIT_FOUND, done.out + done.err
+    assert "actions/checkout@v4" in done.out
 
 
 def test_a_hash_without_a_mark_is_named_not_judged(run_script: RunScript, tmp_path: Path) -> None:
