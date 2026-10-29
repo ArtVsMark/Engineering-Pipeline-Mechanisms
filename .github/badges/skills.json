@@ -733,6 +733,25 @@
     "a-gate-obeys-every-rule"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1742,
+   "merged_at": "2026-10-29",
+   "commit": "eb2663af1411b0e52102943b29b76979f4cb1ebe",
+   "touched": [
+    ".github/workflows/handover-probe.yml",
+    "changelog.d/deps-self-v1.12.0.internal.md"
+   ],
+   "added": [
+    "changelog.d/deps-self-v1.12.0.internal.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
