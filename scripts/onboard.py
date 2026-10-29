@@ -858,7 +858,9 @@ def licensed(path: Path, text: str, repo: str) -> str:
 #: при обновлении, ни двойником `.yaml` (`of_the_project`).
 #: Настройки окна — туда же (#1554): проект дописывает в них свои разрешения, а
 #: JSON настроек поля лицензии не ждёт.
-OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW, paths.SETTINGS})
+#: `.gitignore` проекта: заход дописывает в него строку, а не кладёт свой (#1769).
+IGNORE_FILE: Final = Path(".gitignore")
+OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW, paths.SETTINGS, IGNORE_FILE})
 
 
 def of_the_project(path: Path) -> bool:
@@ -1475,6 +1477,26 @@ def lay_free(consumer: Path, kit: dict[Path, str], repo: str) -> list[Path]:
     free = {path: text for path, text in kit.items() if path not in taken}
     lay(consumer, free, repo)
     return sorted(free)
+
+
+#: Состояние окна, которое пишут положенные хуки: журнал навыков (#1769).
+STATE_IGNORE: Final = f"{paths.SKILL_RUNS.parent.as_posix()}/"
+
+
+def ignore_state(consumer: Path) -> bool:
+    """Дописывает `.claude/state/` в `.gitignore` потребителя; True — дописано.
+
+    Хуки окна, что кладёт заход, пишут журнал навыков туда, и без строки
+    стоп-хук просил закоммитить состояние окна (#1769, замер на EPL). Чужие
+    строки не трогаются, уже стоящая не дублируется; файла нет — создаётся.
+    """
+    ignore = consumer / IGNORE_FILE
+    text = ignore.read_text(encoding="utf-8") if ignore.is_file() else ""
+    if STATE_IGNORE in (line.strip() for line in text.splitlines()):
+        return False
+    tail = "" if not text or text.endswith("\n") else "\n"
+    ignore.write_text(f"{text}{tail}{STATE_IGNORE}\n", encoding="utf-8")
+    return True
 
 
 def bindings_note(consumer: Path) -> str:
@@ -2540,6 +2562,8 @@ def main(argv: list[str] | None = None) -> int:
         laid = lay_free(args.write, kit, args.repo)
         if laid:
             print("положены заготовки данных: " + ", ".join(str(one) for one in laid))
+        if ignore_state(args.write):
+            print(f"в .gitignore дописано `{STATE_IGNORE}`: там состояние хуков окна")
         if unwired := settings_note(args.write, laid, args.repo, pin):
             print(unwired)
         if unanswered := bindings_note(args.write):
