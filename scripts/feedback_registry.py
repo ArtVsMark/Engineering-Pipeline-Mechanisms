@@ -40,6 +40,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
+import check_invisible
 import family_uptake
 import feedback_form
 import findings
@@ -103,6 +104,23 @@ MARK_OPEN: Final = "<!--"
 MARK_BROKEN: Final = "<! --"
 
 
+def shown(text: str) -> str:
+    """Невидимые символы чужого текста — видимой записью `\\u{XXXX}`, а не как есть.
+
+    НЕВИДИМОЕ ПРИХОДИТ И С ВХОДА (взгляд на
+    ArtVsMark/Engineering-Pipeline-Mechanisms#1738): `quoted` сам его больше не
+    вставляет, но символ формата из замера соседа `split()` не режет, и он
+    доходил до агента, читающего живую задачу. Что невидимо, решает один признак
+    — `check_invisible.hidden`, тот же, что у гейта текста для агента (214), с
+    его законными случаями вроде соединителя в составном эмодзи. Символ не
+    выбрасывается: замер соседа читается тем же, только видно, что в нём было.
+    """
+    marks = {column - 1 for _, column, _ in check_invisible.hidden(text)}
+    return "".join(
+        f"\\u{{{ord(char):04x}}}" if at in marks else char for at, char in enumerate(text)
+    )
+
+
 def quoted(text: object) -> str:
     """Чужой текст в тело задачи: одной строкой, кодом и без метки (085).
 
@@ -130,7 +148,7 @@ def quoted(text: object) -> str:
     — ни в одной форме. Ограждение длиннее любой серии обратных кавычек внутри, и кавычка у края
     отделена пробелом (CommonMark, «Code spans»).
     """
-    flat = " ".join(str(text).split()).replace(MARK_OPEN, MARK_BROKEN)
+    flat = shown(" ".join(str(text).split())).replace(MARK_OPEN, MARK_BROKEN)
     if not flat:
         return ""
     fence = "`" * (max(map(len, re.findall("`+", flat)), default=0) + 1)

@@ -333,6 +333,14 @@ def test_a_neighbours_text_carries_no_invisible_character() -> None:
     assert module.MARK_BROKEN in said and module.SEEN_RE.search(said) is None
 
 
+@pytest.mark.parametrize("char", ["\u2060", "\u200b", "\u202e", "\U000e0041"])
+def test_an_invisible_character_from_the_neighbour_is_shown(char: str) -> None:
+    """Невидимое с входа — видимой записью, а не как есть (взгляд на #1738)."""
+    said = module.quoted(f"замер{char}конец")
+    assert char not in said and f"\\u{{{ord(char):04x}}}" in said
+    assert not module.check_invisible.hidden(said), "агент читает то же, что видит человек"
+
+
 def test_a_neighbours_text_carries_no_marker() -> None:
     """Метка живой задачи из чужого текста не складывается подстрокой."""
     said = module.quoted(module.findings.MARKER)
