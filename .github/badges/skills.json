@@ -890,6 +890,28 @@
     "a-gate-obeys-every-rule"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1755,
+   "merged_at": "2026-10-29",
+   "commit": "deefdafcbc5d65017e1e0484db4f71d2df15fa74",
+   "touched": [
+    ".github/workflows/step-claude.yml",
+    ".github/workflows/step-review.yml",
+    ".github/workflows/step-task-items.yml",
+    ".rules/vendor-watch.json",
+    "changelog.d/deps-anthropics-claude-code-action-v1.0.263.changed.md"
+   ],
+   "added": [
+    "changelog.d/deps-anthropics-claude-code-action-v1.0.263.changed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
