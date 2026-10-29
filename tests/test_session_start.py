@@ -11,7 +11,7 @@ from typing import Final
 
 import pytest
 
-from tests.conftest import ROOT, load_script
+from tests.conftest import ROOT, load_script, walk
 
 HOOK: Final = ROOT / ".claude" / "hooks" / "session-start.sh"
 #: Число планки для обоих хуков окна — одно место (#1058).
@@ -242,8 +242,11 @@ def test_the_hook_reads_the_tree_with_the_floor_interpreter() -> None:
     head = said.splitlines()[1]
     assert floor not in head, "шапка хука вписывает число планки рукой — разойдётся с want молча"
     shared = code_of(INSTALL_FILE)
-    assert 'uv python install "$want"' in shared, "общий файл не ставит python$want"
-    assert 'ln -sf "$(/opt/uv/bin/uv python find "$want")" "/usr/local/bin/python$want"' in shared
+    assert 'python install "$want"' in shared, "общий файл не ставит python$want"
+    assert (
+        'ln -sf "$("$floor_uv/bin/uv" python find "$want")" "/usr/local/bin/python$want"' in shared
+    )
+    assert "floor_uv=${FLOOR_UV:-/opt/uv}" in shared, "каталог uv в окне — не /opt/uv"
 
 
 def test_both_start_hooks_install_through_one_file() -> None:
@@ -254,7 +257,7 @@ def test_both_start_hooks_install_through_one_file() -> None:
     """
     for hook in (HOOK, KIT_HOOK):
         code = code_of(hook)
-        assert "uv python install" not in code, f"{hook.name}: своя копия установки"
+        assert "python install" not in code, f"{hook.name}: своя копия установки"
         assert code.index(SOURCED) < code.index(INSTALLED), f"{hook}: установка до планки"
 
 
@@ -413,3 +416,74 @@ def test_without_a_repository_the_hook_names_the_signing_left_on(tmp_path: Path)
     assert done.returncode == 0, done.stderr
     assert "подпись коммитов не выключена" in done.stderr, done.stderr
     assert "выключена — автор" not in done.stdout, done.stdout
+
+
+#: Строка границ `pyyaml` в установке интерпретатора планки.
+FLOOR_PYYAML = re.compile(r'^floor_pyyaml="(?P<need>[^"]+)"$', re.MULTILINE)
+
+
+def test_the_floor_gets_pyyaml_with_the_bounds_of_the_runs() -> None:
+    """Интерпретатор планки получает `pyyaml` — с границами, что объявляют прогоны (#1771).
+
+    Запускатель механизмов потребителя зовёт им скрипты поставщика, и без
+    `yaml` они падали. Границы — одни на дерево: вторая запись разошлась бы
+    с прогонами молча (022).
+    """
+    install = INSTALL_FILE.read_text(encoding="utf-8")
+    match = FLOOR_PYYAML.search(install)
+    assert match, "установка планки не объявляет границ pyyaml"
+    declared = {
+        found
+        for path in walk(ROOT / ".github" / "workflows", "*.yml")
+        for found in re.findall(r'"(pyyaml[^"]*)"', path.read_text(encoding="utf-8"))
+    }
+    assert declared == {match["need"]}, (declared, match["need"])
+    assert "\"python$want\" -c 'import yaml'" in install, "наличие yaml не спрашивается"
+    assert '--python "$(command -v "python$want")"' in install, "pyyaml ставится не в планку"
+
+
+def test_the_floor_install_puts_pyyaml_into_the_floor_interpreter(tmp_path: Path) -> None:
+    """Установка исполняется: планке без `yaml` uv ставит `pyyaml` (взгляд на #1777).
+
+    Подделки: интерпретатор планки знает `yaml`, только когда uv положил
+    метку; uv пишет свои доводы и кладёт метку. Сверка строк этого не
+    доказывала бы — проба исполняет сам `install_floor.sh`.
+    """
+    marker = tmp_path / "yaml-installed"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    floor = bin_dir / "python9.97"
+    asks_yaml = '[ "$1" = -c ] && [ "$2" = "import yaml" ]'
+    floor.write_text(
+        f'#!/bin/sh\n{asks_yaml} && exec test -f "{marker}"\nexit 0\n', encoding="utf-8"
+    )
+    uv = tmp_path / "uv" / "bin" / "uv"
+    uv.parent.mkdir(parents=True)
+    said = tmp_path / "uv-said"
+    uv.write_text(
+        f'#!/bin/sh\necho "$@" >> "{said}"\n[ "$1" = pip ] && touch "{marker}"\nexit 0\n',
+        encoding="utf-8",
+    )
+    for one in (floor, uv):
+        one.chmod(0o755)
+    done = subprocess.run(
+        ["bash", "-c", f'want=9.97; warn() {{ echo "warn: $1" >&2; }}; . "{INSTALL_FILE}"'],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "FLOOR_UV": str(tmp_path / "uv"),
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0 and "warn:" not in done.stderr, done
+    args = said.read_text(encoding="utf-8")
+    assert f"--python {floor}" in args and "--break-system-packages" in args, args
+    match = FLOOR_PYYAML.search(INSTALL_FILE.read_text(encoding="utf-8"))
+    assert match and match["need"] in args, args
+    assert (
+        subprocess.run([str(floor), "-c", "import yaml"], check=False, timeout=30).returncode == 0
+    )
