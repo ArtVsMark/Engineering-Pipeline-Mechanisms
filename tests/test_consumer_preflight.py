@@ -393,16 +393,29 @@ def test_a_tree_without_mechanisms_is_named_and_not_cached(tmp_path: Path) -> No
     assert not list(cache.parent.glob("*.part*")), "выкачка осталась рядом с кешем"
 
 
-def test_the_launcher_defaults_to_the_floor_interpreter(tmp_path: Path) -> None:
-    """Без `PYTHON` запускатель зовёт `python<планка>` из `floor.sh`, а не голый `python3` (#1771).
+def interpreters(tmp_path: Path, floor_has_yaml: bool) -> dict[str, str]:
+    """Подделки `python9.97` (планка) и `python3`: обе зовут настоящий, метя себя в `VIA`.
 
-    Хук старта ставит `pyyaml` в интерпретатор планки; системный `python3`
-    окна ниже планки и без `yaml`.
+    Планка без `yaml` — тот же интерпретатор с `-S`: без `site` пакетов нет.
     """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    floor_flag = "" if floor_has_yaml else " -S"
+    for name, mark, flag in (("python9.97", "планка", floor_flag), ("python3", "python3", "")):
+        fake = bin_dir / name
+        fake.write_text(
+            f'#!/bin/sh\nVIA={mark} exec "{sys.executable}"{flag} "$@"\n', encoding="utf-8"
+        )
+        fake.chmod(0o755)
+    return {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PYTHON": ""}
+
+
+def floored_consumer(tmp_path: Path, floor: str = 'want="9.97"  # планка\n') -> Path:
+    """Потребитель с `floor.sh` и скриптом поставщика, которому нужен `yaml`."""
     origin = supplier(tmp_path)
     repo = origin / "o" / "m.git"
     (repo / "scripts" / "work_plan.py").write_text(
-        "import os\nprint('через планку:', os.environ.get('VIA_FLOOR', 'нет'))\n",
+        "import os\nimport yaml\nprint('через:', os.environ.get('VIA'), yaml.__name__)\n",
         encoding="utf-8",
     )
     git(repo, "add", "-A")
@@ -411,13 +424,29 @@ def test_the_launcher_defaults_to_the_floor_interpreter(tmp_path: Path) -> None:
     tree = consumer(tmp_path, "o/m/.github/workflows/step-a.yml@v1.2.3")
     hooks = tree / ".claude" / "hooks"
     hooks.mkdir(parents=True)
-    (hooks / "floor.sh").write_text("want=9.97\n", encoding="utf-8")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    floor = bin_dir / "python9.97"
-    floor.write_text(f'#!/bin/sh\nVIA_FLOOR=да exec "{sys.executable}" "$@"\n', encoding="utf-8")
-    floor.chmod(0o755)
-    env = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "PYTHON": ""}
-    done = launch(tree, tmp_path, "work_plan.py", env_over=env)
+    (hooks / "floor.sh").write_text(floor, encoding="utf-8")
+    return tree
+
+
+def test_the_launcher_runs_a_yaml_script_on_the_floor_interpreter(tmp_path: Path) -> None:
+    """Без `PYTHON` скрипт с `import yaml` идёт планкой из `floor.sh`, а не `python3` (#1771).
+
+    Хук старта ставит `pyyaml` в интерпретатор планки. `floor.sh` записан
+    кавычками и с комментарием: читается точкой, как у прочих читателей (взгляд
+    на #1777).
+    """
+    tree = floored_consumer(tmp_path)
+    done = launch(tree, tmp_path, "work_plan.py", env_over=interpreters(tmp_path, True))
     assert done.returncode == 0, done.stderr
-    assert "через планку: да" in done.stdout, done.stdout
+    assert "через: планка yaml" in done.stdout, done.stdout
+
+
+def test_a_floor_without_yaml_does_not_displace_python3(tmp_path: Path) -> None:
+    """Планка без `yaml` не вытесняет `python3` с ним (взгляд на #1777).
+
+    Запись планки простая: держит проверка `yaml`, а не случайность разбора.
+    """
+    tree = floored_consumer(tmp_path, "want=9.97\n")
+    done = launch(tree, tmp_path, "work_plan.py", env_over=interpreters(tmp_path, False))
+    assert done.returncode == 0, done.stderr
+    assert "через: python3 yaml" in done.stdout, done.stdout

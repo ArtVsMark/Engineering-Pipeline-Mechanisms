@@ -36,12 +36,15 @@ root=$(git rev-parse --show-toplevel) || refuse "не дерево git"
 cd "$root"
 
 # ИНТЕРПРЕТАТОР ПО УМОЛЧАНИЮ — ПЛАНКА, А НЕ ГОЛЫЙ python3 (#1771). Хук старта
-# ставит `pyyaml` в `python<планка>`, а системный `python3` окна — ниже
-# планки и без `yaml`. Число читается из `floor.sh` строкой, а не исполнением
-# файла. Нет файла или интерпретатора — `python3`, как прежде.
+# ставит `pyyaml` в `python<планка>`, а системный `python3` облачного окна —
+# ниже планки и без `yaml`. Число читается точкой в подоболочке, как у прочих
+# читателей `floor.sh`: второй разборщик на `sed` разошёлся бы с ними на первой
+# непривычной записи (взгляд на #1777, 214). Планка берётся, только если в ней
+# есть `yaml`: локально она может стоять голой, а рабочий `python3` — с ним
+# (взгляд на #1777, 195). Иначе — `python3`, как прежде.
 if [ -z "${PYTHON:-}" ]; then
-  want=$(sed -n 's/^want=\([0-9.]*\)$/\1/p' .claude/hooks/floor.sh 2>/dev/null | head -n 1)
-  if [ -n "$want" ] && command -v "python$want" >/dev/null 2>&1; then
+  want=$(unset want; . .claude/hooks/floor.sh >/dev/null 2>&1; printf '%s' "${want:-}")
+  if [ -n "$want" ] && "python$want" -c 'import yaml' >/dev/null 2>&1; then
     PYTHON="python$want"
   else
     PYTHON=python3
