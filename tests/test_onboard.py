@@ -2963,3 +2963,10 @@ def test_a_standing_state_line_is_not_doubled(tmp_path: Path) -> None:
     assert module.ignore_state(tmp_path) is True
     assert module.ignore_state(tmp_path) is False
     assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == f"{module.STATE_IGNORE}\n"
+
+
+def test_family_steps_note_names_what_the_platform_needs() -> None:
+    """Заход называет, что заводится на площадке руками: план и оба объявления (#1763)."""
+    said = module.family_steps_note()
+    assert module.findings.PLAN_MARKER in said
+    assert ".rules/consumers.json" in said and "consumer-announce" in said

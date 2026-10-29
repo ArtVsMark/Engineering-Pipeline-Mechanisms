@@ -3543,3 +3543,18 @@ def test_red_names_takes_only_a_real_red_and_the_worst_per_name() -> None:
     assert module.red_names(runs) == "tests"
     green = [{"name": "docs", "conclusion": "success", "status": "completed"}]
     assert module.red_names(green) == ""
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_look_can_run_asks_the_base_for_the_review_run(
+    monkeypatch: pytest.MonkeyPatch, present: bool
+) -> None:
+    """Взгляд может дать вердикт, только если `review.yml` есть в базе (#1759)."""
+
+    def request(method: str, path: str, *_: Any, **__: Any) -> Any:
+        if not present:
+            raise module.ghrest.NotFound(f"{method} {path} → 404")
+        return {"name": "review.yml"}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.look_can_run("o/r", change(1, "automerge"), "token") is present

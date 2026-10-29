@@ -859,7 +859,7 @@ def licensed(path: Path, text: str, repo: str) -> str:
 #: Настройки окна — туда же (#1554): проект дописывает в них свои разрешения, а
 #: JSON настроек поля лицензии не ждёт.
 #: `.gitignore` проекта: заход дописывает в него строку, а не кладёт свой (#1769).
-IGNORE_FILE: Final = Path(".gitignore")
+IGNORE_FILE: Final = paths.GITIGNORE
 OWN_BY_PROJECT: Final = frozenset({paths.WORKFLOWS / PIPELINE_FLOW, paths.SETTINGS, IGNORE_FILE})
 
 
@@ -1515,7 +1515,7 @@ def bindings_note(consumer: Path) -> str:
         f"`{answer}` нет: без него карта взгляда не собирается, `audit_profile.py` "
         "отказывает, а навыки `answer-a-rule`, `audit-the-answers` и `close-a-finding` "
         "молчат. Заготовкой он не кладётся — это ответ проекта каталогу правил: скелет "
-        f"собирает заход подключения КАТАЛОГА (`python scripts/onboard_consumer.py --repo "
+        f"собирает заход подключения КАТАЛОГА (`onboard_consumer.py --repo "
         f"<владелец/имя> --out <папка>` в клоне {CATALOGUE_REPO}, его `CONNECT.md`), "
         "а заявка `consumer-announce` подаётся каталогу, когда ответ лёг на вашу "
         "общую ветку (#1763)."
