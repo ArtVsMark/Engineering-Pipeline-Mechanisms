@@ -373,8 +373,14 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
             said = f"судить нечего: сценарий {choice.scenario}, тестов не задето"
             out.append(Step(step.name, f"echo {shlex.quote(said)}", step.installs))
             continue
+        # ВЫБОР ВСТАЁТ СРАЗУ ПОСЛЕ `pytest`, А НЕ В ХВОСТ СТРОКИ (#1749). Строка
+        # шага кончается `|| rc=$?`, и хвост уходил за него: `pytest` шёл без
+        # списка — весь набор, — а при красном оболочка исполняла первый
+        # тест-файл как программу. Доводы pytest принимает в любом месте.
+        picked = " ".join(shlex.quote(one) for one in choice.tests)
         for n in at:
-            lines[n] = f"{lines[n]} {' '.join(shlex.quote(one) for one in choice.tests)}"
+            start = lines[n].index(PYTEST) + len(PYTEST)
+            lines[n] = f"{lines[n][:start]}{picked} {lines[n][start:]}"
         out.append(Step(step.name, "\n".join(lines), step.installs))
     return out
 
