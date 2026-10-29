@@ -636,14 +636,37 @@ def look_pending(runs: list[dict[str, Any]]) -> bool:
     return any(is_look(run) and run.get("status") != "completed" for run in runs)
 
 
+def look_can_run(repo: str, change: Change, owner_token: str) -> bool:
+    """Может ли взгляд дать вердикт: прогон взгляда есть в базе изменения.
+
+    ПЕРВОЕ ИЗМЕНЕНИЕ ПОДКЛЮЧЕНИЯ ВЗГЛЯДА НЕ ПОЛУЧИТ (#1759). Действие площадки
+    сверяет `review.yml` с базой и, не найдя его там, пропускает работу с
+    исходом «успех» — вердикта не будет. А `workflow_run`, который будит
+    очередь по завершению взгляда, площадка исполняет только из прогонов
+    основной ветки: заход, снявший взведение «ждёт вердикта», больше не
+    звал никто. Замер 29.10.2026, EPL #12 (проба #1558): стояло, пока окно не
+    перезапустило очередь рукой. Файла в базе нет — ждать некого; слитое без
+    взгляда называет его реестр (`unlooked.py`).
+    """
+    path = f"repos/{repo}/contents/{paths.REVIEW_RUN.as_posix()}?ref={change.base}"
+    try:
+        ghrest.request("GET", path, owner_token)
+    except ghrest.NotFound:
+        return False
+    return True
+
+
 def awaits_look(repo: str, change: Change, owner_token: str) -> bool:
     """Ждёт ли голова вердикта взгляда — по записям проверок её головы.
 
     Спрашивается отдельно от вердикта проверок и только у головы, которую
     сейчас взводят или сливают: вопрос другой (взгляд в вердикт не входит), и
-    читать его надо в миг решения, а не в начале захода.
+    читать его надо в миг решения, а не в начале захода. Идущий взгляд, у
+    которого вердикта не будет (`look_can_run`), не ждётся (#1759).
     """
-    return look_pending(look_records(repo, change.head, owner_token, "latest"))
+    return look_pending(look_records(repo, change.head, owner_token, "latest")) and look_can_run(
+        repo, change, owner_token
+    )
 
 
 def owed_look(repo: str, change: Change, owner_token: str) -> str:
