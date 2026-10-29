@@ -51,7 +51,7 @@ on:
         type: string
         default: ci.yml
       python-matrix:
-        description: матрица версий Python — «<файл прогона>:<джоб>»; пусто — причина в none
+        description: версии Python — «<файл прогона>:<джоб>[,<джоб>…]»; матрица или python-version у setup-python каждой работы; пусто — причина в none
         type: string
         default: ""
       python-next:

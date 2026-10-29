@@ -1193,6 +1193,37 @@ def matrix_axis(path: Path, job: str, axis: str) -> tuple[list[str], str]:
     return values, image
 
 
+#: Действие установки Python: его `python-version` — версия работы без матрицы.
+SETUP_PYTHON: Final = "actions/setup-python@"
+
+
+def job_pythons(path: Path, job: str) -> tuple[list[str], str]:
+    """Версии Python работы и её образ: ось матрицы, а без неё — `python-version` (#1783).
+
+    Проект ставит версии и отдельными работами без матрицы (каталог:
+    `catalogue` на планке, `catalogue-next-stable` на следующей). Ось
+    `matrix.python` есть — она; нет — `python-version` шага
+    `actions/setup-python` этой работы (строка или список). Ни того, ни
+    другого — отказ с причиной (045).
+    """
+    try:
+        return matrix_axis(path, job, "python")
+    except BadPolicy as missing:
+        said = resolved_job(path, job)
+        found: list[str] = []
+        for step in said.get("steps") or []:
+            if isinstance(step, dict) and str(step.get("uses") or "").startswith(SETUP_PYTHON):
+                version = (step.get("with") or {}).get("python-version")
+                found += [str(one) for one in version] if isinstance(version, list) else []
+                found += [str(version)] if isinstance(version, (str, int, float)) else []
+        if not found:
+            raise BadPolicy(
+                f"{path}: у джоба «{job}» нет ни оси matrix.python, ни python-version"
+                f" у actions/setup-python ({missing})"
+            ) from missing
+        return found, str(said.get("runs-on") or "")
+
+
 def declared_jobs(directory: Path = WORKFLOWS, *, skip: str = "") -> dict[str, Job]:
     """Собирает проверки, выдающие запись на голове изменения.
 

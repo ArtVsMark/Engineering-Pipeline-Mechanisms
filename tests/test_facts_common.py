@@ -618,3 +618,49 @@ def test_own_python_is_a_root_manifest_or_a_package(tmp_path: Path) -> None:
     package.mkdir(parents=True)
     (package / "pyproject.toml").write_text("[project]\nname = 'core'\n", encoding="utf-8")
     assert module.own_python(tmp_path)
+
+
+CI_BY_JOBS = """\
+jobs:
+  catalogue:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/setup-python@abc # v6
+        with:
+          python-version: "3.14"
+  catalogue-next-stable:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/setup-python@abc # v6
+        with:
+          python-version: "3.15"
+"""
+
+
+def test_versions_by_separate_jobs_are_read_from_setup_python(tmp_path: Path) -> None:
+    """Версии отдельными работами без матрицы — из `python-version` каждой (#1783)."""
+    root = tree(tmp_path)
+    (root / ".github" / "workflows" / "ci.yml").write_text(CI_BY_JOBS, encoding="utf-8")
+    run, none = module.ci_facts(root, "ci.yml", "ci.yml:catalogue,catalogue-next-stable")
+    assert none == {}, none
+    assert run["python"] == {"supported": ["3.14", "3.15"], "os": ["ubuntu-26.04"]}
+
+
+def test_a_job_without_a_matrix_or_setup_python_is_unread(tmp_path: Path) -> None:
+    """Ни оси, ни `python-version` — «не прочитана», а не пустой список (#1783, 045)."""
+    root = tree(tmp_path)
+    (root / ".github" / "workflows" / "ci.yml").write_text(
+        "jobs:\n  bare:\n    runs-on: x\n    steps: []\n", encoding="utf-8"
+    )
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+    _, none = module.ci_facts(root, "ci.yml", "ci.yml:bare")
+    assert none["python"] == module.UNREAD_MATRIX.format("ci.yml"), none
+
+
+def test_job_pythons_and_pythons_of_read_each_named_job(tmp_path: Path) -> None:
+    """`job_pythons` — версии одной работы, `pythons_of` — перечня без повторов (#1783)."""
+    flow = tree(tmp_path) / ".github" / "workflows" / "ci.yml"
+    flow.write_text(CI_BY_JOBS, encoding="utf-8")
+    assert module.policy.job_pythons(flow, "catalogue") == (["3.14"], "ubuntu-26.04")
+    versions, images = module.pythons_of(flow, "catalogue, catalogue-next-stable,catalogue")
+    assert versions == ["3.14", "3.15"] and images == {"ubuntu-26.04"}

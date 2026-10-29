@@ -284,19 +284,33 @@ def python_facts(
     значило бы назвать версии чужого джоба. Матрицу читает `pipeline_checks` —
     читатель прогонов один; не прочитано — `policy.BadPolicy` с причиной.
     """
-    supported, first = policy.matrix_axis(flow, job, "python")
-    images = {first}
+    supported, images = pythons_of(flow, job)
     said: dict[str, list[str]] = {"supported": supported}
     if next_flow is not None and next_job:
-        later, second = policy.matrix_axis(next_flow, next_job, "python")
+        later, more = pythons_of(next_flow, next_job)
         said["experimental"] = later
-        images.add(second)
+        images |= more
     said["os"] = sorted(images)
     return said
 
 
+def pythons_of(flow: Path, jobs: str) -> tuple[list[str], set[str]]:
+    """Версии и образы работ, названных через запятую (#1783): без повторов, в порядке.
+
+    Матрица — одна работа; версии отдельными работами — их перечень
+    (`catalogue,catalogue-next-stable`). Читатель работы — `policy.job_pythons`.
+    """
+    versions: list[str] = []
+    images: set[str] = set()
+    for job in (one.strip() for one in jobs.split(",") if one.strip()):
+        found, image = policy.job_pythons(flow, job)
+        versions += [one for one in found if one not in versions]
+        images.add(image)
+    return versions, images
+
+
 def matrix_at(root: Path, said: str) -> tuple[Path, str]:
-    """Матрица, названная `<файл прогона>:<джоб>`, — путь прогона и джоб."""
+    """Матрица, названная `<файл прогона>:<джоб>[,<джоб>…]`, — путь прогона и джобы."""
     flow, _, job = said.partition(":")
     if not flow or not job:
         raise NotRun(f"матрица названа «{said}», а не «<файл прогона>:<джоб>»")
@@ -336,7 +350,8 @@ def ci_facts(
     except policy.BadPolicy as exc:
         print(f"warning: {exc}", file=sys.stderr)
         return run, {"python": UNREAD_MATRIX.format(flow.name)}
-    if job not in listed and not own_python(root):
+    named = [one.strip() for one in job.split(",") if one.strip()]
+    if not set(named) & set(listed) and not own_python(root):
         return run, {"python": NO_MATRIX_JOB.format(flow.name, job)}
     later, later_job = matrix_at(root, python_next) if python_next else (None, "")
     try:
