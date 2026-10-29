@@ -34,6 +34,7 @@ import argparse
 import ast
 import codecs
 import io
+import json
 import re
 import sys
 import tokenize
@@ -67,14 +68,42 @@ class NotRun(RuntimeError):
     """Гейт не отработал: третий исход, а не «чисто»."""
 
 
-def known() -> dict[str, str]:
-    """Номер → имя файла правила, как их публикует каталог."""
+def known(root: Path | None = None) -> dict[str, str]:
+    """Номер → имя файла правила, как их публикует каталог.
+
+    НА ДЕРЕВЕ САМОГО КАТАЛОГА — ЕГО ВЫГРУЗКА ИЗ ДЕРЕВА ИЗМЕНЕНИЯ (#1781).
+    Изменение, добавляющее правило, несёт его номер в своей
+    `export/rules.json`, а в опубликованной с общей ветки его ещё нет: шаг
+    краснел на каждом новом правиле (EIP#972, #974, #977), и перезапуск не
+    помогал. Каталог узнаётся тем же точным именем, что у
+    `check_foreign_why` (#1624): форк судится по опубликованной, как прежде.
+
+    ГРАНИЦА НАЗВАНА (взгляд на #1787). Опубликованную выгрузку на дереве
+    каталога читают и соседи: `drift`, `review_map.titles`, `audit_profile`
+    (без `--export`), `project_badge`. Здесь чинится только этот гейт —
+    его отказ на новом правиле замерен (#1781); их поведение на правиле из
+    изменения каталога этим изменением не судится.
+    """
+    if root is not None and catalogue.is_catalogue(gitcall.own_repo(root)):
+        local = root / catalogue.EXPORT_PATH
+        try:
+            export = json.loads(local.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise NotRun(f"выгрузка каталога в дереве не прочитана: {local} — {exc}") from exc
+        if not isinstance(export, dict):
+            raise NotRun(f"выгрузка каталога в дереве — не объект: {local}")
+        return rules_by_number(export)
     try:
         export = catalogue.read(EXPORT_URL)
     except catalogue.Silent:
         # Молчание канала НЕ превращается в «не отработал»: у него свой исход,
         # и поднимается он до точки входа нетронутым (039).
         raise
+    return rules_by_number(export)
+
+
+def rules_by_number(export: dict[str, object]) -> dict[str, str]:
+    """Номер → слаг правила из выгрузки; списка нет или он пуст — `NotRun` (075)."""
     # Списка правил нет — сломан договор выгрузки, и это названо им самим, а не
     # «ни одного правила»: читается тем же `catalogue.rules_of`, что у дрейфа
     # (строже читает только `audit_profile.export_rules` — см. check_foreign_why).
@@ -296,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_BROKEN
 
     try:
-        real = known()
+        real = known(args.root)
     except catalogue.Silent as exc:
         # ОТКАЗ КАНАЛА НАЗЫВАЕТСЯ И НЕ КРАСИТ. Печатается в поток вывода, а не
         # ошибок: это не находка и не поломка шага, а состояние сети. Адресата
