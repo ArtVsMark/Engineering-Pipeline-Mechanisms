@@ -1106,6 +1106,32 @@
     "a-gate-obeys-every-rule"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1777,
+   "merged_at": "2026-10-29",
+   "commit": "72f32c3c7bb5e22f8faa0e0bfea82c126cf13b94",
+   "touched": [
+    ".claude/hooks/install_floor.sh",
+    "changelog.d/floor-with-pyyaml.fixed.md",
+    "kit/data/.claude/hooks/floor.sh",
+    "kit/data/.claude/mechanisms.sh",
+    "tests/test_consumer_preflight.py",
+    "tests/test_session_start.py"
+   ],
+   "added": [
+    "changelog.d/floor-with-pyyaml.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
