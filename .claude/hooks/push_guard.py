@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Толчок не туда отвергается ДО вызова git, а не ловится после.
 
 Держит два критических запрета свода, и адреса у них разные. «НЕ писать в общую
@@ -47,6 +46,7 @@ git — единственное место, где это возможно, с�
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -101,7 +101,7 @@ def tail(text: str, limit: int = LIMIT) -> str:
     return f"(обрезано, всего {len(text)} знаков) …{text[-limit:]}"
 
 
-def git(*args: str) -> subprocess.CompletedProcess[str] | str:
+def git(*args: str, where: str = "") -> subprocess.CompletedProcess[str] | str:
     """Вызов git с дедлайном; отказ запуска или истёкший срок — причина строкой.
 
     ОТКАЗ НЕ РОНЯЕТ СТРАЖА (письмо каталога #1439). `OSError` от отсутствующего
@@ -118,10 +118,12 @@ def git(*args: str) -> subprocess.CompletedProcess[str] | str:
     try:
         return subprocess.run(
             ["git", *args],
+            check=False,
             capture_output=True,
             text=True,
             encoding="utf-8",
             timeout=deadline,
+            cwd=where or None,
         )
     except subprocess.TimeoutExpired:
         return f"git {args[0]} не ответил за {deadline:.1f} с"
@@ -147,13 +149,36 @@ def git(*args: str) -> subprocess.CompletedProcess[str] | str:
 #: Совпадение с каноном держит `tests/test_push_guard.py::test_the_prefix_is_the_pipeline_one`.
 AGENT_PREFIX: Final = "agent/"
 #: Ключи `git push`, за которыми идёт значение, а не имя ветки.
-WITH_VALUE: Final = frozenset({"--repo", "-o", "--push-option", "--exec", "--receive-pack"})
+WITH_VALUE: Final = frozenset(
+    {"--repo", "-o", "--push-option", "--exec", "--receive-pack"}
+)
 #: Управляющие операторы оболочки: они делят строку на команды. Длинные — раньше
 #: коротких, иначе `&&` прочёлся бы двумя `&`.
 CONTROL: Final = ("&&", "||", ";;", "|&", ";", "|", "&", "\n", "(", ")")
 #: Операторы перенаправления. Цель — следующее слово, слитное или раздельное
 #: (`>out.log`, `> out.log`, `2>&1`), и она снимается вместе с оператором.
-REDIRECTS: Final = ("&>>", "&>", "<<<", "<<-", ">>", ">|", ">&", "<<", "<>", "<&", ">", "<")
+REDIRECTS: Final = (
+    "&>>",
+    "&>",
+    "<<<",
+    "<<-",
+    ">>",
+    ">|",
+    ">&",
+    "<<",
+    "<>",
+    "<&",
+    ">",
+    "<",
+)
+#: Служебное слово сегмента, которым `unwrap` передаёт «дерево не узнать»
+#: (#1746): обёртка или присваивание уводят git в другое дерево, а сам
+#: сегмент с этим знаком командой не бывает — в слове есть пробел.
+LOST_TREE: Final = "<дерево не узнать>"
+#: Переменные окружения, уводящие git в другое дерево — как `--git-dir`.
+TREE_VARIABLES: Final = ("GIT_DIR=", "GIT_WORK_TREE=")
+#: Присваивание переменной перед командой: имя по правилу оболочки, затем `=`.
+ASSIGNMENT: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 #: Глобальные ключи самого git со значением: `git -C путь push`. Отделять их
 #: нужно, потому что подкоманда — первое слово без ключа.
 GLOBAL_WITH_VALUE: Final = frozenset(
@@ -247,6 +272,9 @@ class Look:
     #: «не толчок» отдавали одно и то же, и после взгляда на #1226 сторож стал
     #: судить головой любую команду — `ls` в отсоединённой голове отвергался.
     push: bool = False
+    #: Каталог, в котором идёт толчок: голова читается в нём, а не в каталоге
+    #: сторожа (#1746). Пусто — каталог процесса.
+    where: str = ""
 
 
 def script_of(segment: list[str]) -> tuple[str | None, str]:
@@ -271,7 +299,9 @@ def script_of(segment: list[str]) -> tuple[str | None, str]:
         cluster = word[1:]
         if "c" not in cluster:
             continue
-        if cluster.endswith("c") and all(letter in SHELL_FLAGS for letter in cluster[:-1]):
+        if cluster.endswith("c") and all(
+            letter in SHELL_FLAGS for letter in cluster[:-1]
+        ):
             if place + 1 < len(segment):
                 return segment[place + 1], ""
             return None, f"у оболочки ключ «{cut(word)}» без скрипта — читать нечего"
@@ -308,7 +338,10 @@ def after_wrapper(name: str, rest: list[str]) -> tuple[list[str], str]:
     делает сторожа слепым: угадать, несёт он значение или нет, нечем, а ошибка
     в любую сторону молча меняет, что считается командой.
     """
-    values, flags = WRAPPERS.get(name, frozenset()), WRAPPER_FLAGS.get(name, frozenset())
+    values, flags = (
+        WRAPPERS.get(name, frozenset()),
+        WRAPPER_FLAGS.get(name, frozenset()),
+    )
     place = 0
     eaten = 0
     while place < len(rest):
@@ -363,8 +396,17 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
         return [], "предел вложенности оболочек исчерпан — команда не дочитана"
     first = segment[0].rsplit("/", 1)[-1]
     # `VAR=value git push` — присваивания перед командой, своё написание того же.
-    if "=" in first and not first.startswith("=") and len(segment) > 1:
-        return unwrap(segment[1:], depth - 1)
+    # ПРИСВАИВАНИЕ УЗНАЁТСЯ ПО ЦЕЛОМУ СЛОВУ, А НЕ ПО ХВОСТУ ПОСЛЕ `/` (#1746):
+    # значение с косой чертой (`FOO=a/b git push origin main`) давало хвост
+    # без `=`, и толчок в общую ветку проходил, не узнанный толчком вовсе.
+    if ASSIGNMENT.match(segment[0]) and len(segment) > 1:
+        after, blind = unwrap(segment[1:], depth - 1)
+        if segment[0].startswith(TREE_VARIABLES):
+            return [
+                [LOST_TREE, f"«{cut(segment[0])}» уводит git в другое дерево"],
+                *after,
+            ], blind
+        return after, blind
     if first in SHELLS:
         script, blind = script_of(segment)
         if blind:
@@ -412,8 +454,36 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
             return [], blind
         # Внутри обёртки может стоять другая обёртка или оболочка — снятие идёт
         # по кругу, а не один раз.
-        return unwrap(rest, depth - 1)
+        wrapped, blind = unwrap(rest, depth - 1)
+        # СМЕНА ДЕРЕВА ВНУТРИ ОБЁРТКИ НЕ ТЕРЯЕТСЯ (взгляд на #1747): `env -C X`
+        # и `env --chdir X` — тот же `cd X`, а присваивание `GIT_DIR=` после
+        # `env` — то же, что на верхнем уровне. Отдаются служебными сегментами
+        # перед командой, и `push_targets` ведёт их так же.
+        moves = tree_moves(first, segment[1 : len(segment) - len(rest)])
+        return [*moves, *wrapped], blind
     return [segment], ""
+
+
+def tree_moves(name: str, options: list[str]) -> list[list[str]]:
+    """Смены дерева в ключах обёртки: `cd`-сегменты и знак «дерево не узнать»."""
+    if name != "env":
+        return []
+    moves: list[list[str]] = []
+    place = 0
+    while place < len(options):
+        word = options[place]
+        if word in ("-C", "--chdir") and place + 1 < len(options):
+            moves.append(["cd", options[place + 1]])
+            place += 2
+            continue
+        if word.startswith("--chdir="):
+            moves.append(["cd", word.partition("=")[2]])
+        elif word.startswith("-C") and len(word) > 2:
+            moves.append(["cd", word[2:]])
+        elif word.startswith(TREE_VARIABLES):
+            moves.append([LOST_TREE, f"«{cut(word)}» уводит git в другое дерево"])
+        place += 1
+    return moves
 
 
 def commands_of(text: str) -> list[list[str]]:
@@ -476,7 +546,9 @@ def commands_of(text: str) -> list[list[str]]:
                     # (находка `664b218` на #1079). `<<` бывает и арифметикой
                     # (`$((1<<2))`), и тогда «тело» проглотило бы толчок на
                     # следующей строке, а сторож ответил бы «не толчок» (045).
-                    raise ValueError(f"встроенный документ без разделителя «{cut(mark)}»")
+                    raise ValueError(
+                        f"встроенный документ без разделителя «{cut(mark)}»"
+                    )
                 end = text.find("\n", at)
                 line = text[at : len(text) if end < 0 else end]
                 at = len(text) if end < 0 else end + 1
@@ -532,7 +604,9 @@ def commands_of(text: str) -> list[list[str]]:
         elif char == "#" and not started:
             end = text.find("\n", at)
             at = len(text) if end < 0 else end
-        elif redirect := next((one for one in REDIRECTS if text.startswith(one, at)), None):
+        elif redirect := next(
+            (one for one in REDIRECTS if text.startswith(one, at)), None
+        ):
             if started and not quoted and "".join(word).isdigit():
                 word.clear()
                 started = False
@@ -541,7 +615,9 @@ def commands_of(text: str) -> list[list[str]]:
             dropping = True
             heredoc = redirect == "<<-" if redirect in ("<<", "<<-") else None
             at += len(redirect)
-        elif control := next((one for one in CONTROL if text.startswith(one, at)), None):
+        elif control := next(
+            (one for one in CONTROL if text.startswith(one, at)), None
+        ):
             finish()
             dropping = False
             commands.append([])
@@ -556,7 +632,7 @@ def commands_of(text: str) -> list[list[str]]:
     return [command for command in commands if command] or [[]]
 
 
-def push_targets(command: str) -> Look:
+def push_targets(command: str, start: str = "") -> Look:
     """Что сторож разглядел: цели толчка, «не толчок» или причину слепоты.
 
     Разбор по СЛОВАМ: подстрока `git push` встречается и в тексте документа, и
@@ -575,19 +651,80 @@ def push_targets(command: str) -> Look:
         # отказы `commands_of` — свои и уже обрезаны, поэтому текст берётся как
         # есть.
         return Look(blind=f"команда не разбирается на слова — {exc}")
+    # КАТАЛОГ ТОЛЧКА ВЕДЁТСЯ ПО СТРОКЕ, А НЕ БЕРЁТСЯ У СТОРОЖА (#1746). Окно,
+    # которое ведёт два репозитория, толкает второй через `cd` или `git -C`, а
+    # голова читалась в дереве проекта — и толчок в свою ветку второго
+    # репозитория отвергался всегда. Начало — каталог события (`cwd`), затем
+    # каждое `cd`/`pushd` строки, `cd` скрипта и `env -C`, каждый `-C` толчка.
+    # Каталог, который не узнать (`cd -`, `popd`, переменная, `--git-dir`,
+    # `GIT_DIR=`), — слепота при толчке, а не каталог
+    # сторожа (045). ПРЕДЕЛ НАЗВАН: подоболочка `( cd … )` разбором не
+    # отличается от `cd … ;`, и её `cd` считается действующим.
+    where, lost = start, ""
     for part in parts:
+        if part and part[0] in DIRECTORY_MOVES:
+            where, lost = moved_by(part, where, lost)
+            continue
         found, blind = unwrap(part, DEPTH)
         if blind:
             return Look(blind=blind)
+        # Внутри скрипта оболочки и обёртки каталог ведётся своим счётом: после
+        # `bash -c "cd X …"` внешний каталог прежний (взгляд на #1747).
+        inner, unknown_inner = where, lost
         for segment in found:
+            if segment and segment[0] == LOST_TREE:
+                unknown_inner = unknown_inner or segment[1]
+                continue
+            if segment and segment[0] in DIRECTORY_MOVES:
+                inner, unknown_inner = moved_by(segment, inner, unknown_inner)
+                continue
             if not segment or not is_git(segment[0]):
                 continue
+            here, unknown = inner, unknown_inner
             rest = segment[1:]
             while rest and rest[0].startswith("-"):
+                if rest[0] == "-C" and len(rest) > 1:
+                    here, unknown = moved(here, unknown, [rest[1]])
+                elif rest[0] in ("--git-dir", "--work-tree") or rest[0].startswith(
+                    ("--git-dir=", "--work-tree=")
+                ):
+                    unknown = (
+                        f"«{cut(rest[0])}» уводит git в другое дерево, "
+                        "а сторож судит его по `-C` и `cd`"
+                    )
                 rest = rest[2:] if rest[0] in GLOBAL_WITH_VALUE else rest[1:]
             if rest and rest[0] == "push":
-                return Look(targets=tuple(named_branches(rest[1:])), push=True)
+                if unknown:
+                    return Look(blind=f"каталог толчка не узнан — {unknown}")
+                return Look(
+                    targets=tuple(named_branches(rest[1:])), push=True, where=here
+                )
     return Look()
+
+
+#: Команды смены каталога, которые сторож ведёт по строке.
+DIRECTORY_MOVES: Final = ("cd", "pushd", "popd")
+
+
+def moved_by(command: list[str], where: str, lost: str) -> tuple[str, str]:
+    """Каталог после `cd`/`pushd`/`popd`; `popd` возвращает в каталог, которого сторож не ведёт."""
+    if command[0] == "popd":
+        # Стек каталогов сторож не ведёт: после `popd` каталог не узнать, и
+        # толчок дальше — отказ, а не голова последнего `pushd` (взгляд на #1747).
+        return where, lost or "«popd» возвращает в каталог, которого сторож не ведёт"
+    return moved(where, lost, command[1:])
+
+
+def moved(where: str, lost: str, arguments: list[str]) -> tuple[str, str]:
+    """Каталог после `cd` или `-C` с этими доводами и причина, если его не узнать."""
+    if lost:
+        return where, lost
+    said = [one for one in arguments if one not in ("-L", "-P")]
+    if not said:
+        return os.path.expanduser("~"), ""
+    if len(said) > 1 or said[0] == "-" or "$" in said[0] or "`" in said[0]:
+        return where, f"«cd {cut(' '.join(arguments))}» сторож не раскрывает"
+    return os.path.join(where or os.getcwd(), os.path.expanduser(said[0])), ""
 
 
 def named_branches(arguments: list[str]) -> list[str]:
@@ -611,7 +748,7 @@ def named_branches(arguments: list[str]) -> list[str]:
     return found
 
 
-def head() -> tuple[str, str]:
+def head(where: str = "") -> tuple[str, str]:
     """Текущая ветка и причина, по которой её не узнать.
 
     ДВА ОТВЕТА, А НЕ ОДИН, и разница здесь стоит половины сторожа. Прежде отказ
@@ -629,7 +766,7 @@ def head() -> tuple[str, str]:
     мимо неё. Та же форма, что у `gitcall.branch`; копия своя — хук дерево не
     импортирует (046).
     """
-    said = git("rev-parse", "--symbolic-full-name", "HEAD")
+    said = git("rev-parse", "--symbolic-full-name", "HEAD", where=where)
     if isinstance(said, str):
         return "", said
     if said.returncode != 0:
@@ -675,7 +812,7 @@ def refused(targets: list[str], current: str) -> str:
     return ""
 
 
-def merged_away(branch: str) -> str:
+def merged_away(branch: str, where: str = "") -> str:
     """Причина отказа, если ветку уже слили и удалили; пусто — толчок разрешён.
 
     ВЕТКА, УДАЛЁННАЯ ПЛОЩАДКОЙ ПРИ СЛИЯНИИ, ВОСКРЕСАЕТ ОТ ЛЮБОГО СЛЕДУЮЩЕГО
@@ -712,8 +849,10 @@ def merged_away(branch: str) -> str:
     """
     if not branch or branch == "HEAD":
         return ""
-    tracked = git("config", "--get", f"branch.{branch}.merge")
-    gone = git("rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
+    tracked = git("config", "--get", f"branch.{branch}.merge", where=where)
+    gone = git(
+        "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}", where=where
+    )
     # НЕ ПРОВЕРЕНО — НЕ ПУЩУ: тот же ответ, что у неузнанной головы (045).
     # Две проверки, а не цикл: сужение типа mypy через цикл не переносит.
     if isinstance(tracked, str):
@@ -734,7 +873,9 @@ def merged_away(branch: str) -> str:
     # толчка. Признак здесь ОДИН; «оба» относится к его половинам, а не к двум
     # признакам: второй снят по замеру, и путать их — значит читать этот разбор
     # как описание снятого.
-    pushed = tracked.returncode == 0 and tracked.stdout.strip() == f"{REF_PREFIX}{branch}"
+    pushed = (
+        tracked.returncode == 0 and tracked.stdout.strip() == f"{REF_PREFIX}{branch}"
+    )
     if not pushed:
         return ""
     if gone.returncode != 0:
@@ -793,8 +934,9 @@ def run() -> int:
         # видно, и сторож молчит (084).
         tool = event.get("tool_input") if isinstance(event, dict) else None
         command = str((tool.get("command") if isinstance(tool, dict) else None) or "")
-        return judge(command)
-    except Exception as exc:
+        start = event.get("cwd") if isinstance(event, dict) else None
+        return judge(command, start if isinstance(start, str) else "")
+    except Exception as exc:  # noqa: BLE001 — сбой судейства на толчке — отказ, причина ниже
         # СБОЙ СУДЕЙСТВА НА ТОЛЧКЕ — ОТКАЗ, А НЕ КОД 1 (взгляд на #1454, 195).
         # Трейсбек с кодом 1 площадка считает НЕблокирующей ошибкой, и толчок
         # прошёл бы без проверки — тот же исход, что у отказа git выше. Прочую
@@ -829,9 +971,9 @@ def maybe_push(command: str) -> bool:
     return "push" in NOT_A_LETTER.sub("", command.lower())
 
 
-def judge(command: str) -> int:
+def judge(command: str, start: str = "") -> int:
     """Решение по разобранной команде: 0 — пускать, 2 — отказ с причиной в stderr."""
-    look = push_targets(command)
+    look = push_targets(command, start)
     if look.blind:
         # РАЗБОР, НЕ ДОШЕДШИЙ ДО КОНЦА, НЕ МАШЕТ РУКОЙ. Сторож не знает, толчок
         # перед ним или нет, и «не знаю» здесь обязано значить «не пущу» — как
@@ -846,7 +988,7 @@ def judge(command: str) -> int:
     if not look.push:
         return 0
     targets = list(look.targets)
-    current, broken = head()
+    current, broken = head(look.where)
     if not targets:
         # ТОЛЧОК БЕЗ ЦЕЛИ ТОЛКАЕТ ГОЛОВУ, и проверяется он как толчок головы
         # (взгляд на #1226). Прежде он проходил, не дойдя до проверок: окно на
@@ -868,7 +1010,7 @@ def judge(command: str) -> int:
         print(f"Толчок отвергнут до вызова git: {foreign}", file=sys.stderr)
         return 2
     for target in targets:
-        revived = merged_away(branch_of(target))
+        revived = merged_away(branch_of(target), look.where)
         if revived:
             print(f"Толчок отвергнут до вызова git: {revived}", file=sys.stderr)
             return 2

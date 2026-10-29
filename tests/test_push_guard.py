@@ -128,8 +128,14 @@ def test_a_push_past_the_head_is_refused(command: str) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["git push origin main", "git push origin HEAD:main", "git -C /tmp push origin main"],
-    ids=["прямо", "из головы", "с ключом git"],
+    [
+        "git push origin main",
+        "git push origin HEAD:main",
+        "git -C /tmp push origin main",
+        # Значение с косой чертой прятало толчок целиком (#1746).
+        "FOO=a/b git push origin main",
+    ],
+    ids=["прямо", "из головы", "с ключом git", "присваивание-с-косой"],
 )
 def test_a_push_to_the_shared_branch_is_always_refused(command: str) -> None:
     """Общая ветка отвергается из любой головы: писать в неё напрямую нельзя."""
@@ -1376,3 +1382,86 @@ def test_the_link_gate_sees_a_link(tmp_path: Path) -> None:
     said = "import sys\nfrom pathlib import Path\nPath('p').symlink_to(sys.executable)\n"
     assert links_the_interpreter(ast.parse(said))
     assert not links_the_interpreter(ast.parse("Path('p').symlink_to('x')\n"))
+
+
+def two_trees(tmp_path: Path) -> tuple[Path, Path]:
+    """Дерево проекта на `main` и второй репозиторий окна на `agent/второй` — настоящий git."""
+    trees = []
+    for name, branch in (("проект", "main"), ("второй", "agent/второй")):
+        tree = tmp_path / name
+        subprocess.run(["git", "init", "-q", "-b", "main", str(tree)], check=True, timeout=30)
+        # Голова без коммита не разбирается — дереву нужен первый коммит.
+        subprocess.run(
+            [
+                *("git", "-C", str(tree), "-c", "user.name=т", "-c", "user.email=т@т"),
+                *("commit", "-q", "--allow-empty", "-m", "первый"),
+            ],
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["git", "-C", str(tree), "checkout", "-q", "-B", branch],
+            check=True,
+            timeout=30,
+        )
+        trees.append(tree)
+    return trees[0], trees[1]
+
+
+@pytest.mark.parametrize(
+    ("command", "start", "expect"),
+    [
+        ("git -C {второй} push origin agent/второй", "", 0),
+        ("cd {второй} && git push -u origin agent/второй", "", 0),
+        ("git push origin agent/второй", "{второй}", 0),
+        ("git -C второй push origin agent/второй", "{база}", 0),
+        ("git -C {второй} push origin agent/чужая", "", 2),
+        ("cd {второй} && git push origin agent/чужая", "", 2),
+        ("git push origin agent/второй", "", 2),
+        ("cd - && git push origin agent/второй", "", 2),
+        ("git --git-dir={второй}/.git push origin agent/второй", "", 2),
+        ("pushd {второй} && git push origin agent/второй", "", 0),
+        ("GIT_DIR={второй}/.git git push origin agent/второй", "", 2),
+        # Взгляд на #1747: смена каталога внутри обёртки и скрипта, и `popd`.
+        ("pushd {второй} && popd && git push origin agent/второй", "", 2),
+        ("env -C {второй} git push origin agent/второй", "", 0),
+        ("env --chdir={второй} git push origin agent/второй", "", 0),
+        ("env -C {второй} git push origin agent/чужая", "", 2),
+        ('bash -c "cd {второй} && git push origin agent/второй"', "", 0),
+        ('bash -c "cd {второй}" && git push origin agent/второй', "", 2),
+        ("env GIT_DIR={второй}/.git git push origin agent/второй", "", 2),
+    ],
+    ids=[
+        "ключ-C",
+        "cd-в-строке",
+        "каталог-события",
+        "C-от-каталога-события",
+        "C-чужая-ветка",
+        "cd-чужая-ветка",
+        "дерево-проекта-не-та-ветка",
+        "cd-минус-не-узнан",
+        "git-dir-не-судится",
+        "pushd-в-строке",
+        "переменная-GIT_DIR-не-судится",
+        "popd-не-узнан",
+        "env-C",
+        "env-chdir",
+        "env-C-чужая-ветка",
+        "cd-в-скрипте-оболочки",
+        "cd-скрипта-не-выходит-наружу",
+        "env-GIT_DIR-не-судится",
+    ],
+)
+def test_the_head_is_read_in_the_pushed_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, start: str, expect: int
+) -> None:
+    """Голова читается в дереве, которое толкают, а не в дереве сторожа (#1746).
+
+    Окно ведёт два репозитория; сторож запущен в дереве проекта на `main`.
+    Толчок своей `agent/…` второго репозитория — через `-C`, `cd` или каталог
+    события — проходит; чужая ветка и неузнанный каталог — отказ.
+    """
+    project, second = two_trees(tmp_path)
+    monkeypatch.chdir(project)
+    said = {"второй": str(second), "база": str(tmp_path)}
+    assert module.judge(command.format(**said), start.format(**said)) == expect
