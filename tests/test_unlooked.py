@@ -1378,9 +1378,12 @@ def test_a_near_commit_later_than_by_reads_the_whole_history(
         lambda *a, **k: [{"commit": {"committer": {"date": "2026-10-28T00:00:00Z"}}}],
     )
     read: list[str] = []
-    monkeypatch.setattr(
-        module.ghrest, "paginate", lambda path, *a, **k: read.append(path) or iter(full)
-    )
+
+    def paginate(path: str, *_a: Any, **_k: Any) -> Any:
+        read.append(path)
+        return iter(full)
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
     edge = ONBOARDED_AT("o/r", "t", by)
     assert read, "история целиком не прочитана"
     assert edge is not None and edge.isoformat().startswith("2026-10-20T08:00")
