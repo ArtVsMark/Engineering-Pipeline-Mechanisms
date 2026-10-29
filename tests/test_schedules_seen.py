@@ -8,6 +8,7 @@
 """
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -44,9 +45,83 @@ def test_the_expected_count_follows_the_declared_schedule(
 
 
 @pytest.mark.parametrize(
+    ("cron", "since", "count"),
+    [
+        # 12.09.2026 — суббота. Неделя назад, 05.09, тоже суббота.
+        ("41 5,17 * * *", NOW - timedelta(days=7), 14),
+        ("37 5 * * 1", NOW - timedelta(days=7), 1),
+        ("29 6 * * 1", NOW - timedelta(days=7), 1),
+        ("29 6 * * 1", NOW - timedelta(days=1), 0),
+        ("0 12 * * 0,6", NOW - timedelta(days=7), 3),
+        ("0 12 * * 7", NOW - timedelta(days=7), 1),
+    ],
+    ids=["список часов", "понедельник", "понедельник ещё раз", "не в окне", "выходные", "семь"],
+)
+def test_hour_lists_and_weekdays_are_counted(cron: str, since: datetime, count: int) -> None:
+    """Список часов и день недели считаются, а не обрывают обход (#1768).
+
+    Формы взяты из дерева: `deps-intercept.yml`, `python-next.yml`,
+    `skills.yml`. Воскресенье в cron — и 0, и 7.
+    """
+    assert module.expected_between(cron, since, NOW) == count
+
+
+def tree_crons() -> dict[str, str]:
+    """Все расписания дерева: объявление и строки `cron:` прогонов."""
+    root = Path(__file__).resolve().parents[1]
+    said = {
+        f"объявление {name}": cron
+        for name, cron in module.declared(root / ".rules" / "schedules.json").items()
+    }
+    for path in sorted((root / ".github" / "workflows").glob("*.yml")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if match := CRON_LINE.match(line):
+                said[f"{path.name}: {line.strip()}"] = match["cron"]
+    return said
+
+
+CRON_LINE = re.compile(r"""^\s*-\s*cron:\s*["']?(?P<cron>[^"'#]+?)["']?\s*(?:#.*)?$""")
+
+
+def test_every_schedule_of_the_tree_is_counted() -> None:
+    """Каждое расписание дерева поставщика разбирается — иначе обход его не считает (#1768)."""
+    crons = tree_crons()
+    assert any(name.startswith("объявление") for name in crons), "объявление не прочитано"
+    assert any(not name.startswith("объявление") for name in crons), "строк cron не найдено"
+    week = NOW - timedelta(days=7)
+    refused = {}
+    for name, cron in crons.items():
+        try:
+            module.expected_between(cron, week, NOW)
+        except module.NotRun as exc:
+            refused[name] = str(exc)
+    assert not refused, refused
+
+
+@pytest.mark.parametrize(
     "cron",
-    ["17 6 * * 1", "17 6 1 * *", "*/5 * * * *", "17 */2 * * *", "17 6 * *"],
-    ids=["день недели", "день месяца", "минута шагом", "час шагом", "четыре поля"],
+    [
+        "17 6 1 * *",
+        "*/5 * * * *",
+        "17 */2 * * *",
+        "17 6 * *",
+        "17 6 * * 1-5",
+        "17 6 * * mon",
+        "17 24 * * *",
+        "17 6 * * 8",
+        "60 6 * * *",
+    ],
+    ids=[
+        "день месяца",
+        "минута шагом",
+        "час шагом",
+        "четыре поля",
+        "диапазон дней",
+        "имя дня",
+        "час за краем",
+        "день за краем",
+        "минута за краем",
+    ],
 )
 def test_an_unsupported_form_refuses_instead_of_counting_zero(cron: str) -> None:
     """Неразобранная форма — это отказ, а не «пропусков нет».
@@ -260,3 +335,76 @@ def test_the_sweep_names_its_outcome_at_the_entry_point(
     monkeypatch.setattr(module, "sweep", lambda *a, **k: [missed])
     assert module.main(["--repo", "o/r"]) == module.EXIT_MISSED
     assert "требуют взгляда" in capsys.readouterr().out
+
+
+def test_an_uncounted_schedule_is_its_own_row_and_the_rest_are_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Неразобранная форма — строка своего расписания, остальные досчитаны (#1768).
+
+    Прежде `sweep` падал на первом таком расписании целиком (039, 045).
+    """
+    monkeypatch.setattr(module, "declared", lambda: {"a.yml": "17 6 * * *", "b.yml": "*/5 * * * *"})
+    monkeypatch.setattr(module, "born", lambda *a, **k: None)
+    monkeypatch.setattr(module, "fired", lambda *a, **k: (7, 0))
+    seen = {item.name: item for item in module.sweep("o/r", "t", NOW)}
+    assert seen["a.yml"].expected == 7 and not seen["a.yml"].uncounted
+    assert seen["b.yml"].uncounted and seen["b.yml"].loud
+    assert "не сосчитано" in seen["b.yml"].said() and "*/5" in seen["b.yml"].said()
+
+
+def test_an_uncounted_schedule_is_the_third_outcome_after_the_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Несосчитанное — исход 2, но реестр записан: остальные расписания не теряются."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    written: list[int] = []
+    monkeypatch.setattr(module, "save", lambda _r, _t, seen, *a, **k: written.append(len(seen)))
+    rows = [
+        module.Seen("a.yml", "17 6 * * *", 7, 7, 0),
+        module.Seen("b.yml", "*/5 * * * *", 0, 3, 0, uncounted="форма не поддержана"),
+    ]
+    monkeypatch.setattr(module, "sweep", lambda *a, **k: rows)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+    assert written == [2]
+
+
+def test_an_unknown_workflow_is_its_own_row_and_the_rest_are_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Прогон, неизвестный площадке, — строка расписания, а не обрыв обхода (взгляд на #1773)."""
+    monkeypatch.setattr(module, "declared", lambda: {"a.yml": "17 6 * * *", "b.yml": "17 6 * * *"})
+    monkeypatch.setattr(module, "born", lambda *a, **k: None)
+
+    def fired(_repo: str, name: str, *_a: object) -> tuple[int, int]:
+        if name == "b.yml":
+            raise module.NotRun("прогон «b.yml» площадке неизвестен")
+        return 7, 0
+
+    monkeypatch.setattr(module, "fired", fired)
+    seen = {item.name: item for item in module.sweep("o/r", "t", NOW)}
+    assert seen["a.yml"].expected == 7 and not seen["a.yml"].uncounted
+    assert "неизвестен" in seen["b.yml"].uncounted and seen["b.yml"].loud
+
+
+def test_an_uncounted_row_shows_its_falls_and_names_the_cron_once() -> None:
+    """Строка несосчитанного показывает падения, а cron — один раз (взгляд на #1773)."""
+    reason = "расписание «*/5 * * * *»: минута не числом — форма не поддержана (045)"
+    said = module.Seen("b.yml", "*/5 * * * *", 0, 3, 2, uncounted=reason).said()
+    assert "упало 2" in said
+    assert said.count("*/5 * * * *") == 1, said
+
+
+def test_the_third_outcome_still_names_the_misses_of_the_counted(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Исход 2 не прячет пропусков досчитанных расписаний: они названы в логе (взгляд на #1773)."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    rows = [
+        module.Seen("a.yml", "17 6 * * *", 7, 2, 0),
+        module.Seen("b.yml", "*/5 * * * *", 0, 3, 0, uncounted="форма не поддержана"),
+    ]
+    monkeypatch.setattr(module, "sweep", lambda *a, **k: rows)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+    assert "требуют взгляда среди досчитанных: 1 из 1" in capsys.readouterr().out
