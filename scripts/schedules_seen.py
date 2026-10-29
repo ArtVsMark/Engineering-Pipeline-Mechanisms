@@ -83,9 +83,10 @@ class Seen:
     expected: int
     happened: int
     fell: int
-    #: Почему ожидание не сосчитано; пусто — сосчитано. Неразобранная форма
-    #: — отказ ЭТОГО расписания, а не всего обхода (#1768, 039).
-    unparsed: str = ""
+    #: Почему расписание не сосчитано; пусто — сосчитано. Неразобранная форма
+    #: и прогон, неизвестный площадке, — отказ ЭТОГО расписания, а не всего
+    #: обхода (#1768, взгляд на #1773, 039).
+    uncounted: str = ""
 
     @property
     def missed(self) -> int:
@@ -99,15 +100,18 @@ class Seen:
     @property
     def loud(self) -> bool:
         """Есть ли о чём говорить: несосчитанное, пропусков сверх терпимого или падения."""
-        return bool(self.unparsed) or self.missed > TOLERATED or self.fell > 0
+        return bool(self.uncounted) or self.missed > TOLERATED or self.fell > 0
 
     def said(self) -> str:
         """Строка реестра: что за прогон и что с ним."""
-        if self.unparsed:
-            return (
-                f"- `{self.name}` (`{self.cron}`) — не сосчитано: {self.unparsed}; "
-                f"случилось {self.happened}"
-            )
+        if self.uncounted:
+            # Cron называет сама причина, когда дело в форме; «упало» — и здесь:
+            # падения несосчитанного прогона реестр обязан показывать тоже
+            # (взгляд на #1773).
+            about = f"не сосчитано: {self.uncounted}; случилось {self.happened}"
+            if self.fell:
+                about += f", упало {self.fell}"
+            return f"- `{self.name}` — {about}"
         about = f"ожидалось {self.expected}, случилось {self.happened}"
         if self.missed:
             about += f", пропущено {self.missed}"
@@ -265,13 +269,18 @@ def sweep(repo: str, token: str, now: datetime, days: int = WINDOW_DAYS) -> list
         # про который не удалось спросить (045).
         appeared = born(repo, name, token)
         since = max(window, appeared) if appeared else window
-        happened, fell = fired(repo, name, token, since)
-        # НЕРАЗОБРАННАЯ ФОРМА — СТРОКА СВОЕГО РАСПИСАНИЯ, а не падение обхода
-        # (#1768): прежде первое же такое расписание обрывало счёт остальных.
+        # ОТКАЗ ПО ОДНОМУ РАСПИСАНИЮ — ЕГО СТРОКА, а не падение обхода (#1768,
+        # взгляд на #1773): прежде первое же такое расписание — неразобранная
+        # форма или прогон, неизвестный площадке, — обрывало счёт остальных.
+        try:
+            happened, fell = fired(repo, name, token, since)
+        except NotRun as exc:
+            seen.append(Seen(name, cron, 0, 0, 0, uncounted=str(exc)))
+            continue
         try:
             expected = expected_between(cron, since, now)
         except NotRun as exc:
-            seen.append(Seen(name, cron, 0, happened, fell, unparsed=str(exc)))
+            seen.append(Seen(name, cron, 0, happened, fell, uncounted=str(exc)))
             continue
         seen.append(Seen(name, cron, expected, happened, fell))
     return seen
@@ -353,14 +362,18 @@ def main(argv: list[str] | None = None) -> int:
     # НЕСОСЧИТАННОЕ — ТРЕТИЙ ИСХОД, НО ПОСЛЕ ЗАПИСИ РЕЕСТРА: остальные
     # расписания досчитаны и записаны, а «пропусков нет» про несосчитанное
     # сказать нельзя (039, 045).
-    unparsed = [item for item in seen if item.unparsed]
-    if unparsed:
+    uncounted = [item for item in seen if item.uncounted]
+    loud = [item for item in seen if item.loud and not item.uncounted]
+    if uncounted:
+        # ИСХОД 2 НЕ ПРЯЧЕТ ПРОПУСКОВ (взгляд на #1773): осечки досчитанных
+        # расписаний названы и здесь, а не только в реестре.
+        if loud:
+            print(f"требуют взгляда среди досчитанных: {len(loud)} из {len(seen) - len(uncounted)}")
         print(
-            f"обход не досчитал: {len(unparsed)} из {len(seen)} расписаний — форма не разобрана",
+            f"обход не досчитал: {len(uncounted)} из {len(seen)} расписаний — причина в их строках",
             file=sys.stderr,
         )
         return EXIT_BROKEN
-    loud = [item for item in seen if item.loud]
     if not loud:
         print(f"все объявленные заходы на месте: расписаний {len(seen)}, окно {args.days} сут.")
         return EXIT_OK

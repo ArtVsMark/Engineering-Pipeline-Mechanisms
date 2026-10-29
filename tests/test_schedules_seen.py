@@ -337,7 +337,7 @@ def test_the_sweep_names_its_outcome_at_the_entry_point(
     assert "требуют взгляда" in capsys.readouterr().out
 
 
-def test_an_unparsed_schedule_is_its_own_row_and_the_rest_are_counted(
+def test_an_uncounted_schedule_is_its_own_row_and_the_rest_are_counted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Неразобранная форма — строка своего расписания, остальные досчитаны (#1768).
@@ -348,12 +348,12 @@ def test_an_unparsed_schedule_is_its_own_row_and_the_rest_are_counted(
     monkeypatch.setattr(module, "born", lambda *a, **k: None)
     monkeypatch.setattr(module, "fired", lambda *a, **k: (7, 0))
     seen = {item.name: item for item in module.sweep("o/r", "t", NOW)}
-    assert seen["a.yml"].expected == 7 and not seen["a.yml"].unparsed
-    assert seen["b.yml"].unparsed and seen["b.yml"].loud
+    assert seen["a.yml"].expected == 7 and not seen["a.yml"].uncounted
+    assert seen["b.yml"].uncounted and seen["b.yml"].loud
     assert "не сосчитано" in seen["b.yml"].said() and "*/5" in seen["b.yml"].said()
 
 
-def test_an_unparsed_schedule_is_the_third_outcome_after_the_write(
+def test_an_uncounted_schedule_is_the_third_outcome_after_the_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Несосчитанное — исход 2, но реестр записан: остальные расписания не теряются."""
@@ -362,8 +362,49 @@ def test_an_unparsed_schedule_is_the_third_outcome_after_the_write(
     monkeypatch.setattr(module, "save", lambda _r, _t, seen, *a, **k: written.append(len(seen)))
     rows = [
         module.Seen("a.yml", "17 6 * * *", 7, 7, 0),
-        module.Seen("b.yml", "*/5 * * * *", 0, 3, 0, unparsed="форма не поддержана"),
+        module.Seen("b.yml", "*/5 * * * *", 0, 3, 0, uncounted="форма не поддержана"),
     ]
     monkeypatch.setattr(module, "sweep", lambda *a, **k: rows)
     assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
     assert written == [2]
+
+
+def test_an_unknown_workflow_is_its_own_row_and_the_rest_are_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Прогон, неизвестный площадке, — строка расписания, а не обрыв обхода (взгляд на #1773)."""
+    monkeypatch.setattr(module, "declared", lambda: {"a.yml": "17 6 * * *", "b.yml": "17 6 * * *"})
+    monkeypatch.setattr(module, "born", lambda *a, **k: None)
+
+    def fired(_repo: str, name: str, *_a: object) -> tuple[int, int]:
+        if name == "b.yml":
+            raise module.NotRun("прогон «b.yml» площадке неизвестен")
+        return 7, 0
+
+    monkeypatch.setattr(module, "fired", fired)
+    seen = {item.name: item for item in module.sweep("o/r", "t", NOW)}
+    assert seen["a.yml"].expected == 7 and not seen["a.yml"].uncounted
+    assert "неизвестен" in seen["b.yml"].uncounted and seen["b.yml"].loud
+
+
+def test_an_uncounted_row_shows_its_falls_and_names_the_cron_once() -> None:
+    """Строка несосчитанного показывает падения, а cron — один раз (взгляд на #1773)."""
+    reason = "расписание «*/5 * * * *»: минута не числом — форма не поддержана (045)"
+    said = module.Seen("b.yml", "*/5 * * * *", 0, 3, 2, uncounted=reason).said()
+    assert "упало 2" in said
+    assert said.count("*/5 * * * *") == 1, said
+
+
+def test_the_third_outcome_still_names_the_misses_of_the_counted(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Исход 2 не прячет пропусков досчитанных расписаний: они названы в логе (взгляд на #1773)."""
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module, "save", lambda *a, **k: None)
+    rows = [
+        module.Seen("a.yml", "17 6 * * *", 7, 2, 0),
+        module.Seen("b.yml", "*/5 * * * *", 0, 3, 0, uncounted="форма не поддержана"),
+    ]
+    monkeypatch.setattr(module, "sweep", lambda *a, **k: rows)
+    assert module.main(["--repo", "o/r"]) == module.EXIT_BROKEN
+    assert "требуют взгляда среди досчитанных: 1 из 1" in capsys.readouterr().out
