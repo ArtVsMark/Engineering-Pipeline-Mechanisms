@@ -1258,6 +1258,43 @@
     "bundle-the-work"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1787,
+   "merged_at": "2026-10-30",
+   "commit": "509cf5ec7f65048c5542c18193e71e6264e48bbb",
+   "touched": [
+    "changelog.d/rule-links-on-the-catalogue-tree.fixed.md",
+    "changelog.d/transport-untrusted-quoted.added.md",
+    "packages/transport/SURFACE",
+    "packages/transport/VERSION",
+    "packages/transport/pyproject.toml",
+    "packages/transport/untrusted.py",
+    "scripts/catalogue.py",
+    "scripts/check_rule_links.py",
+    "scripts/feedback_registry.py",
+    "tests/test_rule_links.py",
+    "tests/test_transport_package.py",
+    "tests/test_untrusted.py"
+   ],
+   "added": [
+    "changelog.d/rule-links-on-the-catalogue-tree.fixed.md",
+    "changelog.d/transport-untrusted-quoted.added.md",
+    "packages/transport/untrusted.py",
+    "tests/test_untrusted.py"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "bundle-the-work"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
