@@ -39,6 +39,7 @@ PUBLISHES: Final = (
     (paths.BADGES_DIR / "facts.json").as_posix(),
     (paths.BADGES_DIR / "project.svg").as_posix(),
     (paths.BADGES_DIR / "family-check.json").as_posix(),
+    (paths.BADGES_DIR / "contracts.json").as_posix(),
 )
 #: Значок проекта рисует `scripts/project_badge.py --parts` в общем шаге фактов
 #: (#1422; рисовальщик механизмов с #1563), и не собрать его он вправе:
@@ -53,6 +54,10 @@ PICTURE: Final = PUBLISHES[1]
 #: есть, а разбора нет — прежний разбор снимается, потому что по адресу его не
 #: отличить от живого (та же беда, от которой prune держит значки, #1198).
 FAMILY_CHECK: Final = PUBLISHES[2]
+#: Манифест семьи потребителя (#1766): едет с фактами, а не со значком — его
+#: собирает шаг фактов, и от рисунка он не зависит. Нет рядом — на ветке
+#: остаётся прежний, и это сказано.
+MANIFEST: Final = PUBLISHES[3]
 #: Что кладётся, только если лежит рядом с фактами, — выход действия каталога.
 BESIDE: Final = (PICTURE, FAMILY_CHECK)
 #: Архив находок взгляда: кладётся тем же коммитом, только если шаг позван с
@@ -152,6 +157,7 @@ def targets(source: Path, *, archive: bool) -> tuple[str, ...]:
     """
     beside = source.parent
     said = [PUBLISHES[0]]
+    said += [MANIFEST] if (beside / Path(MANIFEST).name).is_file() else []
     if (beside / Path(PICTURE).name).is_file():
         said += [one for one in BESIDE if (beside / Path(one).name).is_file()]
     said += [ARCHIVE] if archive and (beside / Path(ARCHIVE).name).is_file() else []
@@ -173,7 +179,7 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
     # а краснеет на нём свой шаг.
     chosen = targets(source, archive=archive)
     stale = (FAMILY_CHECK,) if PICTURE in chosen and FAMILY_CHECK not in chosen else ()
-    for wanted in (*BESIDE, *([ARCHIVE] if archive else [])):
+    for wanted in (MANIFEST, *BESIDE, *([ARCHIVE] if archive else [])):
         if wanted in stale:
             print(
                 f"::warning::значок собран без {Path(wanted).name} — прежний разбор снимается: "
@@ -184,7 +190,10 @@ def publish(source: Path, workdir: Path, *, sha: str, archive: bool = False) -> 
             # не его отсутствие, а связь со значком (взгляд на #1546).
             beside = (source.parent / Path(wanted).name).is_file()
             why = "без значка не публикуется" if beside else "рядом с фактами нет"
-            print(f"::warning::{Path(wanted).name}: {why} — на ветке остаётся прежний")
+            # Манифеста нет у поставщика законно: его кладёт свой прогон значков
+            # (#1766), и предупреждение на каждом заходе было бы шумом — строка.
+            mark = "" if wanted == MANIFEST else "::warning::"
+            print(f"{mark}{Path(wanted).name}: {why} — на ветке остаётся прежний")
     checkout(workdir)
     # СБОЙ ДИСКА И ОТСУТСТВИЕ ФАКТОВ — ТОЖЕ «НЕ ОПУБЛИКОВАНО», а не трейсбек с
     # кодом 1: шапка обещает исходы 0 и 2 и `::error::` (039, взгляд на #1233).

@@ -187,6 +187,8 @@ NOT_GIVEN: Final = "проект не отдал показатель во вх�
 NO_MATRIX: Final = "матрица версий Python не названа входом шага — версии не названы, а не пусты"
 #: Матрица названа, но не прочитана: причина для читателя витрины, а не трасса.
 UNREAD_MATRIX: Final = "матрица версий Python в {} не прочитана — версии не названы, а не пусты"
+#: Джоба матрицы в прогоне нет: проект Python не проверяет (#1766).
+NO_MATRIX_JOB: Final = "в {} нет джоба «{}» — матрицы версий Python у проекта нет"
 NO_VERSION: Final = "версия не выводится: в дереве нет ни тега выпуска, ни объявленной версии"
 #: Причина пустого выпуска: тега выпуска в дереве нет (#1761).
 NO_RELEASE: Final = "выпусков нет: тега выпуска в дереве нет"
@@ -321,6 +323,21 @@ def ci_facts(
     if not python_matrix:
         return run, {"python": NO_MATRIX}
     flow, job = matrix_at(root, python_matrix)
+    # ДЖОБА МАТРИЦЫ НЕТ У ПРОЕКТА БЕЗ СВОЕГО PYTHON — СОСТОЯНИЕ, А НЕ ПОЛОМКА
+    # (#1766). Заготовка зовёт шаг с `python-matrix` и у потребителя без
+    # Python (EPL, проба #1558): причина своя, без предупреждения на каждом
+    # заходе. У проекта с `pyproject.toml` пропавший джоб — поломка
+    # (переименован, удалён): «не прочитана» с предупреждением, а не тихое
+    # «матрицы нет» (045). Свой Python — корневой `pyproject.toml` или пакет
+    # `packages/*/pyproject.toml`, который сверяет и `check_env.py` (взгляд
+    # на #1776, 195).
+    try:
+        listed = policy.run_of(flow).get("jobs") or {}
+    except policy.BadPolicy as exc:
+        print(f"warning: {exc}", file=sys.stderr)
+        return run, {"python": UNREAD_MATRIX.format(flow.name)}
+    if job not in listed and not own_python(root):
+        return run, {"python": NO_MATRIX_JOB.format(flow.name, job)}
     later, later_job = matrix_at(root, python_next) if python_next else (None, "")
     try:
         run["python"] = python_facts(flow, job, later, later_job)
@@ -328,6 +345,11 @@ def ci_facts(
         print(f"warning: {exc}", file=sys.stderr)
         return run, {"python": UNREAD_MATRIX.format(flow.name)}
     return run, {}
+
+
+def own_python(root: Path) -> bool:
+    """Есть ли у дерева свой Python: корневой `pyproject.toml` или пакет в `packages/`."""
+    return (root / "pyproject.toml").is_file() or any((root / "packages").glob("*/pyproject.toml"))
 
 
 def taken_from(origin: str, supplier: str) -> bool:
