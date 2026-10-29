@@ -188,6 +188,8 @@ NO_MATRIX: Final = "матрица версий Python не названа вх�
 #: Матрица названа, но не прочитана: причина для читателя витрины, а не трасса.
 UNREAD_MATRIX: Final = "матрица версий Python в {} не прочитана — версии не названы, а не пусты"
 NO_VERSION: Final = "версия не выводится: в дереве нет ни тега выпуска, ни объявленной версии"
+#: Причина пустого выпуска: тега выпуска в дереве нет (#1761).
+NO_RELEASE: Final = "выпусков нет: тега выпуска в дереве нет"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -461,7 +463,15 @@ def common(
         # Неполнота названа рядом с числом: клон без тегов даёт правдоподобное
         # число, которое ложь (045).
         said["version_whole"] = whole
-    said["release"] = release_series(version.release_tag(root))
+    # ВЫПУСКА НЕТ — ПРИЧИНА, А НЕ ПУСТАЯ СТРОКА (#1761). Договор фактов знает
+    # серию `X.Y` или `none.release`; пустая строка — ни то, ни другое, и у
+    # потребителя без выпусков сверка краснела на каждом заходе, а публикация
+    # фактов не наступала вовсе (EPL, проба #1558).
+    series = release_series(version.release_tag(root))
+    if series:
+        said["release"] = series
+    else:
+        none["release"] = NO_RELEASE
     covered = contract_coverage(coverage_facts(coverage))
     none.update(covered.pop("none", {}))
     said.update(covered)

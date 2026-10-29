@@ -40,6 +40,42 @@ def test_a_consumer_without_its_own_numbers_gets_reasons_not_silence(tmp_path: P
     assert said["none"]["python"] == module.NO_MATRIX
 
 
+def test_without_a_release_tag_the_release_is_a_reason(tmp_path: Path) -> None:
+    """Тега выпуска нет — `none.release`, а не `release: ""`: пустое договор не знает (#1761)."""
+    said = module.common(tree(tmp_path), sha="голова", repo=REPO, ci_workflow="ci.yml")
+    assert "release" not in said, said.get("release")
+    assert said["none"]["release"] == module.NO_RELEASE
+
+
+def test_a_release_tag_gives_the_series(tmp_path: Path) -> None:
+    """Тег выпуска есть — серия `X.Y`, как прежде (#1761)."""
+    import subprocess
+
+    root = tree(tmp_path)
+    run = ["git", "-C", str(root)]
+    subprocess.run([*run, "init", "-q", "-b", "main"], check=True, timeout=60)
+    subprocess.run(
+        [
+            *run,
+            "-c",
+            "user.name=т",
+            "-c",
+            "user.email=т@т",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "старт",
+        ],
+        check=True,
+        timeout=60,
+    )
+    subprocess.run([*run, "tag", "v1.2.0"], check=True, timeout=60)
+    said = module.common(root, sha="голова", repo=REPO, ci_workflow="ci.yml")
+    assert said["release"] == "1.2"
+    assert "release" not in said.get("none", {})
+
+
 def test_an_own_key_does_not_override_a_common_one() -> None:
     """Свой генератор того же числа — отказ, а не перезапись (045)."""
     with pytest.raises(module.NotRun, match="перекрывает общие"):
