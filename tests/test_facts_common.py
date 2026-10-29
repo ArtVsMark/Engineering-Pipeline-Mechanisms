@@ -139,6 +139,15 @@ def test_a_named_matrix_is_read_and_a_bad_name_is_refused(tmp_path: Path) -> Non
     assert none == {} and run["python"] == build.python_facts()
 
 
+def test_a_missing_matrix_job_is_a_state_not_unread(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Джоба матрицы в прогоне нет — своя причина и без предупреждения (#1766)."""
+    run, none = module.ci_facts(tree(tmp_path), "ci.yml", "ci.yml:test-matrix")
+    assert none == {"python": module.NO_MATRIX_JOB.format("ci.yml", "test-matrix")}
+    assert "python" not in run and "warning" not in capsys.readouterr().err
+
+
 def test_our_build_and_the_shared_step_give_the_same_facts(tmp_path: Path) -> None:
     """Наша сборка и общий шаг дают одни факты: источник общей части один (022)."""
     whole = build.collect(ROOT, "голова", mine=REPO)

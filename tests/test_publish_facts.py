@@ -46,6 +46,7 @@ def stand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     # Значок проекта шаг рисует рядом с фактами (#1282) — стенд кладёт его так же.
     (tmp_path / "project.svg").write_text("<svg/>\n", encoding="utf-8")
     (tmp_path / "family-check.json").write_text('{"links": []}\n', encoding="utf-8")
+    (tmp_path / "contracts.json").write_text('{"gives": {}}\n', encoding="utf-8")
     monkeypatch.chdir(clone)
     return {"remote": remote, "clone": clone, "source": source, "tmp": tmp_path}
 
@@ -59,6 +60,8 @@ PUBLISHED_PATH = ".github/badges/facts.json"
 PUBLISHED_PICTURE = ".github/badges/project.svg"
 #: Разбор семьи — по адресу, который читает каталог (`РАЗБОР_АДРЕС`, #1532).
 PUBLISHED_FAMILY = ".github/badges/family-check.json"
+#: Манифест семьи — по адресу, который читает сверка семьи (`family_contract.MANIFEST`, #1766).
+PUBLISHED_MANIFEST = ".github/badges/contracts.json"
 
 
 def on_branch(remote: Path, path: str) -> str:
@@ -69,7 +72,12 @@ def on_branch(remote: Path, path: str) -> str:
 def test_the_first_publication_starts_the_branch(stand: dict[str, Path]) -> None:
     """Ветки нет — публикация начинает её сиротой и кладёт ровно `PUBLISHES`."""
     assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
-    assert module.PUBLISHES == (PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY)
+    assert module.PUBLISHES == (
+        PUBLISHED_PATH,
+        PUBLISHED_PICTURE,
+        PUBLISHED_FAMILY,
+        PUBLISHED_MANIFEST,
+    )
     assert on_branch(stand["remote"], PUBLISHED_PATH) == '{"a": 1}\n'
     assert on_branch(stand["remote"], PUBLISHED_PICTURE) == "<svg/>\n"
     assert on_branch(stand["remote"], PUBLISHED_FAMILY) == '{"links": []}\n'
@@ -371,7 +379,7 @@ def test_the_archive_rides_the_same_commit_when_asked(stand: dict[str, Path]) ->
         if one.strip()
     ]
     assert sorted(touched) == sorted(
-        [PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY, PUBLISHED_ARCHIVE]
+        [PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY, PUBLISHED_MANIFEST, PUBLISHED_ARCHIVE]
     )
 
 
@@ -381,7 +389,7 @@ def test_without_the_archive_input_a_foreign_archive_lives(stand: dict[str, Path
     module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
     assert git("ls-tree", "--name-only", "-r", "-z", PUBLISHED_TO, cwd=stand["remote"]).split("\0")[
         :-1
-    ] == sorted([PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY])
+    ] == sorted([PUBLISHED_PATH, PUBLISHED_PICTURE, PUBLISHED_FAMILY, PUBLISHED_MANIFEST])
 
 
 def test_a_missing_archive_does_not_hold_the_facts(
@@ -404,3 +412,12 @@ def test_our_badges_run_asks_the_shared_step_for_the_archive() -> None:
     assert "findings_archive.py" not in (ROOT / ".github/workflows/badges.yml").read_text(
         encoding="utf-8"
     )
+
+
+def test_the_manifest_rides_with_the_facts_not_the_picture(stand: dict[str, Path]) -> None:
+    """Манифест семьи едет с фактами, а не со значком; нет рядом — прежний остаётся (#1766)."""
+    (stand["tmp"] / "project.svg").unlink()
+    chosen = module.targets(stand["source"], archive=False)
+    assert PUBLISHED_MANIFEST in chosen and PUBLISHED_PICTURE not in chosen
+    (stand["tmp"] / "contracts.json").unlink()
+    assert PUBLISHED_MANIFEST not in module.targets(stand["source"], archive=False)

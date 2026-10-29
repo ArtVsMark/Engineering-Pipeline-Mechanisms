@@ -363,6 +363,13 @@ def facts_number() -> str:
     return found[1]
 
 
+def release_of(root: Path) -> dict[str, str] | None:
+    """Последний выпуск дерева в форме манифеста: тег и его коммит; выпуска нет — `None`."""
+    tag = version.release_tag(root)
+    sha = version.git("rev-list", "-n", "1", tag, root=root) if tag else None
+    return {"tag": tag, "sha": sha} if tag and sha else None
+
+
 def manifest_facts(root: Path) -> dict[str, Any]:
     """Выпуск (тег и его коммит) и отдаваемые контракты — из дерева `root`.
 
@@ -374,9 +381,9 @@ def manifest_facts(root: Path) -> dict[str, Any]:
     (#299): голова уходит вперёд, и номер с неё приписал бы выпуску чужой
     контракт (взгляд на #1294). Без выпуска приписывать некому — номер с головы.
     """
-    tag = version.release_tag(root)
-    sha = version.git("rev-list", "-n", "1", tag, root=root) if tag else None
-    released = tag if tag and sha else None
+    release = release_of(root)
+    released = release["tag"] if release else None
+    sha = release["sha"] if release else None
     at_tag = f"{released}:{VERSION_FILE.as_posix()}"
     said = version.git("show", at_tag, root=root) if released else None
     if released and not said:
@@ -402,6 +409,24 @@ def family_manifest(facts: dict[str, Any]) -> str:
         "project": facts["repo"],
         "release": said["release"],
         "gives": said["gives"],
+        "takes": [],
+    }
+    return json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
+
+
+def consumer_manifest(root: Path, repo: str) -> str:
+    """Манифест семьи ПОТРЕБИТЕЛЯ: выпуск из его дерева, отдаёт и берёт парно — ничего (#1766).
+
+    Потребитель — не издатель: контрактов у него нет, и `gives` честно пуст;
+    парных связей заход знать не может, и `takes` пуст, как у нас (семейные
+    связи сверка находит в дереве сама). Форма та же, что у `family_manifest`,
+    и выпуск читается тем же `release_of` — второго разбора нет (214).
+    """
+    doc: dict[str, Any] = {
+        "schema": FAMILY_SCHEMA,
+        "project": repo,
+        "release": release_of(root),
+        "gives": {},
         "takes": [],
     }
     return json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
@@ -542,7 +567,7 @@ SKILL_RECORDS: Final = "skills.json"
 #: пишется литералом, а не через `FACTS`. Через `FACTS` он переименовался бы
 #: вместе с нашей константой и держал бы совпадение, а не файл шага (взгляд на
 #: #1227). Что литерал равен `PUBLISHES`, сверяет тест.
-SHARED_STEP: Final = ("facts.json", "project.svg", "family-check.json")
+SHARED_STEP: Final = ("facts.json", "project.svg", "family-check.json", "contracts.json")
 
 
 def branch_files() -> list[str]:
@@ -1002,6 +1027,11 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="убрать из каталога публикации всё, чего ветка badges держать не вправе",
     )
+    parser.add_argument(
+        "--consumer-manifest",
+        default="",
+        help="записать манифест семьи потребителя (contracts.json) в этот путь — общий шаг",
+    )
     parser.add_argument("--sha", default="", help="голова, на которой собрано")
     parser.add_argument(
         "--supplier",
@@ -1023,6 +1053,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.commit_of:
         return commit_of(Path(args.commit_of))
+    if args.consumer_manifest:
+        if not args.repo:
+            print("манифест не собран: не назван --repo", file=sys.stderr)
+            return EXIT_BROKEN
+        try:
+            said = consumer_manifest(Path(args.root), args.repo)
+            Path(args.consumer_manifest).write_text(said, encoding="utf-8")
+        except (NotRun, OSError) as exc:
+            print(f"манифест не собран: {exc}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(f"манифест семьи: {args.consumer_manifest}")
+        return EXIT_OK
     if args.branch_files:
         print("\n".join(branch_files()))
         return EXIT_OK
