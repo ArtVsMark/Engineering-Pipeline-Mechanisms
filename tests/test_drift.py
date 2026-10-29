@@ -2284,6 +2284,23 @@ def test_a_platform_run_is_named_not_judged(
     assert "прогон площадки, не судится: Dependabot" in capsys.readouterr().out
 
 
+def test_platform_run_reads_the_event_of_the_suite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`dynamic` — прогон площадки; чужое приложение без прогона и проверка без набора — нет."""
+    said = {"9": [{"event": module.PLATFORM_EVENT}], "8": [{"event": "push"}], "7": []}
+    asked: list[str] = []
+
+    def request(_method: str, path: str, *_rest: Any, **_kw: Any) -> Any:
+        asked.append(path)
+        return {"workflow_runs": said[path.rsplit("=", 1)[1]]}
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.platform_run("o/r", "t", {"check_suite": {"id": 9}})
+    assert not module.platform_run("o/r", "t", {"check_suite": {"id": 8}})
+    assert not module.platform_run("o/r", "t", {"check_suite": {"id": 7}})
+    assert not module.platform_run("o/r", "t", {})
+    assert len(asked) == 3, "проверка без набора не должна ходить к площадке"
+
+
 def test_a_head_without_checks_is_a_refusal_not_silence(monkeypatch: pytest.MonkeyPatch) -> None:
     """Проверок на голове нет — источник отказывает, а не докладывает «тишину»."""
     annotated_head(monkeypatch, [], {})
