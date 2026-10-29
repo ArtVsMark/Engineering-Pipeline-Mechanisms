@@ -752,6 +752,36 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1748,
+   "merged_at": "2026-10-29",
+   "commit": "ccd9ce9c9339daa0a3dfd5ddba41bf470f81e308",
+   "touched": [
+    "changelog.d/asked-family-kit-connected.fixed.md",
+    "changelog.d/preflight-off-class.fixed.md",
+    "scripts/check_asked_family.py",
+    "scripts/preflight.py",
+    "tests/test_asked_family.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/asked-family-kit-connected.fixed.md",
+    "changelog.d/preflight-off-class.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
