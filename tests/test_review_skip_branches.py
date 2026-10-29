@@ -166,6 +166,7 @@ def test_the_registry_run_drops_machine_branches_before_the_scan(
         return {}, watermark
 
     monkeypatch.setattr(unlooked.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(unlooked, "onboarded_at", lambda *_: None)
     monkeypatch.setattr(unlooked.findings, "live_issue", lambda *_: (89, unlooked.MARKER))
     monkeypatch.setattr(unlooked, "merged_changes", lambda *_: merged)
     monkeypatch.setattr(unlooked, "scan", scan)
@@ -211,6 +212,7 @@ def test_a_machine_entry_already_in_the_registry_is_dropped_and_the_window_count
         return dict(known), watermark
 
     monkeypatch.setattr(unlooked.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(unlooked, "onboarded_at", lambda *_: None)
     monkeypatch.setattr(unlooked.findings, "live_issue", lambda *_: (89, body))
     monkeypatch.setattr(unlooked, "merged_changes", lambda *_: merged)
     monkeypatch.setattr(unlooked, "scan", scan)

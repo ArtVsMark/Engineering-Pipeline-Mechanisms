@@ -20,7 +20,18 @@ from tests.conftest import ROOT, load_script
 
 module = load_script("unlooked.py")
 
+#: Граница подключения взгляда как её читает механизм — до подмены ниже.
+ONBOARDED_AT = module.onboarded_at
+
 DAY = "2026-09-10T12:00:00Z"
+
+
+@pytest.fixture(autouse=True)
+def long_onboarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Взгляд подключён давно: граница #1757 не задевает проверки, которые судят другое."""
+    monkeypatch.setattr(
+        module, "onboarded_at", lambda *_: module.datetime(2000, 1, 1, tzinfo=module.UTC)
+    )
 
 
 def merged(number: int, at: str = DAY) -> dict[str, Any]:
@@ -1262,3 +1273,91 @@ def test_main_hands_the_found_number_to_save(
     monkeypatch.setattr(module, "save", lambda *args, **kwargs: saved.append(args[-1]))
     module.main(["--repo", "o/r"])
     assert saved == [handed] and handed in (89, module.findings.UNREAD)
+
+
+def test_the_onboarding_edge_is_the_oldest_commit_of_the_review_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Граница — самый старый коммит общей ветки с `review.yml`; его нет — `None` (#1757)."""
+    pages: dict[str, list[dict[str, Any]]] = {
+        "o/r": [
+            {"commit": {"committer": {"date": "2026-10-29T13:52:00Z"}}},
+            {"commit": {"committer": {"date": "2026-10-20T08:00:00Z"}}},
+        ],
+        "o/empty": [],
+    }
+    asked: list[str] = []
+
+    def paginate(path: str, token: str, key: str | None = None) -> Any:
+        asked.append(path)
+        return iter(pages[path.split("/commits")[0].removeprefix("repos/")])
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    edge = ONBOARDED_AT("o/r", "t")
+    assert edge is not None and edge.isoformat().startswith("2026-10-20T08:00")
+    assert ONBOARDED_AT("o/empty", "t") is None
+    assert asked[0] == f"repos/o/r/commits?path={module.paths.REVIEW_RUN.as_posix()}"
+
+
+def test_a_merge_before_onboarding_is_not_a_channel_miss(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Слитое до подключения взгляда в реестр не встаёт и снимается; после — встаёт (#1757)."""
+    edge = module.datetime(2026, 10, 29, 13, 0, tzinfo=module.UTC)
+    early = merged(10, "2026-10-23T09:00:00Z")
+    late = merged(12, "2026-10-29T13:52:00Z")
+    body = f"{module.MARKER}\n- #10 · вердикта нет · 2026-10-23\n"
+    seen: list[list[int]] = []
+
+    def scan(items: Any, known: Any, watermark: int, look: Any) -> tuple[dict[int, Any], int]:
+        seen.append(sorted(item["number"] for item in items) + sorted(known))
+        return dict(known), watermark
+
+    monkeypatch.setattr(module, "onboarded_at", lambda *_: edge)
+    monkeypatch.setattr(module.ghrest, "token_from_env", lambda: "t")
+    monkeypatch.setattr(module.findings, "live_issue", lambda *_: (13, body))
+    monkeypatch.setattr(module, "merged_changes", lambda *_: [late, early])
+    monkeypatch.setattr(module, "feed_reader", lambda *_: None)
+    monkeypatch.setattr(module, "scan", scan)
+    monkeypatch.setattr(module, "late_on", lambda *a, **k: "")
+    module.main(["--repo", "o/r"])
+    said = capsys.readouterr().out
+    assert seen == [[12]], seen
+    assert "слито до подключения взгляда — в реестр не встало: 1 (#10)" in said
+    assert "записи слитого до подключения сняты: #10" in said
+
+
+def test_without_the_review_run_on_trunk_everything_is_before() -> None:
+    """`review.yml` в общей ветке нет — всё слитое до подключения; без времени — нет (045)."""
+    assert module.before_onboarding(merged(1, "2026-10-29T13:52:00Z"), None)
+    assert not module.before_onboarding({"number": 2}, None)
+
+
+def test_the_edge_costs_one_request_when_the_review_run_predates_the_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Коммит с `review.yml` не позже окна — один запрос, без обхода истории (взгляд на #1760)."""
+    asked: list[str] = []
+
+    def request(method: str, path: str, token: str, *_: Any, **__: Any) -> Any:
+        asked.append(path)
+        return [{"commit": {"committer": {"date": "2026-09-01T00:00:00Z"}}}]
+
+    def paginate(*_: Any, **__: Any) -> Any:
+        raise AssertionError("история обходится целиком, хотя хватило одного запроса")
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    by = module.datetime(2026, 10, 1, tzinfo=module.UTC)
+    edge = ONBOARDED_AT("o/r", "t", by)
+    assert edge is not None and edge < by
+    assert len(asked) == 1 and "until=2026-10-01T00:00:00Z" in asked[0] and "per_page=1" in asked[0]
+
+
+def test_an_unread_edge_date_is_a_refusal_not_no_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Дата коммита не прочитана — `NotRun`, а не `None` «взгляда нет» (взгляд на #1760, 045)."""
+    monkeypatch.setattr(
+        module.ghrest, "paginate", lambda *_, **__: iter([{"commit": {"committer": {}}}])
+    )
+    with pytest.raises(module.NotRun, match="граница подключения"):
+        ONBOARDED_AT("o/r", "t")
