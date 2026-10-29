@@ -1472,6 +1472,25 @@ def test_a_choice_that_lands_nowhere_is_said(capsys: pytest.CaptureFixture[str])
     assert "не применён" not in capsys.readouterr().out
 
 
+def test_steps_without_pytest_are_not_promised_a_whole_set(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Нет `pytest` в шагах — «прикладывать не к чему», а не «полный набор» (045)."""
+    picked = preflight.scope.Choice("code", ("tests/test_a.py",), "")
+    preflight.narrowed([preflight.Step("линтер", "ruff check", "")], picked)
+    out = capsys.readouterr().out
+    assert "прикладывать не к чему" in out and "целиком" not in out, out
+
+
+def test_a_tool_shim_does_not_put_the_cwd_on_the_path() -> None:
+    """Прокладка инструмента — `-P -m`, без каталога в `sys.path` (взгляд на #1772)."""
+    folder = preflight.shims(preflight.sys.executable)
+    for tool in preflight.STEP_TOOLS:
+        shim = folder / tool
+        if shim.exists():
+            assert " -P -m " in shim.read_text(encoding="utf-8"), tool
+
+
 def test_a_refused_choice_falls_back_to_the_whole_set(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
@@ -1832,6 +1851,25 @@ def test_a_bare_tool_in_a_step_runs_on_the_running_interpreter(
     assert done.returncode == 0 and "чужой" not in done.stdout, done
 
 
+#: Где в строке оболочки начинается новая команда.
+COMMAND_BREAK = re.compile(r"&&|\|\||;|\bthen\b|\bdo\b|\belse\b")
+#: Приставки перед именем команды: `exec`, `time`, `timeout <срок>`.
+PREFIX = re.compile(r"^(?:(?:exec|time)\s+|timeout\s+\S+\s+)+")
+
+
+def test_the_command_positions_are_read_past_the_first_word() -> None:
+    """Голый инструмент виден и после `&&`, `then`, `timeout 60` (взгляд на #1772)."""
+    for line, tool in [
+        ("timeout 60 pytest -q", "pytest"),
+        ("make && ruff check", "ruff"),
+        ("if x; then mypy; fi", "mypy"),
+    ]:
+        found = {
+            (PREFIX.sub("", part.strip()).split() or [""])[0] for part in COMMAND_BREAK.split(line)
+        }
+        assert tool in found, (line, found)
+
+
 #: Строка установки шага и её пакеты — без версий и ключей.
 PIP_INSTALL = re.compile(r"python -m pip install\s+(?P<rest>.+)")
 
@@ -1854,11 +1892,15 @@ def test_every_bare_tool_of_the_steps_has_a_shim() -> None:
                 if re.fullmatch(r"[A-Za-z][\w.-]*", name):
                     installed.add(name)
     assert {"pytest", "ruff", "mypy"} <= installed, installed
+    # Голое слово ищется В КАЖДОЙ ПОЗИЦИИ КОМАНДЫ, а не только первым словом
+    # строки (взгляд на #1772): после `&&`, `||`, `;`, `then`, `do` и за
+    # приставками `exec`, `time`, `timeout <срок>`.
     for text in texts:
         for line in text.splitlines():
-            first = line.strip().removeprefix("run:").split()[:1]
-            if first and first[0] in installed:
-                called.add(first[0])
+            for part in COMMAND_BREAK.split(line.strip().removeprefix("run:")):
+                words = PREFIX.sub("", part.strip()).split()[:1]
+                if words and words[0] in installed:
+                    called.add(words[0])
     assert called, "ни одного голого инструмента не найдено — разбор сломан"
     assert called <= set(preflight.STEP_TOOLS), called - set(preflight.STEP_TOOLS)
 
