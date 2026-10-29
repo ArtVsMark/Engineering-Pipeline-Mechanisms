@@ -1481,6 +1481,8 @@ def lay_free(consumer: Path, kit: dict[Path, str], repo: str) -> list[Path]:
 
 #: Состояние окна, которое пишут положенные хуки: журнал навыков (#1769).
 STATE_IGNORE: Final = f"{paths.SKILL_RUNS.parent.as_posix()}/"
+#: Строки `.gitignore`, уже закрывающие состояние окна, — без `/` по краям.
+STATE_COVERED: Final = frozenset({paths.SKILL_RUNS.parent.as_posix(), paths.SKILL_RUNS.parts[0]})
 
 
 def ignore_state(consumer: Path) -> bool:
@@ -1492,7 +1494,9 @@ def ignore_state(consumer: Path) -> bool:
     """
     ignore = consumer / IGNORE_FILE
     text = ignore.read_text(encoding="utf-8") if ignore.is_file() else ""
-    if STATE_IGNORE in (line.strip() for line in text.splitlines()):
+    # Уже закрыто — и родительской строкой, и формой с корневым `/` или без
+    # хвостового `/` (взгляд на #1775): дописанная поверх была бы дублем.
+    if any(line.strip().strip("/") in STATE_COVERED for line in text.splitlines()):
         return False
     tail = "" if not text or text.endswith("\n") else "\n"
     ignore.write_text(f"{text}{tail}{STATE_IGNORE}\n", encoding="utf-8")

@@ -42,6 +42,7 @@ from tests.conftest import RunScript
 WITHOUT_INPUT: Final = (
     "check_contract.py",
     "check_derived_refs.py",
+    "check_env.py",
     "check_new_is_tested.py",
     "check_required_context.py",
     "check_reread.py",

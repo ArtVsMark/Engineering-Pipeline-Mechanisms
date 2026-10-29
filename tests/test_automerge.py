@@ -1645,6 +1645,7 @@ def test_the_owed_look_is_read_from_the_skip_note_of_the_latest_record(
         return iter(records)
 
     monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: {"name": "review.yml"})
     item = change(1, "automerge")
     url = "https://github.com/o/r/actions/runs/{run}/job/9"
     records[:] = [
@@ -3558,3 +3559,26 @@ def test_look_can_run_asks_the_base_for_the_review_run(
 
     monkeypatch.setattr(module.ghrest, "request", request)
     assert module.look_can_run("o/r", change(1, "automerge"), "token") is present
+
+
+def test_a_skipped_look_without_the_review_run_in_the_base_is_not_owed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Пропущенный взгляд не должен, если `review.yml` в базе нет (взгляд на #1775, 195).
+
+    Перезапуск взгляда, которому вердикта не дать, голову не сдвинет: первое
+    изменение подключения, позеленевшее перезапуском, встало бы снова.
+    """
+    url = "https://github.com/o/r/actions/runs/555/job/9"
+
+    def paginate(path: str, tok: str, key: str | None = None) -> Any:
+        if path.endswith("/annotations"):
+            return iter([{"title": module.look_waits.SKIPPED}])
+        return iter([{"id": 1, "name": "review", "status": "completed", "details_url": url}])
+
+    def request(method: str, path: str, *_: Any, **__: Any) -> Any:
+        raise module.ghrest.NotFound(f"{method} {path} → 404")
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    monkeypatch.setattr(module.ghrest, "request", request)
+    assert module.owed_look("o/r", change(1, "automerge"), "token") == ""

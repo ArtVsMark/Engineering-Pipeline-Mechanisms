@@ -684,6 +684,10 @@ def owed_look(repo: str, change: Change, owner_token: str) -> str:
             continue
         notes = ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", owner_token)
         if any(str(note.get("title") or "") == look_waits.SKIPPED for note in notes):
+            # Перезапуск взгляда, которому вердикта не дать, голову не сдвинет
+            # (`look_can_run`, #1759; взгляд на #1775, 195): не должен.
+            if not look_can_run(repo, change, owner_token):
+                return ""
             return run_of(str(run.get("details_url") or ""))
     return ""
 

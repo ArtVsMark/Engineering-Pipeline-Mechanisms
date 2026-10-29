@@ -2970,3 +2970,13 @@ def test_family_steps_note_names_what_the_platform_needs() -> None:
     said = module.family_steps_note()
     assert module.findings.PLAN_MARKER in said
     assert ".rules/consumers.json" in said and "consumer-announce" in said
+
+
+@pytest.mark.parametrize("line", [".claude/", "/.claude/", ".claude/state", "/.claude/state/"])
+def test_write_does_not_duplicate_a_line_that_already_covers_the_state(
+    tmp_path: Path, line: str
+) -> None:
+    """Строка, уже закрывающая `.claude/state/` иной формой, — не дубль (взгляд на #1775)."""
+    (tmp_path / ".gitignore").write_text(f"{line}\n", encoding="utf-8")
+    assert module.ignore_state(tmp_path) is False
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == f"{line}\n"
