@@ -912,6 +912,25 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1756,
+   "merged_at": "2026-10-29",
+   "commit": "8bb5e1c39641f109900efc8cb87da19eab5a7ecc",
+   "touched": [
+    ".github/workflows/handover-probe.yml",
+    "changelog.d/deps-self-v1.13.0.internal.md"
+   ],
+   "added": [
+    "changelog.d/deps-self-v1.13.0.internal.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
