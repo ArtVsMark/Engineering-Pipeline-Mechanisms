@@ -8,7 +8,7 @@
       "links": []
     },
     "family": {
-      "state": "ok",
+      "state": "behind",
       "why": "",
       "links": [
         {
@@ -16,9 +16,9 @@
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "release",
           "mine": "v2.1.0",
-          "latest": "v2.1.0",
+          "latest": "v2.2.0",
           "where": ".github/workflows/ci.yml",
-          "state": "ok",
+          "state": "behind",
           "why": ""
         },
         {
@@ -26,9 +26,9 @@
           "publisher": "ArtVsMark/Engineering-Incidents-Playbook",
           "what": "release",
           "mine": "v2.1.0",
-          "latest": "v2.1.0",
+          "latest": "v2.2.0",
           "where": ".github/workflows/rules-inbox.yml",
-          "state": "ok",
+          "state": "behind",
           "why": ""
         },
         {
@@ -78,8 +78,8 @@
     {
       "code": "EIP",
       "repo": "ArtVsMark/Engineering-Incidents-Playbook",
-      "state": "ok",
-      "why": ""
+      "state": "behind",
+      "why": "release: v2.1.0 → v2.2.0 (связей 2, .github/workflows/ci.yml, .github/workflows/rules-inbox.yml)"
     },
     {
       "code": "EPM",
