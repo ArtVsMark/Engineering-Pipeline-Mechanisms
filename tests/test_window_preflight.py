@@ -1891,3 +1891,16 @@ def test_a_tree_without_its_own_python_still_checks_its_packages(tmp_path: Path)
     said = env.survey(tmp_path)
     assert said.floor is None
     assert any("engineering-pipeline-absent-xyz" in one for one in said.problems), said
+
+
+def test_a_tree_without_its_own_python_still_refuses_a_bounds_dispute(tmp_path: Path) -> None:
+    """Без `pyproject.toml` спор границ в прогонах — отказ, а не «годится» (взгляд на #1775).
+
+    Пустоту строк установки прощает только её законный случай (022).
+    """
+    flows = tmp_path / ".github" / "workflows"
+    flows.mkdir(parents=True)
+    (flows / "a.yml").write_text('run: python -m pip install "ruff>=0.6,<1"\n', encoding="utf-8")
+    (flows / "b.yml").write_text('run: python -m pip install "ruff>=0.7,<1"\n', encoding="utf-8")
+    with pytest.raises(env.NotRun, match="по-разному"):
+        env.survey(tmp_path)
