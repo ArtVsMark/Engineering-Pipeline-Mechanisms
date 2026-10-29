@@ -1443,7 +1443,9 @@ def platform_warnings(repo: str, token: str) -> list[Drift]:
 #: Как в пробе узнаётся вызов по тегу. Сам её адрес объявлен в `paths`:
 #: второй якорь заводится ровно тем, что путь собирают на месте.
 PROBE: Final = paths.HANDOVER_PROBE
-PROBE_PIN_RE: Final = re.compile(r"uses:\s*[\w.-]+/[\w.-]+/[^@\s]+@(?P<ref>[\w.-]+)")
+#: Кавычки — та же форма, что у `ACTION_USE` (взгляд на #1739, 195): разбор
+#: одной строки `uses:` один на перечень форм.
+PROBE_PIN_RE: Final = re.compile(r"uses:\s*[\"']?[\w.-]+/[\w.-]+/[^@\s\"']+@(?P<ref>[\w.-]+)")
 
 
 def probe_behind_release(root: Path | None = None) -> list[Drift]:

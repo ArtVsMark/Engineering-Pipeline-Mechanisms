@@ -3041,3 +3041,17 @@ def test_a_stable_build_is_understood_once() -> None:
     assert module.minors([odd]) == ([], ["3.15"])
     assert not module.published([odd], "3.15", "26.04", stable_only=True)
     assert module.published([odd], "3.15", "26.04")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-a.yml@v1.2.3",
+        '    uses: "ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-a.yml@v1.2.3"',
+    ],
+    ids=["голая", "кавычки"],
+)
+def test_the_probe_pin_is_read_in_quotes_too(line: str) -> None:
+    """Прибивка пробы в кавычках видна, как у `ACTION_USE` (взгляд на #1739, 195)."""
+    found = [one["ref"] for one in module.PROBE_PIN_RE.finditer(line)]
+    assert found == ["v1.2.3"], found

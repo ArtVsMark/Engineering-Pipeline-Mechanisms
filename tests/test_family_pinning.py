@@ -37,7 +37,11 @@ WORKFLOWS = walk(ROOT / ".github" / "workflows", "*.yml")
 #: версий действий, а не буквами (взгляд на #1006, 022).
 FAMILY = load_script("catalogue.py").FAMILY_PREFIX
 #: Обращение к чужому механизму: `uses: <владелец>/<имя>[/путь]@<ссылка>`.
-USES_RE = re.compile(r"uses:\s*(?P<repo>[\w.-]+/[\w.-]+)(?P<path>/[\w./-]+)?@(?P<ref>\S+)")
+#: Значение в кавычках — та же форма, что видит `drift.ACTION_USE` (взгляд на
+#: #1739, 195): пин семьи в кавычках судит этот гейт, а не никто.
+USES_RE = re.compile(
+    r"uses:\s*[\"']?(?P<repo>[\w.-]+/[\w.-]+)(?P<path>/[\w./-]+)?@(?P<ref>[^\s\"']+)"
+)
 #: Закреплённая версия: тег вида `vN.N.N`. Мажорный алиас (`@v1`) сюда не
 #: входит намеренно — он подвижен, и потребитель, прибитый к нему, едет вместе
 #: с чужими правками.
@@ -106,3 +110,18 @@ def test_an_own_trunk_call_is_not_a_family_connection() -> None:
     assert own_trunk_call(own)
     assert not own_trunk_call(own.replace("@main", "@v1.4.0"))
     assert not own_trunk_call(own.replace("step-review.yml", "нет-такого.yml"))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "    uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/x.yml@v1.2.3",
+        '    uses: "ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/x.yml@v1.2.3"',
+        "    uses: 'ArtVsMark/some-action@v1.2.3'",
+    ],
+    ids=["голая", "двойные-кавычки", "одинарные-кавычки"],
+)
+def test_a_family_pin_is_read_in_every_quoting(line: str) -> None:
+    """Пин семьи разбирается и в кавычках: ссылка без кавычки на хвосте (взгляд на #1739)."""
+    match = USES_RE.search(line)
+    assert match and match["repo"].startswith(FAMILY) and match["ref"] == "v1.2.3", line
