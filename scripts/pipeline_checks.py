@@ -506,6 +506,11 @@ def foreign(supplier: Path | None) -> bool:
     return bool(here and there and here != there)
 
 
+def mechanisms_tree(tree: Path) -> bool:
+    """Несёт ли дерево сам код механизмов — то есть поставщик ли оно (#1774)."""
+    return (tree / paths.SCRIPTS / Path(__file__).name).is_file()
+
+
 def contract_of(tree: Path, supplier: Path | None) -> str | None:
     """Версия контракта, под которую проверяется ответ: своя у поставщика, тега — у потребителя.
 
@@ -531,12 +536,21 @@ def contract_of(tree: Path, supplier: Path | None) -> str | None:
     прежде. Замер 18.10.2026: своего `CONTRACT_VERSION` нет ни у каталога, ни у
     Usage-Token, ни у грейдера — условие живо, но сегодня никого не задевает.
 
+    СВОЙ НОМЕР — ТОЛЬКО У ДЕРЕВА С МЕХАНИЗМАМИ (#1774). Граница «не узнали,
+    чей поставщик» задела потребителя: журнал EPL завёл свой
+    `CONTRACT_VERSION` под свои выпуски, сводная проверка поставщика не
+    опознала, и `ci-complete` краснела «0.1.0 вне окна механизмов». Своя
+    версия первее выкачки теперь только у дерева, которое само несёт код
+    механизмов (`scripts/pipeline_checks.py`, :func:`mechanisms_tree`): это
+    наше дерево под пробой передачи. У потребителя его номер — номер его
+    выпусков, а окно сверяется с выкачкой тега.
+
     Своей версии нет, поставщик назван, а версии нет и в нём — отказ, а не
     «сверять не с чем» (075). Нет ни того, ни другого — `None`: спросить не у
     кого, и так бывает только у подделки.
     """
     own = tree / paths.VERSION
-    if own.is_file() and not foreign(supplier):
+    if own.is_file() and (supplier is None or (mechanisms_tree(tree) and not foreign(supplier))):
         return file_text(own, "версия контракта").strip()
     if supplier is None:
         return None

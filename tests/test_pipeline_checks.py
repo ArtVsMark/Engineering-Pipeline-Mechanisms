@@ -153,8 +153,7 @@ def test_the_own_contract_comes_first_and_the_called_tag_second(tmp_path: Path) 
     дереве, и выкачка первой красила бы её на каждом выпуске (взгляд на #1498).
     Ни своей, ни поставщика — `None`; поставщик без версии — отказ (045).
     """
-    tree = tmp_path / "tree"
-    tree.mkdir()
+    tree = mechanisms(tmp_path / "tree")
     (tree / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     supplier = supplier_at(tmp_path / "mechanisms", FAKE_VERSION)
     assert policy.contract_of(tree, supplier) == "0.1.0"
@@ -163,6 +162,13 @@ def test_the_own_contract_comes_first_and_the_called_tag_second(tmp_path: Path) 
     assert policy.contract_of(tmp_path / "bare", None) is None
     with pytest.raises(policy.BadPolicy, match="версия контракта позванного тега"):
         policy.contract_of(tmp_path / "bare", supplier_at(tmp_path / "empty", None))
+
+
+def mechanisms(tree: Path) -> Path:
+    """Дерево, несущее код механизмов, — как наше под пробой передачи (#1774)."""
+    (tree / "scripts").mkdir(parents=True, exist_ok=True)
+    (tree / "scripts" / "pipeline_checks.py").write_text("", encoding="utf-8")
+    return tree
 
 
 def cloned(where: Path, origin: str) -> Path:
@@ -192,8 +198,7 @@ def test_a_consumers_own_contract_is_not_the_suppliers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, running: str, origin: str, taken: str
 ) -> None:
     """Своя версия контракта — только у самого поставщика, а не у дерева с файлом (`169baca`)."""
-    tree = tmp_path / "tree"
-    tree.mkdir()
+    tree = mechanisms(tmp_path / "tree")
     (tree / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
     monkeypatch.setenv("GITHUB_REPOSITORY", running)
     # Каталог запуска — дерево без `origin`: без имени прогона своя сторона
@@ -1476,3 +1481,43 @@ def test_the_record_name_is_composed_in_one_place() -> None:
     assert policy.own_name("lint", {}) == "lint"
     assert policy.own_name("lint", {"name": "Линтер"}) == "Линтер"
     assert policy.composed("lint", "lint") == f"lint{policy.COMPOSED}lint"
+
+
+def test_a_consumers_own_number_is_not_the_mechanisms_window(tmp_path: Path) -> None:
+    """Свой `CONTRACT_VERSION` потребителя вне окна механизмов не краснеет (#1774).
+
+    Поставщик не опознан (выкачка без `origin`), а дерево — не механизмы:
+    окно сверяется с версией выкачки тега, а номер потребителя — его выпусков.
+    """
+    path = answered(tmp_path / "consumer")
+    (path.parent / "CONTRACT_VERSION").write_text("9.0.0\n", encoding="utf-8")
+    supplier = supplier_at(tmp_path / "mechanisms", "0.1.7")
+    assert policy.contract_of(path.parent, supplier) == "0.1.7"
+    assert "lint" in policy.load(path, supplier=supplier)
+
+
+def test_a_tag_outside_the_window_still_refuses_beside_an_own_number(tmp_path: Path) -> None:
+    """Тег поставщика за окном `contract:` краснеет и у потребителя со своим номером (#1774)."""
+    path = answered(tmp_path / "consumer")
+    (path.parent / "CONTRACT_VERSION").write_text("0.1.7\n", encoding="utf-8")
+    supplier = supplier_at(tmp_path / "mechanisms", FAKE_VERSION)
+    with pytest.raises(policy.BadPolicy, match="вне объявленного диапазона"):
+        policy.load(path, supplier=supplier)
+
+
+def test_the_release_step_keeps_the_consumers_own_number(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Шаг выпуска ведёт номер потребителя в его дереве, не трогая номер механизмов (#1774)."""
+    release = load_script("release.py")
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    (consumer / "CONTRACT_VERSION").write_text("0.1.0\n", encoding="utf-8")
+    supplier = supplier_at(tmp_path / "mechanisms", "0.1.7")
+    monkeypatch.chdir(consumer)
+    assert release.declared_version() == "0.1.0"
+    after = release.next_contract("0.1.0", touched=True, breaking=False)
+    release.paths.VERSION.write_text(f"{after}\n", encoding="utf-8")
+    assert (consumer / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == after != "0.1.0"
+    assert (supplier / "CONTRACT_VERSION").read_text(encoding="utf-8").strip() == "0.1.7"
+    assert policy.contract_of(consumer, supplier) == "0.1.7"
