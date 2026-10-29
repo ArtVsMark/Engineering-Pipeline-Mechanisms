@@ -5,13 +5,14 @@
 ответа с деревом, — и оба проверяются подделанными расхождениями.
 """
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.conftest import FAKE_VERSION, Run, RunScript, load_script
+from tests.conftest import FAKE_VERSION, ROOT, Run, RunScript, load_script, walk
 
 policy = load_script("pipeline_checks.py")
 
@@ -1546,3 +1547,33 @@ def test_carries_mechanisms_is_the_module_in_scripts(tmp_path: Path) -> None:
     """Дерево с механизмами узнаётся по файлу модуля в `scripts/` (#1774)."""
     assert not policy.carries_mechanisms(tmp_path)
     assert policy.carries_mechanisms(mechanisms(tmp_path))
+
+
+#: Литерал начала строки `uses:` в регулярке — то, что заменяет `USES_HEAD`.
+USES_LITERAL = 'r"uses:'
+
+
+def test_the_uses_head_is_spelled_once() -> None:
+    """Начало строки `uses:` в регулярках — только `USES_HEAD` (взгляд на #1785, 090).
+
+    Форма кавычек была скопирована в шесть разборов, и перечень форм между
+    копиями расходился бы молча. Тест читает и код, и тесты: сосед в тесте
+    (`CATALOGUE_CALL_RE`, `LOCAL_CALL_RE`) тоже не видел кавычек.
+    """
+    found = [
+        f"{path.relative_to(ROOT)}:{n}"
+        for where in (ROOT / "scripts", ROOT / "tests")
+        for path in walk(where, "*.py")
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if USES_LITERAL in line and "USES_LITERAL" not in line
+    ]
+    assert found == ["scripts/pipeline_checks.py:73"], found
+
+
+@pytest.mark.parametrize("quote", ["", '"', "'"])
+def test_the_uses_head_takes_a_quoted_value(quote: str) -> None:
+    """`USES_HEAD` видит значение и в кавычках, и без (взгляд на #1785)."""
+    line = f"uses: {quote}./.github/workflows/step-x.yml{quote}"
+    pattern = re.compile(policy.USES_HEAD + r"\./\.github/workflows/(?P<file>[\w.-]+\.yml)")
+    match = pattern.search(line)
+    assert match and match["file"] == "step-x.yml"

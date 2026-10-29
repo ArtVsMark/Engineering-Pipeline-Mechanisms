@@ -67,7 +67,8 @@ OURS: Final = feedback_form.SUPPLIER
 #: Кавычки — та же форма, что у `drift.ACTION_USE` и гейта пинов семьи (взгляд на
 #: #1785, 195): сосед, взявший шаг строкой в кавычках, — тоже взявший.
 CALL_RE: Final = re.compile(
-    r"uses:\s*[\"']?(?i:"
+    policy.USES_HEAD
+    + r"(?i:"
     + re.escape(OURS)
     + r")/\.github/workflows/(?P<step>[\w.-]+)\.ya?ml@(?P<ref>[\w.-]+)"
 )

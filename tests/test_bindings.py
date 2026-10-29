@@ -1344,8 +1344,11 @@ ORIGIN_KINDS = frozenset({"called", "copied", "adapted"})
 ORIGIN_REQUIRED_FOR = MACHINE_KINDS
 #: Вызов действия каталога в наших прогонах: адрес действия и тег.
 CATALOGUE_ORIGIN = "ArtVsMark/Engineering-Incidents-Playbook:"
+#: Начало строки `uses:` — общее с разбором вызовов в коде, кавычки тоже
+#: (`pipeline_checks.USES_HEAD`, взгляд на #1785, 195).
+USES_HEAD: Final = load_script("pipeline_checks.py").USES_HEAD
 CATALOGUE_CALL_RE = re.compile(
-    r"uses:\s*ArtVsMark/Engineering-Incidents-Playbook(?P<path>/[\w./-]+)?@(?P<tag>[\w.-]+)"
+    USES_HEAD + r"ArtVsMark/Engineering-Incidents-Playbook(?P<path>/[\w./-]+)?@(?P<tag>[\w.-]+)"
 )
 
 
@@ -1440,7 +1443,7 @@ def test_every_called_catalogue_action_is_someones_origin() -> None:
 
 #: Вызов переиспользуемого прогона своего дерева: джоб, который его зовёт,
 #: держится тем, что зовёт вызванный прогон.
-LOCAL_CALL_RE: Final = re.compile(r"uses:\s*\./\.github/workflows/(?P<file>[\w.-]+\.yml)")
+LOCAL_CALL_RE: Final = re.compile(USES_HEAD + r"\./\.github/workflows/(?P<file>[\w.-]+\.yml)")
 
 
 def action_path(found: re.Match[str]) -> str:

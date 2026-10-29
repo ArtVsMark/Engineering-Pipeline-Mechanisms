@@ -123,7 +123,7 @@ def carriers(root: Path, base: str) -> set[str]:
 
 #: Вызов прогона в строке `uses:`: путь вызываемого от корня — после адреса.
 CALL_RE: Final = re.compile(
-    r"uses:\s*[\"']?(?P<said>(?:\S*?/)?(?P<path>\.github/workflows/[^@\s\"']+)(?:@[^\s\"']+)?)"
+    policy.USES_HEAD + r"(?P<said>(?:\S*?/)?(?P<path>\.github/workflows/[^@\s\"']+)(?:@[^\s\"']+)?)"
 )
 
 

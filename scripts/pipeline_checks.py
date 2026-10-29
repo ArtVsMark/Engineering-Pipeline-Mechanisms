@@ -67,6 +67,10 @@ import yaml
 DEFAULT_PATH: Final = paths.PIPELINE
 WORKFLOWS: Final = paths.WORKFLOWS
 SCHEMA: Final = 4
+#: Начало строки `uses:` — значение в кавычках или без. ОДНО на все разборы
+#: вызовов (взгляд на #1785): форма кавычек была скопирована в шесть
+#: регулярок, и перечень форм между копиями расходился бы молча (090).
+USES_HEAD: Final = r"uses:\s*[\"']?"
 
 REQUIRED: Final = "required"
 ADVISORY: Final = "advisory"

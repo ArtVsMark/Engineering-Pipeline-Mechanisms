@@ -55,7 +55,10 @@ def test_every_pattern_finds_a_path_in_the_tree() -> None:
 
 
 #: Вызов общего шага из прогона: `uses: ./.github/workflows/step-….yml`.
-CALLED_STEP = re.compile(r"uses:\s*\./(\.github/workflows/step-[\w-]+\.yml)")
+#: Начало строки `uses:` — общее с кодом, кавычки тоже (взгляд на #1785, 195).
+CALLED_STEP = re.compile(
+    load_script("pipeline_checks.py").USES_HEAD + r"\./(\.github/workflows/step-[\w-]+\.yml)"
+)
 
 
 def test_an_area_of_a_caller_names_its_called_step() -> None:
