@@ -156,6 +156,8 @@ CONTROL: Final = ("&&", "||", ";;", "|&", ";", "|", "&", "\n", "(", ")")
 #: Операторы перенаправления. Цель — следующее слово, слитное или раздельное
 #: (`>out.log`, `> out.log`, `2>&1`), и она снимается вместе с оператором.
 REDIRECTS: Final = ("&>>", "&>", "<<<", "<<-", ">>", ">|", ">&", "<<", "<>", "<&", ">", "<")
+#: Присваивание переменной перед командой: имя по правилу оболочки, затем `=`.
+ASSIGNMENT: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 #: Глобальные ключи самого git со значением: `git -C путь push`. Отделять их
 #: нужно, потому что подкоманда — первое слово без ключа.
 GLOBAL_WITH_VALUE: Final = frozenset(
@@ -368,7 +370,10 @@ def unwrap(segment: list[str], depth: int) -> tuple[list[list[str]], str]:
         return [], "предел вложенности оболочек исчерпан — команда не дочитана"
     first = segment[0].rsplit("/", 1)[-1]
     # `VAR=value git push` — присваивания перед командой, своё написание того же.
-    if "=" in first and not first.startswith("=") and len(segment) > 1:
+    # ПРИСВАИВАНИЕ УЗНАЁТСЯ ПО ЦЕЛОМУ СЛОВУ, А НЕ ПО ХВОСТУ ПОСЛЕ `/` (#1746):
+    # значение с косой чертой (`FOO=a/b git push origin main`) давало хвост
+    # без `=`, и толчок в общую ветку проходил, не узнанный толчком вовсе.
+    if ASSIGNMENT.match(segment[0]) and len(segment) > 1:
         return unwrap(segment[1:], depth - 1)
     if first in SHELLS:
         script, blind = script_of(segment)
@@ -584,15 +589,21 @@ def push_targets(command: str, start: str = "") -> Look:
     # которое ведёт два репозитория, толкает второй через `cd` или `git -C`, а
     # голова читалась в дереве проекта — и толчок в свою ветку второго
     # репозитория отвергался всегда. Начало — каталог события (`cwd`), затем
-    # каждое `cd` строки и каждый `-C` толчка. Каталог, который не узнать
-    # (`cd -`, переменная, `--git-dir`), — слепота при толчке, а не каталог
+    # каждое `cd`/`pushd` строки и каждый `-C` толчка. Каталог, который не узнать
+    # (`cd -`, переменная, `--git-dir`, `GIT_DIR=`), — слепота при толчке, а не каталог
     # сторожа (045). ПРЕДЕЛ НАЗВАН: подоболочка `( cd … )` разбором не
     # отличается от `cd … ;`, и её `cd` считается действующим.
     where, lost = start, ""
     for part in parts:
-        if part and part[0] == "cd":
+        if part and part[0] in ("cd", "pushd"):
             where, lost = moved(where, lost, part[1:])
             continue
+        if not lost:
+            # Переменные `GIT_DIR` и `GIT_WORK_TREE` уводят git в другое дерево
+            # так же, как `--git-dir`, — где бы они ни стояли в строке.
+            moving = [one for one in part if one.startswith(("GIT_DIR=", "GIT_WORK_TREE="))]
+            if moving:
+                lost = f"«{cut(moving[0])}» уводит git в другое дерево"
         found, blind = unwrap(part, DEPTH)
         if blind:
             return Look(blind=blind)

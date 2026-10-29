@@ -128,8 +128,14 @@ def test_a_push_past_the_head_is_refused(command: str) -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["git push origin main", "git push origin HEAD:main", "git -C /tmp push origin main"],
-    ids=["прямо", "из головы", "с ключом git"],
+    [
+        "git push origin main",
+        "git push origin HEAD:main",
+        "git -C /tmp push origin main",
+        # Значение с косой чертой прятало толчок целиком (#1746).
+        "FOO=a/b git push origin main",
+    ],
+    ids=["прямо", "из головы", "с ключом git", "присваивание-с-косой"],
 )
 def test_a_push_to_the_shared_branch_is_always_refused(command: str) -> None:
     """Общая ветка отвергается из любой головы: писать в неё напрямую нельзя."""
@@ -1414,6 +1420,8 @@ def two_trees(tmp_path: Path) -> tuple[Path, Path]:
         ("git push origin agent/второй", "", 2),
         ("cd - && git push origin agent/второй", "", 2),
         ("git --git-dir={второй}/.git push origin agent/второй", "", 2),
+        ("pushd {второй} && git push origin agent/второй", "", 0),
+        ("GIT_DIR={второй}/.git git push origin agent/второй", "", 2),
     ],
     ids=[
         "ключ-C",
@@ -1425,6 +1433,8 @@ def two_trees(tmp_path: Path) -> tuple[Path, Path]:
         "дерево-проекта-не-та-ветка",
         "cd-минус-не-узнан",
         "git-dir-не-судится",
+        "pushd-в-строке",
+        "переменная-GIT_DIR-не-судится",
     ],
 )
 def test_the_head_is_read_in_the_pushed_tree(
