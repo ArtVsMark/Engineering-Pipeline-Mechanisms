@@ -16,8 +16,9 @@
 #
 # Исходы: код скрипта; 2 — запускатель не отработал (вызовов нет, вызовы
 # расходятся, ссылка не тег, выкачка не удалась, такого скрипта нет).
-# Интерпретатор — `PYTHON` (по умолчанию `python3`): ему нужны планка механизмов
-# и `pyyaml`.
+# Интерпретатор — `PYTHON`; по умолчанию `python<планка>` из `.claude/hooks/floor.sh`,
+# если он есть, иначе `python3`. Ему нужны планка механизмов и `pyyaml` — оба
+# ставит хук старта (`install_floor.sh`, #1771).
 set -euo pipefail
 
 refuse() {
@@ -33,6 +34,22 @@ shift
 
 root=$(git rev-parse --show-toplevel) || refuse "не дерево git"
 cd "$root"
+
+# ИНТЕРПРЕТАТОР ПО УМОЛЧАНИЮ — ПЛАНКА, А НЕ ГОЛЫЙ python3 (#1771). Хук старта
+# ставит `pyyaml` в `python<планка>`, а системный `python3` облачного окна —
+# ниже планки и без `yaml`. Число читается точкой в подоболочке, как у прочих
+# читателей `floor.sh`: второй разборщик на `sed` разошёлся бы с ними на первой
+# непривычной записи (взгляд на #1777, 214). Планка берётся, только если в ней
+# есть `yaml`: локально она может стоять голой, а рабочий `python3` — с ним
+# (взгляд на #1777, 195). Иначе — `python3`, как прежде.
+if [ -z "${PYTHON:-}" ]; then
+  want=$(unset want; . .claude/hooks/floor.sh >/dev/null 2>&1; printf '%s' "${want:-}")
+  if [ -n "$want" ] && "python$want" -c 'import yaml' >/dev/null 2>&1; then
+    PYTHON="python$want"
+  else
+    PYTHON=python3
+  fi
+fi
 
 # Запись вызова — с кавычками или без: `uses: o/m/…@v1` и `uses: "o/m/…@v1"`.
 # Берутся только ОБЩИЕ ШАГИ механизмов (`step-*.yml`) и только незакомментированные
@@ -81,10 +98,10 @@ if [ ! -f "$cache/scripts/preflight.py" ]; then
   # гонке негде случиться. Стереть разовый остаток — одно действие человека.
   [ -d "$cache" ] && [ ! -f "$cache/scripts/preflight.py" ] \
     && refuse "кеш механизмов $cache неполон — остаток прежнего запускателя; удалите его, и следующий заход выкачает заново"
-  "${PYTHON:-python3}" -c '' 2>/dev/null \
-    || refuse "интерпретатор ${PYTHON:-python3} не запускается — переносить кеш нечем"
+  "$PYTHON" -c '' 2>/dev/null \
+    || refuse "интерпретатор $PYTHON не запускается — переносить кеш нечем"
   swap() {
-    "${PYTHON:-python3}" -c '
+    "$PYTHON" -c '
 import os, sys
 try:
     os.rename(sys.argv[1], sys.argv[2])
@@ -118,4 +135,4 @@ export PYTHONPATH="$cache/packages/transport${PYTHONPATH:+:$PYTHONPATH}"
 if [ "$script" = preflight.py ]; then
   set -- --root "$root" --mechanisms "$cache" --supplier "$supplier" "$@"
 fi
-exec "${PYTHON:-python3}" "$cache/scripts/$script" "$@"
+exec "$PYTHON" "$cache/scripts/$script" "$@"
