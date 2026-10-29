@@ -647,6 +647,31 @@
     "close-a-finding"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1739,
+   "merged_at": "2026-10-29",
+   "commit": "97b2958052cdb32687ec49111c9ebfccbccfa953",
+   "touched": [
+    "changelog.d/action-pins-family-case.fixed.md",
+    "scripts/check_action_pins.py",
+    "scripts/drift.py",
+    "tests/test_action_pins.py"
+   ],
+   "added": [
+    "changelog.d/action-pins-family-case.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [
+    "close-a-finding"
+   ],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
