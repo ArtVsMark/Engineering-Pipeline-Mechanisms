@@ -122,6 +122,8 @@ jobs:
   probe-attribution-history:
     name: probe-attribution-history
     uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution-history.yml@v1.12.0
+    with:
+      strip-ours: true
     permissions:
       contents: read
 
@@ -141,6 +143,8 @@ jobs:
   probe-attribution:
     name: probe-attribution
     uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/step-attribution.yml@v1.12.0
+    with:
+      strip-ours: true
     permissions:
       contents: read
       checks: read
