@@ -190,6 +190,9 @@ UNREAD_MATRIX: Final = "матрица версий Python в {} не прочи
 NO_VERSION: Final = "версия не выводится: в дереве нет ни тега выпуска, ни объявленной версии"
 #: Причина пустого выпуска: тега выпуска в дереве нет (#1761).
 NO_RELEASE: Final = "выпусков нет: тега выпуска в дереве нет"
+#: Выпуск не прочитан: история или теги клона неполны, и «тега нет» было бы
+#: непрочитанным, выданным за отсутствие (взгляд на #1770, 045).
+UNREAD_RELEASE: Final = "выпуск не прочитан: отсутствие тега не доказано ({})"
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -422,6 +425,20 @@ def rules_said(root: Path, supplier: str = "") -> dict[str, Any]:
         return {"read": False, "why": str(exc)}
 
 
+def release_absent(root: Path) -> str:
+    """Причина пустого выпуска: «тега нет» — только доказанное (взгляд на #1770).
+
+    Клон мелкий, теги не выкачаны или источник не ответил — выпуск не
+    прочитан, а не отсутствует: непрочитанное, выданное за отсутствие, —
+    ровно то, от чего `version.absence` заведён (045).
+    """
+    try:
+        why = version.absence(root)
+    except version.NotRun as exc:
+        return UNREAD_RELEASE.format(exc)
+    return NO_RELEASE if why == version.ABSENCE_NONE else UNREAD_RELEASE.format(why)
+
+
 def common(
     root: Path,
     *,
@@ -471,7 +488,7 @@ def common(
     if series:
         said["release"] = series
     else:
-        none["release"] = NO_RELEASE
+        none["release"] = release_absent(root)
     covered = contract_coverage(coverage_facts(coverage))
     none.update(covered.pop("none", {}))
     said.update(covered)
