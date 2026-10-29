@@ -2,13 +2,13 @@
   "schema": "1.0",
   "source": {
     "summary": "1.7",
-    "at": "2026-10-29T14:54:46+00:00"
+    "at": "2026-10-29T16:28:08+00:00"
   },
   "held": {
-    "наш механизм без переделки": 10,
+    "наш механизм без переделки": 11,
     "наш механизм, переписан к себе": 20,
     "наш механизм, вид взятия не объявлен": 0,
-    "свой механизм": 882,
+    "свой механизм": 881,
     "прозой": 229,
     "никак": 39,
     "неприменимо": 145
@@ -6348,10 +6348,10 @@
     },
     "174": {
       "ArtVsMark/Engineering-Incidents-Playbook": {
-        "held": "свой механизм",
-        "mechanism": "gate",
-        "where": "scripts/build_facts.py — сводные факты каталога о себе публикуются в .github/badges/facts.json на ветке `badges`, по контракту витрины: schema строкой, generated_at обязателен, неизмеренный раздел ОТСУТСТВУЕТ, а не выставлен в ноль; scripts/build_rules_index.py — выгрузка export/rules.json собирается издателем и читается потребителями (витрина берёт числа оттуда, а не считает их клоном); scripts/aggregate_bindings.py — то же для сводки export/where.json",
-        "origin": "ArtVsMark/ArtVsMark:.rules/facts.schema.json@c17e09433443"
+        "held": "наш механизм без переделки",
+        "mechanism": "pipeline",
+        "where": ".github/workflows/badges.yml — работа `facts` зовёт общий шаг механизмов step-facts по тегу v1.11.0: факты каталога о себе собираются из дерева и публикуются в .github/badges/facts.json на ветке `badges`, по договору фактов семьи у механизмов (schema строкой, неизмеренный раздел ОТСУТСТВУЕТ с причиной в `none`, а не выставлен в ноль); scripts/build_rules_index.py — выгрузка export/rules.json собирается издателем и читается потребителями (витрина берёт числа оттуда, а не считает их клоном); scripts/aggregate_bindings.py — то же для сводки export/where.json",
+        "origin": "ArtVsMark/Engineering-Pipeline-Mechanisms:.github/workflows/step-facts.yml@96c2c93b52cd"
       },
       "ArtVsMark/Stepik-Python-Grader": {
         "held": "свой механизм",
