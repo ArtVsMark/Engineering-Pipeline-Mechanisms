@@ -13,7 +13,7 @@ registry = load_script("feedback_registry.py")
     [
         ("@someone посмотри #12", "`@someone посмотри #12`"),
         ("строка\n## заголовок\n- пункт", "`строка ## заголовок - пункт`"),
-        ("<!-- work-plan -->", "`<! -- work-plan -->`"),
+        ("<!-- метка -->", "`<! -- метка -->`"),
         ("a`b", "``a`b``"),
         ("`край", "`` `край ``"),
         ("   ", ""),
@@ -36,4 +36,4 @@ def test_the_registry_quotes_through_the_package() -> None:
     """Реестр соседей зовёт пакетное ограждение, а невидимое делает видимым сам (#1782, 214)."""
     assert registry.quoted("@сосед") == untrusted.quoted("@сосед")
     assert registry.MARK_OPEN == untrusted.MARK_OPEN
-    assert "\\u{200b}" in registry.quoted("a​b")
+    assert "\\u{200b}" in registry.quoted(f"a{chr(0x200B)}b")

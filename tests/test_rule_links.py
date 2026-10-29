@@ -347,3 +347,10 @@ def test_another_tree_still_reads_the_published_export(
         module.catalogue, "read", lambda *_: {"rules": [{"id": "001", "slug": "a"}]}
     )
     assert module.known(tmp_path) == {"001": "a"}
+
+
+def test_rules_by_number_reads_the_list_and_refuses_an_empty_one() -> None:
+    """Номер → слаг из выгрузки; пустой список — «не отработал», а не «правил нет» (075)."""
+    assert module.rules_by_number({"rules": [{"id": "001", "slug": "a"}]}) == {"001": "a"}
+    with pytest.raises(module.NotRun, match="ни одного правила"):
+        module.rules_by_number({"rules": []})

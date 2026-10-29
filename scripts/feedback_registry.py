@@ -100,7 +100,8 @@ class Collected:
         return {repo.lower() for repo in (*self.broken, *self.unread)}
 
 
-#: Начало нашей метки `<!-- … -->` и его видимый разрыв — у пакета транспорта (#1782).
+#: Начало нашей метки `<!-- … -->` и его видимый разрыв — у пакета транспорта
+#: (ArtVsMark/Engineering-Pipeline-Mechanisms#1782).
 MARK_OPEN: Final = untrusted.MARK_OPEN
 MARK_BROKEN: Final = untrusted.MARK_BROKEN
 
@@ -149,9 +150,10 @@ def quoted(text: object) -> str:
     — ни в одной форме. Ограждение длиннее любой серии обратных кавычек внутри, и кавычка у края
     отделена пробелом (CommonMark, «Code spans»).
 
-    ОГРАЖДЕНИЕ — У ПАКЕТА ТРАНСПОРТА (#1782): `untrusted.quoted` отдан семье тегом,
-    каталог зовёт его же (правило 230). Здесь поверх — только невидимое (`shown`),
-    чей признак живёт у гейта `check_invisible` и в пакет не едет.
+    ОГРАЖДЕНИЕ — У ПАКЕТА ТРАНСПОРТА (ArtVsMark/Engineering-Pipeline-Mechanisms#1782):
+    `untrusted.quoted` отдан семье тегом, каталог зовёт его же (правило 230). Здесь
+    поверх — только невидимое (`shown`), чей признак живёт у гейта `check_invisible`
+    и в пакет не едет.
     """
     return untrusted.quoted(shown(str(text)))
 
