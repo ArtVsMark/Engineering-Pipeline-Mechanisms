@@ -148,7 +148,7 @@ def test_a_supplier_without_its_version_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_own_contract_comes_first_and_the_called_tag_second(tmp_path: Path) -> None:
-    """`contract_of`: дерево со своей версией — поставщик; без неё — версия позванного тега.
+    """`contract_of`: дерево с кодом механизмов — свой номер; иначе — версия позванного тега.
 
     Своя версия первее выкачки: проба передачи зовёт прошлый тег на нашем
     дереве, и выкачка первой красила бы её на каждом выпуске (взгляд на #1498).
@@ -159,6 +159,8 @@ def test_the_own_contract_comes_first_and_the_called_tag_second(tmp_path: Path) 
     supplier = supplier_at(tmp_path / "mechanisms", FAKE_VERSION)
     assert policy.contract_of(tree, supplier) == "0.1.0"
     assert policy.contract_of(tree, None) == "0.1.0"
+    # Отсутствующий поставщик — «не чужой» самим `foreign`, без своей ветки (#1778).
+    assert policy.foreign(None) is False
     assert policy.contract_of(tmp_path / "bare", supplier) == FAKE_VERSION
     assert policy.contract_of(tmp_path / "bare", None) is None
     with pytest.raises(policy.BadPolicy, match="версия контракта позванного тега"):
