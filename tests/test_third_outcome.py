@@ -171,3 +171,18 @@ def test_a_step_with_its_keys_still_says_it_did_not_run(
     assert "usage:" not in result.text, (
         f"{step} упал на разборе ключей — это двойка argparse, а не объявленный исход"
     )
+
+
+def test_check_env_says_it_did_not_run_on_a_broken_floor(
+    run_script: RunScript, tmp_path: Path
+) -> None:
+    """Третий исход `check_env` — битая планка, а не пустой вход (#1763).
+
+    Пустой каталог — проект без своего Python, и «не требуется» там законный
+    ответ; не отработать сверка обязана, когда `pyproject.toml` есть, а
+    границы в нём нет.
+    """
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    result = run_script("check_env.py", "--root", str(tmp_path), cwd=tmp_path, env=dict(NO_HINTS))
+    assert result.code == outcomes.declared("check_env.py")["EXIT_BROKEN"], result.text
+    assert "не отработал" in result.text and names_a_subject(result.text), result.text
