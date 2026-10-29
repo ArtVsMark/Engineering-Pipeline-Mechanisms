@@ -39,7 +39,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Final
 
@@ -1348,7 +1348,17 @@ OURS_RE: Final = re.compile(r"[а-яё]", re.IGNORECASE)
 #: (взгляд на #1754). ЗАМЕР 29.10.2026, 40 голов общей ветки: наборов
 #: приложения действий 6926, неперезапускаемых 5 — все пять `Dependabot`,
 #: ложных среди наших ноль.
+#:
+#: ГРАНИЦЫ НАЗВАНЫ (взгляды на #1754, 195). Замер — свежие головы; перезапуск
+#: площадка разрешает около 30 дней, и у давней головы неперезапускаемыми
+#: стали бы и наши наборы — признак тогда не судится вовсе
+#: (:data:`PLATFORM_TRUST_DAYS`). Прочие прогоны, что площадка запускает
+#: сама — CodeQL в настройке по умолчанию, сборка Pages, агент Copilot, —
+#: попадают сюда же, если их набор неперезапускаем; у нас их нет, замера нет.
 ACTIONS_APP: Final = "github-actions"
+#: Сколько суток признак `rerequestable` различает площадку и дерево. Срок
+#: перезапуска у площадки — около 30 дней; запас неделя.
+PLATFORM_TRUST_DAYS: Final = 23
 
 
 def platform_suites(repo: str, token: str, head: str) -> set[int]:
@@ -1396,8 +1406,13 @@ def platform_warnings(repo: str, token: str) -> list[Drift]:
 
     Проверок на голове нет — отказ источника, а не «площадка молчит»: спросить
     было не у кого (075).
+
+    ПРЕДУПРЕЖДЕНИЕ ПРОГОНА САМОЙ ПЛОЩАДКИ ЗАПИСЬЮ НЕ СТАНОВИТСЯ (#1753): правкой
+    дерева его не снять, и оно остаётся строкой лога захода — там же, откуда
+    источник выводит прочие. Это граница, а не адресат.
     """
-    head = (ghrest.request("GET", f"repos/{repo}/commits/{paths.TRUNK}", token) or {}).get("sha")
+    said_head = ghrest.request("GET", f"repos/{repo}/commits/{paths.TRUNK}", token) or {}
+    head = said_head.get("sha")
     if not head:
         raise NotRun(f"голова {paths.TRUNK} не прочитана — спросить проверки не у кого")
     # ОБА СПИСКА ЧИТАЮТСЯ ДО КОНЦА, а не первой страницей: у проверок страница
@@ -1409,16 +1424,33 @@ def platform_warnings(repo: str, token: str) -> list[Drift]:
         raise NotRun(
             f"на голове {head[:7]} нет ни одной проверки — предупреждений спросить не у кого"
         )
-    theirs_suites = platform_suites(repo, token, head)
-    asked: dict[str, dict[str, Any]] = {}
+    # ДАВНЯЯ ГОЛОВА — ПРИЗНАК НЕ СУДИТСЯ (взгляд на #1754): неперезапускаемыми
+    # стали бы и наши наборы, и все предупреждения ушли бы в печать. Дата не
+    # прочитана — так же: дешёвая сторона — лишняя запись, а не тишина (051).
+    committed = ghrest.moment(((said_head.get("commit") or {}).get("committer") or {}).get("date"))
+    fresh = committed is not None and datetime.now(UTC) - committed < timedelta(
+        days=PLATFORM_TRUST_DAYS
+    )
+    if not fresh:
+        print(
+            f"голова {head[:7]} старше {PLATFORM_TRUST_DAYS} сут. или без даты: прогоны площадки "
+            "не отличить по `rerequestable` — судятся все"
+        )
+    theirs_suites = platform_suites(repo, token, head) if fresh else set()
+    # КЛЮЧ — ИМЯ ВМЕСТЕ СО СТОРОНОЙ (взгляд на #1754): джоб дерева с именем
+    # прогона площадки (`Dependabot`) иначе делил бы с ним одну выборку.
+    asked: dict[tuple[str, bool], dict[str, Any]] = {}
     for run in runs:
         if (run.get("output") or {}).get("annotations_count"):
-            asked.setdefault(str(run.get("name")), run)
+            side = (run.get("check_suite") or {}).get("id") in theirs_suites
+            asked.setdefault((str(run.get("name")), side), run)
     said: dict[str, set[str]] = {}
-    for name, run in sorted(asked.items()):
+    for (name, theirs), run in sorted(asked.items()):
         # ПРОГОН ПЛОЩАДКИ НЕ СУДИТСЯ, НО НАЗЫВАЕТСЯ (#1753, 045): запись дрейфа о
         # нём снять нечем, а молчание спрятало бы, что предупреждение было.
-        theirs = (run.get("check_suite") or {}).get("id") in theirs_suites
+        # Названо оно строкой лога ночного захода — граница названа (взгляд на
+        # #1754): адресата у неснимаемого предупреждения нет, и лог — честнее
+        # записи, которую снять нечем.
         for note in ghrest.paginate(f"repos/{repo}/check-runs/{run['id']}/annotations", token):
             text = " ".join(str(note.get("message") or "").split())
             if note.get("annotation_level") not in WARNING_LEVELS or not text:
@@ -1443,7 +1475,9 @@ def platform_warnings(repo: str, token: str) -> list[Drift]:
 #: Как в пробе узнаётся вызов по тегу. Сам её адрес объявлен в `paths`:
 #: второй якорь заводится ровно тем, что путь собирают на месте.
 PROBE: Final = paths.HANDOVER_PROBE
-PROBE_PIN_RE: Final = re.compile(r"uses:\s*[\w.-]+/[\w.-]+/[^@\s]+@(?P<ref>[\w.-]+)")
+#: Кавычки — та же форма, что у `ACTION_USE` (взгляд на #1739, 195): разбор
+#: одной строки `uses:` один на перечень форм.
+PROBE_PIN_RE: Final = re.compile(r"uses:\s*[\"']?[\w.-]+/[\w.-]+/[^@\s\"']+@(?P<ref>[\w.-]+)")
 
 
 def probe_behind_release(root: Path | None = None) -> list[Drift]:

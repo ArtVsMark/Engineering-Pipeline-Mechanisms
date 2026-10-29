@@ -1361,3 +1361,48 @@ def test_an_unread_edge_date_is_a_refusal_not_no_review(monkeypatch: pytest.Monk
     )
     with pytest.raises(module.NotRun, match="граница подключения"):
         ONBOARDED_AT("o/r", "t")
+
+
+def test_a_near_commit_later_than_by_reads_the_whole_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ответ `until` позже `by` (дата автора ≠ коммиттера) — история целиком (взгляд на #1760)."""
+    by = module.datetime(2026, 10, 25, tzinfo=module.UTC)
+    full = [
+        {"commit": {"committer": {"date": "2026-10-29T13:52:00Z"}}},
+        {"commit": {"committer": {"date": "2026-10-20T08:00:00Z"}}},
+    ]
+    monkeypatch.setattr(
+        module.ghrest,
+        "request",
+        lambda *a, **k: [{"commit": {"committer": {"date": "2026-10-28T00:00:00Z"}}}],
+    )
+    read: list[str] = []
+
+    def paginate(path: str, *_a: Any, **_k: Any) -> Any:
+        read.append(path)
+        return iter(full)
+
+    monkeypatch.setattr(module.ghrest, "paginate", paginate)
+    edge = ONBOARDED_AT("o/r", "t", by)
+    assert read, "история целиком не прочитана"
+    assert edge is not None and edge.isoformat().startswith("2026-10-20T08:00")
+
+
+def test_by_without_an_earlier_commit_reads_the_whole_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`by` задан, а коммита до него нет — история целиком (взгляд на #1760)."""
+    by = module.datetime(2026, 10, 25, tzinfo=module.UTC)
+    full = [{"commit": {"committer": {"date": "2026-10-27T08:00:00Z"}}}]
+    monkeypatch.setattr(module.ghrest, "request", lambda *a, **k: [])
+    monkeypatch.setattr(module.ghrest, "paginate", lambda *a, **k: iter(full))
+    edge = ONBOARDED_AT("o/r", "t", by)
+    assert edge is not None and edge.isoformat().startswith("2026-10-27T08:00")
+
+
+def test_a_merge_at_the_edge_is_not_before_onboarding() -> None:
+    """Слияние ровно в миг подключения — уже после него, а не до (взгляд на #1760)."""
+    edge = module.datetime(2026, 10, 27, 8, tzinfo=module.UTC)
+    assert not module.before_onboarding({"merged_at": "2026-10-27T08:00:00Z"}, edge)
+    assert module.before_onboarding({"merged_at": "2026-10-27T07:59:59Z"}, edge)

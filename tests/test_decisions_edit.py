@@ -281,3 +281,11 @@ def test_every_form_the_link_gate_reads_drops_its_rise(said: str) -> None:
     """Подъём снимается у всех форм, которые разбирает гейт ссылок (`7dec509`, `39f732e`, 210)."""
     flat = edit.without_rise(said)
     assert f"{edit.PLATFORM_MARK}/issues/7" in flat and "./" not in flat, flat
+
+
+def test_a_single_dot_slash_is_not_a_climb_to_the_platform() -> None:
+    """`](./issues/7)` — ссылка внутри каталога, а не на площадку (взгляд на #1728)."""
+    here = "## Решение\n\nСм. [#7](./issues/7).\n"
+    assert edit.PLATFORM_MARK not in edit.frozen(here)["Решение"]
+    climb = edit.frozen("## Решение\n\nСм. [#7](./../../issues/7).\n")["Решение"]
+    assert edit.PLATFORM_MARK in climb

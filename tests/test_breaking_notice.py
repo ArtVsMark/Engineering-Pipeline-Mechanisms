@@ -664,3 +664,20 @@ def test_a_non_json_owner_in_a_dry_run_is_not_asked(
     monkeypatch.setattr(module.ghrest, "request", not_json)
     assert module.asked_owner("т") == ""
     assert "не спрошено" in capsys.readouterr().out
+
+
+def test_a_value_error_of_own_code_keeps_its_trace(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ValueError` своего кода — трасса, а не строка «не отработало» (взгляд на #1741).
+
+    Не-JSON площадки ловят её вызовы; блок шага `ValueError` целиком не глотает.
+    """
+    family_of(monkeypatch, [TOOK])
+
+    def broken(*_: object, **__: object) -> object:
+        raise ValueError("ошибка своего кода")
+
+    monkeypatch.setattr(module, "changes", broken)
+    with pytest.raises(ValueError, match="ошибка своего кода"):
+        module.main(["--tag", "v1.8.0", *OURS])

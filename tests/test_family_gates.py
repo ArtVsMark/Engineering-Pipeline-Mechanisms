@@ -153,8 +153,8 @@ def test_the_live_issue_names_each_queue_with_its_addresses() -> None:
     said = module.document(summary(), OURS)
     body = module.render_issue(said)
     assert body.startswith(module.MARKER)
-    assert "доработать у нас" in body and "o/сосед · `scripts/b.py` · от `" in body
-    assert "- 002 · o/сосед · `scripts/c.py`" in body and "- 003" in body
+    assert "доработать у нас" in body and "`o/сосед` · `scripts/b.py` · от `" in body
+    assert "- `002` · `o/сосед` · `scripts/c.py`" in body and "- `003`" in body
     empty = {**said, "queues": {"rework": [], "spread": [], "propose": []}}
     assert module.render_issue(empty).count("Пусто на ") == 3
 
@@ -282,7 +282,7 @@ def test_a_rework_row_takes_its_reason_from_the_neighbours_record() -> None:
     ]
     said = {"queues": {"rework": rows, "spread": [], "propose": []}, "held": {}}
     body = module.render_issue(said, reasons)
-    first, second = [line for line in body.splitlines() if line.startswith("- 00")]
+    first, second = [line for line in body.splitlines() if line.startswith("- `00")]
     assert "причина: доработка" in first and "`нужен вход <путь>` (`o/n#4`)" in first
     assert second.endswith("причины в канале нет")
     assert "причин" not in module.render_issue(said)
@@ -314,3 +314,11 @@ def test_a_reason_is_found_for_every_form_of_mechanism(mechanism: str, path: str
     assert "причина: доработка" in module.reason_of(row, reasons)
     stranger = {**row, "origin": f"{OURS}:scripts/b.py@v1.0.0"}
     assert module.reason_of(stranger, reasons) == " · причины в канале нет"
+
+
+def test_map_row_fields_are_quoted_as_neighbour_data() -> None:
+    """Поля строки карты — данные соседа: кавычка и `@имя` их не ломают (взгляд на #1730)."""
+    row = {"rule": "155", "repo": "o/@сосед", "where": "a`b", "origin": "x#1"}
+    said = {"queues": {"rework": [row], "spread": [], "propose": []}}
+    body = module.render_issue(said)
+    assert "`o/@сосед`" in body and "``a`b``" in body and "`x#1`" in body, body

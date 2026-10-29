@@ -78,12 +78,16 @@ def python_floor(root: Path = Path()) -> tuple[int, int]:
     return int(found.group(1)), int(found.group(2))
 
 
-def needs(root: Path = Path()) -> dict[str, Need]:
+def needs(root: Path = Path(), *, may_be_empty: bool = False) -> dict[str, Need]:
     """Инструменты и их границы — из строк установки в прогонах.
 
     Одно имя, объявленное в двух прогонах с разными границами, — расхождение
     дерева, а не выбор механизма: обе строки правдоподобны, и брать любую
     значило бы решать за проект молча.
+
+    ``may_be_empty`` — строк установки нет законно (проект без своего Python:
+    инструменты ставят общие шаги поставщика). Пустота тогда — ``{}``, а спор
+    границ и отсутствие прогонов остаются отказом (взгляд на #1775, 022).
     """
     directory = root / paths.WORKFLOWS
     if not directory.is_dir():
@@ -101,7 +105,7 @@ def needs(root: Path = Path()) -> dict[str, Need]:
                         f"{bounds or '—'} в {path.name} — дерево спорит само с собой (022)"
                     )
                 found[name] = Need(name, bounds, path.name)
-    if not found:
+    if not found and not may_be_empty:
         raise NotRun("в прогонах нет ни одной строки установки — предмет сверки не найден (075)")
     return found
 
@@ -215,15 +219,10 @@ def survey(root: Path = Path()) -> Survey:
     # ТОЛЬКО граница: инструменты прогонов и пакеты дерева сверяются, как
     # прежде (взгляд на #1775, 195).
     floor = python_floor(root) if (root / "pyproject.toml").is_file() else None
-    try:
-        declared = needs(root)
-    except NotRun:
-        # Прогоны есть, а строк установки в них нет — у проекта без своего
-        # Python это норма: инструменты ставят общие шаги поставщика. Нет и
-        # прогонов — предмета сверки нет, и это отказ, как прежде (075).
-        if floor is not None or not (root / paths.WORKFLOWS).is_dir():
-            raise
-        declared = {}
+    # Прогоны без строк установки у проекта без своего Python — норма:
+    # инструменты ставят общие шаги поставщика. Спор границ и отсутствие
+    # прогонов — отказ и здесь (взгляд на #1775, 022, 075).
+    declared = needs(root, may_be_empty=floor is None)
     running = sys.version_info[:2]
     seen = [
         f"интерпретатор: {running[0]}.{running[1]}, дерево требует >={floor[0]}.{floor[1]}"

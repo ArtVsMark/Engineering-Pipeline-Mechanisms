@@ -513,6 +513,11 @@ def red_fixers(
     for change in queue:
         why: list[str] = []
         for number in changerefs.fixes_red_in(change.body):
+            # САМОССЫЛКА — НЕ ПОЧИНКА СОСЕДА (взгляд на #1729, 195): предел
+            # трёх и план её уже отсекают, и очередь отвечает так же.
+            if number == change.number:
+                why.append(f"#{number} — оно само")
+                continue
             target = alive.get(number)
             if target is None:
                 why.append(f"#{number} закрыто")
@@ -638,6 +643,11 @@ def look_pending(runs: list[dict[str, Any]]) -> bool:
 
 def look_can_run(repo: str, change: Change, owner_token: str) -> bool:
     """Может ли взгляд дать вердикт: прогон взгляда есть в базе изменения.
+
+    ГРАНИЦА НАЗВАНА (взгляд на #1775, 195): правка `review.yml` в самом
+    изменении тоже лишает взгляд вердикта, но ждать там некого — действие
+    пропускает работу сразу, запись взгляда завершается, и `look_pending`
+    перестаёт держать голову без этого вопроса.
 
     ПЕРВОЕ ИЗМЕНЕНИЕ ПОДКЛЮЧЕНИЯ ВЗГЛЯДА НЕ ПОЛУЧИТ (#1759). Действие площадки
     сверяет `review.yml` с базой и, не найдя его там, пропускает работу с

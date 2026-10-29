@@ -22,6 +22,10 @@ BARE = "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\
 #: Действие семьи формой, которую `ACTION_USE` видит, — иначе случай «семья»
 #: зеленел бы при любом `own_prefixes` (поздний взгляд на #1734, `b0d4beb`).
 FAMILY = "      - uses: ArtVsMark/some-action@v1.0.0\n"
+#: Вызов общего шага семьи — самая частая её форма (взгляд на #1739, `7ec4bb2`).
+FAMILY_STEP = (
+    "      - uses: ArtVsMark/Engineering-Pipeline-Mechanisms/.github/workflows/x.yml@v1.0.0\n"
+)
 
 
 def git(repo: Path, *args: str) -> None:
@@ -97,6 +101,11 @@ def test_every_form_of_an_old_pin_is_refused(
         ({"a.yml": run_file(OLD, UP)}, {"a.yml": run_file(OLD, UP), "b.yml": run_file(UP)}),
         # Действие семьи судит гейт заготовки (155), не этот.
         ({"a.yml": run_file(FAMILY.replace("v1.0.0", "v2.0.0"))}, {"a.yml": run_file(FAMILY)}),
+        # Вызов общего шага семьи — самая частая её форма (взгляд на #1739).
+        (
+            {"a.yml": run_file(FAMILY_STEP.replace("v1.0.0", "v2.0.0"))},
+            {"a.yml": run_file(FAMILY_STEP)},
+        ),
         # Новое действие одной версией: рядом стоит только оно само, ниже нечего.
         ({"a.yml": run_file()}, {"a.yml": run_file(OLD)}),
         # Откат во всех строках: старшей версии рядом не осталось (`7ca7778`).
@@ -105,7 +114,15 @@ def test_every_form_of_an_old_pin_is_refused(
             {"a.yml": run_file(OLD), "b.yml": run_file(OLD)},
         ),
     ],
-    ids=["подъём", "перестановка", "прежнее-расхождение", "семья", "новое-действие", "откат"],
+    ids=[
+        "подъём",
+        "перестановка",
+        "прежнее-расхождение",
+        "семья",
+        "семья-шаг",
+        "новое-действие",
+        "откат",
+    ],
 )
 def test_the_lawful_is_not_refused(
     run_script: RunScript, tmp_path: Path, base: dict[str, str], head: dict[str, str]
@@ -218,3 +235,14 @@ def test_a_version_has_a_rank_and_a_hash_has_none(
 ) -> None:
     """`v4` ниже `v7.0.1`; хеш и имя ветки порядка не несут."""
     assert pins.rank(said) == expect
+
+
+def test_a_partial_rollback_is_refused(run_script: RunScript, tmp_path: Path) -> None:
+    """Откат в части строк — отказ: рядом осталась старшая версия (взгляд на #1741, 195)."""
+    repo = change(
+        tmp_path,
+        {"a.yml": run_file(UP), "b.yml": run_file(UP)},
+        {"a.yml": run_file(OLD), "b.yml": run_file(UP)},
+    )
+    done = run_script("check_action_pins.py", "--base", "main", cwd=repo)
+    assert done.code == pins.EXIT_FOUND, done.out + done.err
