@@ -383,6 +383,21 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
 PYTEST: Final = "pytest "
 
 
+#: Вызов `pytest` словом команды, а не частью имени (`pytest-xdist`).
+PYTEST_CALL: Final = re.compile(r"(?<![\w-])pytest(?![\w-])")
+
+
+def runs_pytest(command: str) -> bool:
+    """Зовёт ли блок шага `pytest`, а не только называет его (взгляд на #1779, 045).
+
+    Строка установки (`pip install pytest…`) прогоном тестов не является.
+    """
+    return any(
+        PYTEST_CALL.search(line) and "pip install" not in line
+        for line in map(plain, command.splitlines())
+    )
+
+
 def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
     """Шаг тестов — по выбору классификатора (#1597); прочие шаги как есть.
 
@@ -418,11 +433,15 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
     # не с `pytest ` — `python -m pytest`, `timeout 600 pytest`, — и выбор не
     # лёг никуда. Набор тогда полный, и строка «тест-файлов: N» без этого слова
     # обещала бы сужение, которого не было (045).
-    if not took:
+    # «ПОЛНЫЙ НАБОР» — ТОЛЬКО ТАМ, ГДЕ ОН ЕСТЬ (взгляд на #1750, 045): в шагах
+    # без `pytest` вовсе прогона тестов нет, и обещать его было бы неправдой.
+    if not took and any(runs_pytest(step.command) for step in found):
         print(
             "выбор тестов не применён: ни одна строка шагов не начинается"
-            f" с `{PYTEST.strip()}` — полный набор"
+            f" с `{PYTEST.strip()}` — набор идёт, как написан в шаге, целиком"
         )
+    elif not took:
+        print(f"выбор тестов не применён: в шагах нет `{PYTEST.strip()}` — прикладывать не к чему")
     return out
 
 
@@ -498,6 +517,12 @@ PYTHON_NAMES: Final = ("python", "python3")
 #: Инструменты, которые блоки шагов зовут голым словом: `pytest` (`ci.yml`),
 #: `ruff` и `mypy` (`step-lint.yml`). Перечень сверяет с прогонами тест по
 #: дереву — новый голый инструмент без прокладки краснеет там.
+#:
+#: ГРАНИЦА НАЗВАНА (взгляд на #1772, 195): сверяются прогоны поставщика. Голый
+#: инструмент, которого нет здесь, — `coverage`, `black` в шаге потребителя —
+#: ищется по `PATH`, как до #1767, и у потребителя с интерпретатором в
+#: `/usr/bin` пойдёт системным `python3`. Своё такое слово потребитель зовёт
+#: формой `python -m <инструмент>`: `python` прокладка уже держит.
 STEP_TOOLS: Final = ("pytest", "ruff", "mypy")
 
 
@@ -522,6 +547,10 @@ def shims(executable: str) -> Path:
     прокладки нет, и слово ищется по `PATH`, как прежде. Модуль спрашивается у
     ЭТОГО процесса: ``executable`` — его же `sys.executable`.
 
+    `-m` С `-P` (взгляд на #1772, 022): `python -m` ставит в `sys.path` текущий
+    каталог, а голый инструмент площадки — нет. Без `-P` импорт из корня
+    дерева без установки зеленел бы здесь и краснел на площадке.
+
     Каталог — свой на процесс (`mkdtemp`: имя не угадать, права только
     владельцу), стирается на выходе.
     """
@@ -530,7 +559,7 @@ def shims(executable: str) -> Path:
     runner = shlex.quote(executable)
     lines = {name: f'exec {runner} "$@"' for name in PYTHON_NAMES}
     lines |= {
-        tool: f'exec {runner} -m {tool} "$@"'
+        tool: f'exec {runner} -P -m {tool} "$@"'
         for tool in STEP_TOOLS
         if importlib.util.find_spec(tool) is not None
     }
