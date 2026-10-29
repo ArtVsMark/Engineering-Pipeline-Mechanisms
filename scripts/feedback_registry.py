@@ -48,6 +48,7 @@ import ghrest
 import main_guard
 import paths
 import report
+import untrusted
 
 EXIT_OK: Final = 0
 EXIT_BROKEN: Final = 2
@@ -99,9 +100,9 @@ class Collected:
         return {repo.lower() for repo in (*self.broken, *self.unread)}
 
 
-#: Начало нашей метки `<!-- … -->` и его видимый разрыв в чужом тексте.
-MARK_OPEN: Final = "<!--"
-MARK_BROKEN: Final = "<! --"
+#: Начало нашей метки `<!-- … -->` и его видимый разрыв — у пакета транспорта (#1782).
+MARK_OPEN: Final = untrusted.MARK_OPEN
+MARK_BROKEN: Final = untrusted.MARK_BROKEN
 
 
 def shown(text: str) -> str:
@@ -147,13 +148,12 @@ def quoted(text: object) -> str:
     текст встаёт в код строки: внутри него площадка не делает ни упоминаний, ни ссылок, ни разметки
     — ни в одной форме. Ограждение длиннее любой серии обратных кавычек внутри, и кавычка у края
     отделена пробелом (CommonMark, «Code spans»).
+
+    ОГРАЖДЕНИЕ — У ПАКЕТА ТРАНСПОРТА (#1782): `untrusted.quoted` отдан семье тегом,
+    каталог зовёт его же (правило 230). Здесь поверх — только невидимое (`shown`),
+    чей признак живёт у гейта `check_invisible` и в пакет не едет.
     """
-    flat = shown(" ".join(str(text).split())).replace(MARK_OPEN, MARK_BROKEN)
-    if not flat:
-        return ""
-    fence = "`" * (max(map(len, re.findall("`+", flat)), default=0) + 1)
-    pad = " " if flat.startswith("`") or flat.endswith("`") else ""
-    return f"{fence}{pad}{flat}{pad}{fence}"
+    return untrusted.quoted(shown(str(text)))
 
 
 def collected(uptake: Any) -> Collected:

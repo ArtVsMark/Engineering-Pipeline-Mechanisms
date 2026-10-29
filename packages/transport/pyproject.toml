@@ -42,7 +42,7 @@ dynamic = ["version"]
 license-files = ["LICENSE"]
 
 [tool.setuptools]
-py-modules = ["ghrest", "report"]
+py-modules = ["ghrest", "report", "untrusted"]
 
 [tool.setuptools.dynamic]
 version = { file = ["VERSION"] }
