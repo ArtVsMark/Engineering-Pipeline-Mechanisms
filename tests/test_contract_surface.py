@@ -185,6 +185,9 @@ def test_a_contract_outside_the_range_is_refused(tmp_path: Path) -> None:
     Не «подвинь границу»: механическое поднятие числа оставляет ненужный обход
     жить вечно, а смысл перечитывания ровно в том, чтобы его снять.
     """
+    # Дерево — поставщик: несёт код механизмов, и свой номер у него — окно (#1774).
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "pipeline_checks.py").write_text("", encoding="utf-8")
     (tmp_path / "CONTRACT_VERSION").write_text(f"{FAKE_VERSION}\n", encoding="utf-8")
     path = tmp_path / ".pipeline.yml"
     path.write_text(ANSWER, encoding="utf-8")
