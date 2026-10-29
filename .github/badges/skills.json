@@ -956,6 +956,27 @@
     "a-gate-obeys-every-rule"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1772,
+   "merged_at": "2026-10-29",
+   "commit": "b705f93820a4bf862ce50d35b0191bce69ddadd4",
+   "touched": [
+    "changelog.d/preflight-bare-python-is-the-runner.fixed.md",
+    "scripts/preflight.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/preflight-bare-python-is-the-runner.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
