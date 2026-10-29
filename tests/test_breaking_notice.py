@@ -615,3 +615,16 @@ def test_an_unread_answer_stays_not_read(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(module.consumers, "answer_of", answer_of)
     with pytest.raises(module.NotRun, match="не прочитано"):
         module.window_of(took("o/взял", None), "т")
+
+
+def test_a_non_json_answer_on_the_repository_is_not_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Не-JSON ответ при проверке репозитория — `NotRun`, а не трасса (`6f54d8f`, 039)."""
+
+    def request(method: str, path: str, token: str, *_: object, **__: object) -> object:
+        if path.endswith("/contents/.pipeline.yml"):
+            raise module.ghrest.NotFound(f"{method} {path} → 404: Not Found")
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setattr(module.ghrest, "request", request)
+    with pytest.raises(module.NotRun, match="не прочитано"):
+        module.window_of(took("o/шум", None), "т")

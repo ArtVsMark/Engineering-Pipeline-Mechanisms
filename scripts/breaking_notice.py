@@ -288,7 +288,8 @@ def seen(repo: str, token: str) -> None:
         raise NotRun(
             f"окно не прочитано: {repo} не виден токену — закрыт или удалён, а не без файла"
         ) from exc
-    except ghrest.TransportError as exc:
+    except (ghrest.TransportError, ValueError) as exc:
+        # ValueError — небитый, но не JSON ответ площадки: «не прочитано», как в `window_of` (039).
         raise NotRun(f"окно не прочитано: {exc}") from exc
 
 
