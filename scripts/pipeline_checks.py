@@ -644,8 +644,9 @@ def load(path: Path = DEFAULT_PATH, supplier: Path | None = None) -> dict[str, C
             )
     except contract_form.NotRun as exc:
         problems.append(str(exc))
-    # Записи соседа о наших механизмах (#1665) — тем же приёмом: битая
-    # запись видна шагом `pipeline` у него, а не нашим обходом семьи.
+    # Записи соседа о механизмах поставщика (#1665) — любого, кого называет
+    # поле `supplier`, а не только наших (взгляд на #1737) — тем же приёмом:
+    # битая запись видна шагом `pipeline` у него, а не обходом семьи.
     try:
         feedback_form.form_of(raw.get(feedback_form.SECTION))
     except feedback_form.NotRun as exc:
