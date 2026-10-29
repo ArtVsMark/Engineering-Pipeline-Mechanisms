@@ -1962,3 +1962,48 @@ def test_found_or_unread_keeps_a_number_and_relooks_an_absence() -> None:
     """Найденный номер едет в запись; «задачи нет» — `UNREAD`, ищется перед записью."""
     assert module.findings.found_or_unread(7) == 7
     assert module.findings.found_or_unread(None) == module.findings.UNREAD
+
+
+def test_a_switched_off_red_is_named_but_not_debt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Красное класса `off` названо своим разделом и в «Не держит слияние» не идёт (#1765).
+
+    Тот раздел план читает источником 3 (`debt.branch_debt`): выключенное
+    потребителем с причиной держало бы его непустым навсегда.
+    """
+    from tests.conftest import load_script
+
+    debt = load_script("debt.py")
+    answer = {
+        "lint / lint": module.policy.Check("lint / lint", module.policy.OFF, "своего Python нет"),
+        "facts / facts": module.policy.Check("facts / facts", module.policy.ADVISORY, "свои факты"),
+    }
+    written = platform(
+        monkeypatch,
+        [
+            {"name": "lint / lint", "status": "completed", "conclusion": "failure"},
+            {"name": "facts / facts", "status": "completed", "conclusion": "failure"},
+        ],
+    )
+    monkeypatch.setattr(module.policy, "load", lambda *a, **k: answer)
+    module.main(["--repo", "o/r"])
+    body = written[-1]
+    assert debt.section(body, "Не держит слияние") == ["facts / facts"]
+    assert "## Выключено потребителем — не долг" in body and "- `lint / lint`" in body
+
+
+def test_only_switched_off_red_is_not_called_green() -> None:
+    """Красно только выключенное — «Не держит слияние» не пишет «зелены» (взгляд на #1770)."""
+    body = module.render_body([], [], [], "голова", switched_off=["lint / lint"])
+    assert "совещательные проверки на голове зелены" not in body
+    assert "только выключенное потребителем" in body
+
+
+def test_switched_off_red_on_a_merged_head_is_not_debt() -> None:
+    """Выключенное на голове слитого — в разделе «не долг», а не в долге (взгляд на #1770, 195)."""
+    off = module.Unfixed(name="lint / lint", where="#7", run=1, klass=module.policy.OFF)
+    debt = module.Unfixed(name="facts / facts", where="#7", run=1, klass=module.policy.ADVISORY)
+    body = module.render_body([], [], [], "голова", unfixed=[off, debt])
+    merged = body.split("## Красное, пережившее слияние")[1]
+    switched = body.split("## Выключено потребителем — не долг")[1].split("## ")[0]
+    assert "facts / facts" in merged and "lint / lint" not in merged.split("## ")[0]
+    assert "lint / lint" in switched

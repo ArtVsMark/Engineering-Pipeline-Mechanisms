@@ -386,8 +386,13 @@ def test_the_subject_is_read_from_the_settings_and_the_step_names_none() -> None
         if str(one.get("name", "")).strip() == STEP_NAME
     ]
     assert len(runs) == 1, f"шаг «{STEP_NAME}» объявлен не один раз: {len(runs)}"
-    assert runs[0].split() == ["mypy"], (
-        f"шаг «{STEP_NAME}» зовёт mypy с доводами: {runs[0]} — состав живёт в настройках"
+    # ВЫЗОВ, А НЕ ВЕСЬ БЛОК (#1758): шаг теперь сперва спрашивает, есть ли
+    # настройка mypy вовсе, и без неё говорит «судить нечего». Предмет здесь —
+    # доводов у вызова нет; строки вызова ищутся по первому слову.
+    calls = [line.split() for line in runs[0].splitlines() if line.split()[:1] == ["mypy"]]
+    assert calls == [["mypy"]], (
+        f"шаг «{STEP_NAME}» зовёт mypy с доводами или не зовёт вовсе: {runs[0]}"
+        " — состав живёт в настройках"
     )
     # ПРЕДЕЛ НАЗВАН (046, взгляд на #1169): mypy примет в `files` и глоб, и
     # отдельный файл, а гейт обходит КАТАЛОГИ — шесть обходов здесь читают
