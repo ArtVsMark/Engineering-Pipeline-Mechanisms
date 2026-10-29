@@ -1012,6 +1012,29 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1773,
+   "merged_at": "2026-10-29",
+   "commit": "90321aaab9aaf627c3d410e377fda720a3f845d0",
+   "touched": [
+    ".github/workflows/step-schedules-seen.yml",
+    "changelog.d/schedules-cron-lists-and-weekdays.fixed.md",
+    "scripts/schedules_seen.py",
+    "tests/test_schedules_seen.py"
+   ],
+   "added": [
+    "changelog.d/schedules-cron-lists-and-weekdays.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source",
+    "what-the-graph-misses",
+    "work-the-plan"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
