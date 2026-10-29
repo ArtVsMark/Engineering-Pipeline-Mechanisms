@@ -1684,6 +1684,8 @@ def test_a_switched_off_check_does_not_hold_the_push(
     assert preflight.main([]) == expect
     said = capsys.readouterr().out
     assert ("класс off" in said) is (expect == preflight.EXIT_OK)
+    if expect == preflight.EXIT_OK:
+        assert "зелено: 0 проверок дерева прошли" in said, "выключенное красное посчитано прошедшим"
 
 
 @pytest.mark.parametrize("written", ["off", '"off"'], ids=["булево-yaml", "строкой"])

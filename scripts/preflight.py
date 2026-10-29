@@ -325,10 +325,13 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
     # дописывает к имени значения ячейки (`test (3.14)`), а имя с `${{ }}`
     # раскрывает сама — такая запись с ответом `.pipeline.yml` не совпадёт, и
     # красное её шага считается обязательным: ошибка в сторону «держит».
+    # Имя собирает `pipeline_checks` — тот же разбор, что читает ответ
+    # `.pipeline.yml`: второй разбор с литералом разошёлся бы молча, и `off`
+    # перестал бы действовать (214, взгляд на #1748).
     jobs = [
-        (f"{caller} / {inner}" if inner else caller, job_steps)
+        (pipeline_checks.composed(caller, inner) if inner else caller, job_steps)
         for key, job in (document.get("jobs") or {}).items()
-        for caller in [str((job or {}).get("name") or key)]
+        for caller in [pipeline_checks.own_name(str(key), job or {})]
         for inner, job_steps in _jobs_of(job or {}, path, supplier, supplier_repo)
     ]
     for check, job_steps in jobs:
@@ -1089,7 +1092,9 @@ def main(argv: list[str] | None = None) -> int:
         for step in red:
             print(f"  {step.name}: {step.command}")
         return EXIT_RED
-    print(f"\nзелено: {len(found)} проверок дерева прошли")
+    # Выключенные красные в «прошли» не входят: число сходится с перечнем
+    # выше (взгляд на #1748, `14e8da8`).
+    print(f"\nзелено: {len(found) - len(quiet)} проверок дерева прошли")
     if args.push:
         return push_branch(args.root)
     return EXIT_OK

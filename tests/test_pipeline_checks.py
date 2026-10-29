@@ -1469,3 +1469,10 @@ def test_a_declared_contract_surface_must_exist_in_the_tree(tmp_path: Path) -> N
         policy.load(path, supplier=supplier)
     (path.parent / "export").mkdir()
     assert "lint" in policy.load(path, supplier=supplier)
+
+
+def test_the_record_name_is_composed_in_one_place() -> None:
+    """Имя записи собирает одна функция: её зовут `check_names` и предполётная (214, #1748)."""
+    assert policy.own_name("lint", {}) == "lint"
+    assert policy.own_name("lint", {"name": "Линтер"}) == "Линтер"
+    assert policy.composed("lint", "lint") == f"lint{policy.COMPOSED}lint"
