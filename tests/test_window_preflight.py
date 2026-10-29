@@ -1427,6 +1427,16 @@ def test_the_test_step_takes_the_classifier_choice() -> None:
     assert preflight.narrowed([step], whole) == [step]
 
 
+def test_a_choice_that_lands_nowhere_is_said(capsys: pytest.CaptureFixture[str]) -> None:
+    """Строка тестов не с `pytest ` — выбор не лёг, и это сказано, а не «тест-файлов: N» (195)."""
+    step = preflight.Step("тесты", "python -m pytest --strict-markers", "")
+    picked = preflight.scope.Choice("code", ("tests/test_a.py",), "")
+    assert preflight.narrowed([step], picked) == [step]
+    assert "выбор тестов не применён" in capsys.readouterr().out
+    preflight.narrowed([preflight.Step("тесты", "pytest -q", "")], picked)
+    assert "не применён" not in capsys.readouterr().out
+
+
 def test_a_refused_choice_falls_back_to_the_whole_set(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:

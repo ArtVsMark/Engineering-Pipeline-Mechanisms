@@ -386,12 +386,14 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
     if choice is None or choice.tests is None:
         return found
     out: list[Step] = []
+    took = False
     for step in found:
         lines = step.command.splitlines()
         at = [n for n, line in enumerate(lines) if plain(line).startswith(PYTEST)]
         if not at:
             out.append(step)
             continue
+        took = True
         if not choice.tests:
             said = f"судить нечего: сценарий {choice.scenario}, тестов не задето"
             out.append(Step(step.name, f"echo {shlex.quote(said)}", step.installs, step.checks))
@@ -405,6 +407,15 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
             start = lines[n].index(PYTEST) + len(PYTEST)
             lines[n] = f"{lines[n][:start]}{picked} {lines[n][start:]}"
         out.append(Step(step.name, "\n".join(lines), step.installs, step.checks))
+    # СОСЕДНИЙ СЛУЧАЙ НАЗВАН (195, взгляд на #1750): строка тестов начинается
+    # не с `pytest ` — `python -m pytest`, `timeout 600 pytest`, — и выбор не
+    # лёг никуда. Набор тогда полный, и строка «тест-файлов: N» без этого слова
+    # обещала бы сужение, которого не было (045).
+    if not took:
+        print(
+            "выбор тестов не применён: ни одна строка шагов не начинается"
+            f" с `{PYTEST.strip()}` — полный набор"
+        )
     return out
 
 
