@@ -256,3 +256,42 @@ def test_added_mechanisms_are_only_the_added_ones(
     commit(repo)
     monkeypatch.chdir(repo)
     assert module.added_mechanisms("main") == ["scripts/check_new.py"]
+
+
+SIGN = "# SPDX-License-Identifier: MIT — https://github.com/{}\n"
+THIN = (
+    "on: push\njobs:\n  lint:\n    name: lint\n"
+    "    uses: {}/.github/workflows/step-lint.yml@v1.12.0\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("path", "text", "asked"),
+    [
+        ("scripts/check_kit.py", SIGN.format("o/поставщик") + '"""Гейт."""\n', False),
+        ("scripts/check_mine.py", SIGN.format("o/свой") + '"""Гейт."""\n', True),
+        (".github/workflows/ci.yml", THIN.format("o/поставщик"), False),
+        (".github/workflows/ci.yml", THIN.format("o/свой"), True),
+        (".github/workflows/own.yml", "on: push\njobs:\n  a:\n    steps:\n      - run: x\n", True),
+    ],
+    ids=["подпись-поставщика", "своя-подпись", "тонкий-вызов", "вызов-своего", "свой-прогон"],
+)
+def test_a_mechanism_connected_ready_is_not_asked(
+    repo: Path, path: str, text: str, asked: bool
+) -> None:
+    """Заготовка поставщика — ответ 162 подписью или тонким вызовом; своё судится (#1743)."""
+    _git(repo, "remote", "add", "origin", "https://github.com/o/свой.git")
+    where = repo / path
+    where.parent.mkdir(parents=True, exist_ok=True)
+    where.write_text(text, encoding="utf-8")
+    quiet, ready = module.silent([path], repo)
+    assert (quiet, ready) == (([path], []) if asked else ([], [path]))
+
+
+def test_an_unknown_self_lets_nothing_through(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Своё имя не узнать — подпись поставщика ничего не отпускает: судится как прежде (045)."""
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    (repo / "scripts" / "check_kit.py").write_text(
+        SIGN.format("o/поставщик") + '"""Гейт."""\n', encoding="utf-8"
+    )
+    assert module.silent(["scripts/check_kit.py"], repo) == (["scripts/check_kit.py"], [])

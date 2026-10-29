@@ -103,7 +103,10 @@ from pathlib import Path, PurePosixPath
 from typing import Final
 
 import check_new_is_tested as neighbour
+import gitcall
 import main_guard
+import onboard
+import yaml
 
 EXIT_OK: Final = 0
 EXIT_FOUND: Final = 1
@@ -217,17 +220,73 @@ def added_mechanisms(base: str) -> list[str]:
     )
 
 
-def silent(paths: list[str], root: Path) -> list[str]:
-    """Добавленные механизмы, в тексте которых записи о семье нет."""
+#: Адрес поставщика в строке подписи заготовки: `… — https://github.com/<владелец>/<репо>`.
+SIGNED_BY: Final = re.compile(
+    rf"{re.escape(onboard.LICENSE_ID)} — https://github\.com/([\w.-]+/[\w.-]+)"
+)
+
+
+def supplier_of(path: str, text: str) -> str:
+    """Чьей подписью подписан файл заготовки (`onboard.is_signed`); не подписан — пусто."""
+    if not onboard.is_signed(Path(path), text):
+        return ""
+    said = SIGNED_BY.search(text)
+    return said[1] if said else ""
+
+
+def calls_only(text: str, own: str) -> bool:
+    """Прогон, каждый джоб которого — вызов чужого переиспользуемого прогона: тонкий вызов."""
+    try:
+        flow = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return False
+    jobs = flow.get("jobs") if isinstance(flow, dict) else None
+    if not isinstance(jobs, dict) or not jobs:
+        return False
+    for job in jobs.values():
+        uses = str((job or {}).get("uses") or "") if isinstance(job, dict) else ""
+        caller = "/".join(uses.split("@", 1)[0].split("/")[:2])
+        if not uses or uses.startswith("./") or caller.lower() == own.lower():
+            return False
+    return True
+
+
+def connected(path: str, text: str, own: str) -> bool:
+    """Механизм подключён готовым у поставщика — заход положил его, а не проект написал.
+
+    ПОДКЛЮЧЁННОЕ ГОТОВЫМ — ТОЖЕ ОТВЕТ 162, и написан он подписью, а не абзацем
+    (#1743). Проба переноса #1558: изменение подключения у потребителя кладёт
+    полсотни механизмов поставщика, и гейт требовал абзаца о семье от каждого —
+    в файле, который проект не пишет, а `--update` перепишет. Признаки два:
+    подпись заготовки чужим репозиторием (её ставит `onboard.licensed`) и тонкий
+    вызов — прогон, где каждый джоб зовёт чужой переиспользуемый прогон, как
+    `ci.yml` заготовки, который строки лицензии не несёт. Своего имени не узнать
+    — не отпускается ничего: свой механизм, подписанный своим же адресом,
+    судится как прежде (045).
+    """
+    if not own:
+        return False
+    signed = supplier_of(path, text)
+    if signed:
+        return signed.lower() != own.lower()
+    return path.endswith((".yml", ".yaml")) and calls_only(text, own)
+
+
+def silent(paths: list[str], root: Path) -> tuple[list[str], list[str]]:
+    """Добавленные механизмы без записи о семье и подключённые готовыми у поставщика."""
+    own = gitcall.own_repo(root)
     quiet: list[str] = []
+    ready: list[str] = []
     for one in paths:
         try:
             text = (root / one).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise neighbour.NotRun(f"механизм {one} не прочитан: {exc}") from exc
-        if not recorded(text):
+        if connected(one, text, own):
+            ready.append(one)
+        elif not recorded(text):
             quiet.append(one)
-    return quiet
+    return quiet, ready
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -237,13 +296,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         added = added_mechanisms(args.base or neighbour.base_ref())
-        quiet = silent(added, Path())
+        quiet, ready = silent(added, Path())
     except neighbour.NotRun as exc:
         print(f"проверка не отработала: {exc}", file=sys.stderr)
         return EXIT_BROKEN
     if not added:
         print("новых механизмов в изменении нет — спрашивать семью не о чем")
         return EXIT_OK
+    if ready:
+        print(f"подключено готовым у поставщика, ответ 162 — подпись: {len(ready)}")
     if quiet:
         print("новый механизм не называет, у кого из семьи спросили и что нашли (162):")
         for one in quiet:
@@ -258,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
             f"Как спросить — навык каталога ask-the-family-first: {ASK_SKILL}"
         )
         return EXIT_FOUND
-    print(f"новые механизмы называют семью: {len(added)}")
+    print(f"новые механизмы называют семью: {len(added) - len(ready)}")
     return EXIT_OK
 
 
