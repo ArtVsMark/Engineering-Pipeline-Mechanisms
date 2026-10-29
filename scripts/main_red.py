@@ -1113,8 +1113,14 @@ def render_body(
     queue: Queue | None = None,
     tries: Proof | None = None,
     unfixed: list[Unfixed] | None = None,
+    switched_off: list[str] | None = None,
 ) -> str:
-    """Собирает тело задачи: три зеркала и один журнал."""
+    """Собирает тело задачи: три зеркала и один журнал.
+
+    `switched_off` — красное класса `off`: решение потребителя с причиной, а
+    не долг (#1765). Оно названо своим разделом, а в «Не держит слияние» не
+    идёт — тот раздел читает план источником 3 (`debt.branch_debt`).
+    """
     lines = [
         MARKER,
         "",
@@ -1163,8 +1169,30 @@ def render_body(
             "починкой, а не с забвением.",
             "",
         ]
+    elif switched_off:
+        # КРАСНО ТОЛЬКО ВЫКЛЮЧЕННОЕ — НЕ «ЗЕЛЕНО» (взгляд на #1770): раздел ниже
+        # называет то же красное, и «зелены» здесь ему противоречило бы.
+        lines += ["Пусто — красное на голове только выключенное потребителем, раздел ниже.", ""]
     else:
         lines += ["Пусто — совещательные проверки на голове зелены.", ""]
+
+    # ВЫКЛЮЧЕННОЕ НА ГОЛОВАХ СЛИТЫХ — ТОЖЕ НЕ ДОЛГ (взгляд на #1770, 195): класс
+    # `off` решён потребителем и для слитого так же, как для головы.
+    unfixed = unfixed or []
+    off_merged = [item for item in unfixed if item.klass == policy.OFF]
+    unfixed = [item for item in unfixed if item.klass != policy.OFF]
+    if switched_off or off_merged:
+        lines += [
+            "## Выключено потребителем — не долг",
+            "",
+            "Класс `off` в `.pipeline.yml`: проверку проект выключил с причиной.",
+            "Красное названо, чтобы не пропасть молча (045), но долгом не считается",
+            "и в план не идёт (#1765).",
+            "",
+            *[f"- `{name}`" for name in switched_off or []],
+            *[item.said() for item in off_merged],
+            "",
+        ]
 
     lines += ["## Красное, пережившее слияние — источник 3", ""]
     lines += [
@@ -1282,6 +1310,10 @@ def main(argv: list[str] | None = None) -> int:
         fed = policy.feeds()
         red = red_of(runs)
         holds, rest = split(red, required)
+        # ВЫКЛЮЧЕННОЕ — НЕ ДОЛГ (#1765): класс `off` решён потребителем с
+        # причиной. Перезапуск и прочие решения по `rest` его видят, как прежде;
+        # меняется только раздел, в котором он назван.
+        switched = set(policy.names_of(answer, policy.OFF))
 
         live_number, body = findings.live_issue(args.repo, token, MARKER)
         flakes = parse_flakes(body)
@@ -1333,7 +1365,8 @@ def main(argv: list[str] | None = None) -> int:
         for name in holds:
             print(f"  [источник 0] {name}")
         for name in rest:
-            print(f"  [источник 3] {name}")
+            # Выключенное — не долг и здесь, а не только в теле задачи (взгляд на #1770).
+            print(f"  [{'выключено, не долг' if name in switched else 'источник 3'}] {name}")
         # МИГАНИЕ НА ГОЛОВЕ ИЗМЕНЕНИЯ ВИДНО ОТСЮДА ЖЕ. Реестр мигания один
         # (#99), и второй список того же разошёлся бы с первым молча (022).
         # ПЕРЕЗАПУСК НА ИЗМЕНЕНИИ ДЕЛАЕТСЯ С 21.09.2026 — им занят
@@ -1381,7 +1414,16 @@ def main(argv: list[str] | None = None) -> int:
         save(
             args.repo,
             token,
-            render_body(holds, rest, flakes, sha, queue, proof, seen.unfixed),
+            render_body(
+                holds,
+                [name for name in rest if name not in switched],
+                flakes,
+                sha,
+                queue,
+                proof,
+                seen.unfixed,
+                [name for name in rest if name in switched],
+            ),
             args.apply,
             findings.found_or_unread(live_number),
         )

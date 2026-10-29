@@ -175,7 +175,23 @@ def test_without_the_file_the_boundary_is_the_connection(tmp_path: Path) -> None
         "-m",
         "после",
     )
-    assert named_since(tmp_path, tmp_path / ".runner") == (0, connected)
+    # Отметка — РОДИТЕЛЬ коммита подключения: он сам входит в проверку (#1762).
+    assert named_since(tmp_path, tmp_path / ".runner") == (
+        0,
+        git(tmp_path, "rev-parse", f"{connected}^1"),
+    )
+
+
+def test_a_connection_at_the_head_is_checked_not_refused(tmp_path: Path) -> None:
+    """Слияние подключения — голова: диапазон его содержит, а не пуст (#1762).
+
+    Подключение — корень истории: отметки нет, и спрашивается вся история.
+    """
+    git(tmp_path, "init", "-q")
+    (tmp_path / ".pipeline.yml").write_text("checks: {}\n", encoding="utf-8")
+    git(tmp_path, "add", ".pipeline.yml")
+    git(tmp_path, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "подключение")
+    assert named_since(tmp_path, tmp_path / ".runner") == (0, "")
 
 
 def test_the_file_names_the_boundary_and_an_empty_one_refuses(tmp_path: Path) -> None:
