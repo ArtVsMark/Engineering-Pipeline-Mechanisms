@@ -383,6 +383,21 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
 PYTEST: Final = "pytest "
 
 
+#: Вызов `pytest` словом команды, а не частью имени (`pytest-xdist`).
+PYTEST_CALL: Final = re.compile(r"(?<![\w-])pytest(?![\w-])")
+
+
+def runs_pytest(command: str) -> bool:
+    """Зовёт ли блок шага `pytest`, а не только называет его (взгляд на #1779, 045).
+
+    Строка установки (`pip install pytest…`) прогоном тестов не является.
+    """
+    return any(
+        PYTEST_CALL.search(line) and "pip install" not in line
+        for line in map(plain, command.splitlines())
+    )
+
+
 def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
     """Шаг тестов — по выбору классификатора (#1597); прочие шаги как есть.
 
@@ -420,7 +435,7 @@ def narrowed(found: list[Step], choice: scope.Choice | None) -> list[Step]:
     # обещала бы сужение, которого не было (045).
     # «ПОЛНЫЙ НАБОР» — ТОЛЬКО ТАМ, ГДЕ ОН ЕСТЬ (взгляд на #1750, 045): в шагах
     # без `pytest` вовсе прогона тестов нет, и обещать его было бы неправдой.
-    if not took and any(PYTEST.strip() in step.command for step in found):
+    if not took and any(runs_pytest(step.command) for step in found):
         print(
             "выбор тестов не применён: ни одна строка шагов не начинается"
             f" с `{PYTEST.strip()}` — набор идёт, как написан в шаге, целиком"

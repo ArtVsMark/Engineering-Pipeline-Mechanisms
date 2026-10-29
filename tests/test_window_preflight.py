@@ -1946,3 +1946,19 @@ def test_a_tree_without_its_own_python_still_refuses_a_bounds_dispute(tmp_path: 
     (flows / "b.yml").write_text('run: python -m pip install "ruff>=0.7,<1"\n', encoding="utf-8")
     with pytest.raises(env.NotRun, match="по-разному"):
         env.survey(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("command", "runs"),
+    [
+        ("pytest -q", True),
+        ("timeout 600 python -m pytest", True),
+        ("python -m pip install pytest-xdist", False),
+        ('python -m pip install "pytest>=8"', False),
+        ("ruff check", False),
+    ],
+    ids=["голый", "через-m", "имя-пакета", "строка-установки", "без-pytest"],
+)
+def test_runs_pytest_reads_a_call_not_a_name(command: str, runs: bool) -> None:
+    """«Шаг зовёт `pytest`» — вызов, а не подстрока имени пакета (взгляд на #1779)."""
+    assert preflight.runs_pytest(command) is runs
