@@ -1392,6 +1392,29 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1795,
+   "merged_at": "2026-10-30",
+   "commit": "6073091dd1a3e5d171965e02d848a0514911dd15",
+   "touched": [
+    "changelog.d/preflight-pytest-by-words.fixed.md",
+    "scripts/feedback_registry.py",
+    "scripts/preflight.py",
+    "tests/test_untrusted.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/preflight-pytest-by-words.fixed.md"
+   ],
+   "expected": [
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
