@@ -1349,6 +1349,30 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1789,
+   "merged_at": "2026-10-30",
+   "commit": "7ec73b124d33fe2fc528293e1e2b61b3a29569be",
+   "touched": [
+    "changelog.d/feedback-shown-multiline.fixed.md",
+    "scripts/check_invisible.py",
+    "scripts/feedback_registry.py",
+    "tests/test_check_invisible.py",
+    "tests/test_feedback_registry.py"
+   ],
+   "added": [
+    "changelog.d/feedback-shown-multiline.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
