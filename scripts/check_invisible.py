@@ -362,7 +362,19 @@ def flag_tags(text: str) -> set[int]:
 
 def hidden(text: str) -> list[tuple[int, int, str]]:
     """Невидимые символы текста: строка, столбец и что это за символ."""
-    found: list[tuple[int, int, str]] = []
+    return [(line, column, what) for _, line, column, what in hidden_at(text)]
+
+
+def hidden_at(text: str) -> list[tuple[int, int, int, str]]:
+    """Невидимые символы текста: место от начала текста, строка, столбец и что это.
+
+    МЕСТО ОТДАЁТ ОБХОД, А НЕ ПОТРЕБИТЕЛЬ (взгляд на
+    ArtVsMark/Engineering-Pipeline-Mechanisms#1789, 210). Тело задачи
+    (`feedback_registry.shown`) нужно смещение, гейту — строка и столбец; пересчёт
+    столбца в смещение у потребителя — второе знание о том, как обход делит
+    строки, и при смене деления места разъехались бы молча.
+    """
+    found: list[tuple[int, int, int, str]] = []
     flags = flag_tags(text)
     line, column = 1, 0
     for at, char in enumerate(text):
@@ -387,7 +399,7 @@ def hidden(text: str) -> list[tuple[int, int, str]]:
             elif not fits(before, char):
                 said = "селектор варианта, которого у этой основы нет"
         if said:
-            found.append((line, column, f"U+{ord(char):04X} — {said}"))
+            found.append((at, line, column, f"U+{ord(char):04X} — {said}"))
     return found
 
 
