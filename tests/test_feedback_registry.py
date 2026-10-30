@@ -341,6 +341,18 @@ def test_an_invisible_character_from_the_neighbour_is_shown(char: str) -> None:
     assert not module.check_invisible.hidden(said), "агент читает то же, что видит человек"
 
 
+def test_an_invisible_character_after_the_first_line_is_shown_in_place() -> None:
+    """Многострочный замер: невидимое второй строки — на своём месте (взгляд на #1787).
+
+    `shown` идёт до склейки строк, и столбец, взятый индексом от начала текста,
+    оставлял символ сырым, а видимой записью делал чужой символ первой строки.
+    """
+    zwsp = chr(0x200B)
+    said = module.shown(f"первая строка\nвтор{zwsp}ая")
+    assert said == "первая строка\nвтор\\u{200b}ая"
+    assert not module.check_invisible.hidden(module.quoted(f"раз\nдва{zwsp}три"))
+
+
 def test_a_neighbours_text_carries_no_marker() -> None:
     """Метка живой задачи из чужого текста не складывается подстрокой."""
     said = module.quoted(module.findings.MARKER)

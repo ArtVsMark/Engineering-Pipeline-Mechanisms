@@ -116,8 +116,15 @@ def shown(text: str) -> str:
     — `check_invisible.hidden`, тот же, что у гейта текста для агента (214), с
     его законными случаями вроде соединителя в составном эмодзи. Символ не
     выбрасывается: замер соседа читается тем же, только видно, что в нём было.
+
+    МЕСТО — ОТ НАЧАЛА ТЕКСТА, А НЕ ОТ НАЧАЛА СТРОКИ (взгляд на
+    ArtVsMark/Engineering-Pipeline-Mechanisms#1787): `hidden` отдаёт строку и
+    столбец, а `quoted` зовёт `shown` до склейки строк. Столбец, взятый как
+    индекс, в многострочном замере оставлял невидимое сырым и заменял чужой
+    символ первой строки.
     """
-    marks = {column - 1 for _, column, _ in check_invisible.hidden(text)}
+    starts = [0] + [at + 1 for at, char in enumerate(text) if char == "\n"]
+    marks = {starts[line - 1] + column - 1 for line, column, _ in check_invisible.hidden(text)}
     return "".join(
         f"\\u{{{ord(char):04x}}}" if at in marks else char for at, char in enumerate(text)
     )
