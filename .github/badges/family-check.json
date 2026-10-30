@@ -3,17 +3,17 @@
   "project": "ArtVsMark/Engineering-Pipeline-Mechanisms",
   "segments": {
     "gives": {
-      "state": "behind",
+      "state": "ok",
       "why": "",
       "links": [
         {
           "segment": "gives",
           "publisher": "ArtVsMark/Engineering-Pipeline-Mechanisms",
           "what": "release",
-          "mine": "v1.13.0",
+          "mine": "v1.14.0",
           "latest": "v1.14.0",
           "where": ".github/badges/contracts.json",
-          "state": "behind",
+          "state": "ok",
           "why": ""
         },
         {
@@ -146,7 +146,7 @@
     {
       "code": "EPM",
       "repo": "ArtVsMark/Engineering-Pipeline-Mechanisms",
-      "state": "behind",
+      "state": "ok",
       "why": "свой: состояние отдачи"
     }
   ],
