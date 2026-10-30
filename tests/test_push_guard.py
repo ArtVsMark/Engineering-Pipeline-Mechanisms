@@ -1477,10 +1477,14 @@ def test_the_head_is_read_in_the_pushed_tree(
     ],
     ids=["описание-со-словом-push", "описание-push", "толчок", "кавычка-в-команде"],
 )
+@pytest.mark.parametrize("indent", [None, 2], ids=["одной-строкой", "в-несколько-строк"])
 def test_the_fallback_guard_reads_the_command_not_the_description(
-    tmp_path: Path, command: str, description: str, code: int
+    tmp_path: Path, command: str, description: str, code: int, indent: int | None
 ) -> None:
-    """Запасной режим судит значение `command`, а не хвост события с `description` (#1764)."""
+    """Запасной режим судит значение `command`, а не хвост события с `description` (#1764).
+
+    Событие в несколько строк судится так же (взгляд на #1776).
+    """
     where = tmp_path / "hooks"
     where.mkdir()
     for name in ("push_guard.sh", "push_guard.py"):
@@ -1488,7 +1492,9 @@ def test_the_fallback_guard_reads_the_command_not_the_description(
     said = subprocess.run(
         [str(where / "push_guard.sh")],
         input=json.dumps(
-            {"tool_input": {"command": command, "description": description}}, ensure_ascii=False
+            {"tool_input": {"command": command, "description": description}},
+            ensure_ascii=False,
+            indent=indent,
         ),
         capture_output=True,
         text=True,

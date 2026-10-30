@@ -762,7 +762,7 @@ def test_the_shared_step_draws_the_picture_before_it_publishes() -> None:
 FACTS_PUBLISH_RUN: Final = (
     'python $MECHANISMS/scripts/publish_facts.py "$RUNNER_TEMP/facts/facts.json" '
     '--workdir "$RUNNER_TEMP/publish" --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" '
-    "$ARCHIVE_FLAG"
+    "$ARCHIVE_FLAG $MANIFEST_FLAG"
 )
 
 
@@ -1616,6 +1616,29 @@ def test_the_shared_step_writes_the_manifest_only_for_a_consumer(
     )
     assert done.returncode == 0, done.stderr
     assert (tmp_path / "facts" / "contracts.json").is_file() is written
+
+
+def test_the_manifest_is_built_before_the_check() -> None:
+    """Манифест собирается ДО сверки фактов: она ищет его рядом с фактами (взгляд на #1776)."""
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-facts.yml").read_text("utf-8"))
+    names = [one.get("name") for one in flow["jobs"]["facts"]["steps"]]
+    assert names.index("манифест семьи потребителя") < names.index(
+        "сверить факты с договором семьи"
+    )
+
+
+def test_only_a_consumer_publishes_as_the_manifest_writer() -> None:
+    """`--own-manifest` — только у потребителя: у поставщика манифест пишет свой прогон (#1776)."""
+    flow = yaml.safe_load((ROOT / ".github" / "workflows" / "step-facts.yml").read_text("utf-8"))
+    step = next(
+        one
+        for one in flow["jobs"]["facts"]["steps"]
+        if one.get("name") == "опубликовать факты коммитом поверх ветки badges"
+    )
+    assert "$MANIFEST_FLAG" in step["run"]
+    said = step["env"]["MANIFEST_FLAG"]
+    assert "github.repository != job.workflow_repository" in said
+    assert "'--own-manifest'" in said
 
 
 @pytest.mark.parametrize("why", ["shallow", "unfetched", "unasked"])

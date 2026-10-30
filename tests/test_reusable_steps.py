@@ -16,6 +16,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Final
@@ -675,3 +676,82 @@ def test_the_family_check_finds_this_runs_facts_and_manifest(
     assert (tree / ".github/badges/contracts.json").is_file() is manifest
     if said:
         assert said in done.stdout, done
+
+
+def supplier_with_badges(tmp_path: Path, manifest: bool) -> Path:
+    """Дерево поставщика с `origin`, на ветке `badges` которого манифест есть или нет."""
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    tree = tmp_path / "tree"
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], check=True, timeout=60, capture_output=True)
+
+    git("init", "-q", "--bare", str(remote))
+    git("init", "-q", "-b", "badges", str(seed))
+    badges = seed / ".github" / "badges"
+    badges.mkdir(parents=True)
+    (badges / ("contracts.json" if manifest else "facts.json")).write_text(
+        '{"release": "v1"}', encoding="utf-8"
+    )
+    git("-C", str(seed), "add", "-A")
+    git("-C", str(seed), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "b")
+    git("-C", str(seed), "push", "-q", str(remote), "badges")
+    git("init", "-q", str(tree))
+    git("-C", str(tree), "remote", "add", "origin", str(remote))
+    return tree
+
+
+@pytest.mark.parametrize(
+    ("manifest", "failing", "taken", "said"),
+    [
+        (True, "", True, "манифест семьи — опубликованный на ветке badges"),
+        (False, "", False, "манифеста поставщика на ветке badges нет"),
+        (True, "ls-tree", False, "дерево ветки badges не прочитано"),
+        (True, "show", False, "есть, но не прочитан"),
+    ],
+    ids=["взят", "нет-на-ветке", "сбой-ls-tree", "сбой-show"],
+)
+def test_the_supplier_takes_its_published_manifest_or_says_why_not(
+    tmp_path: Path, manifest: bool, failing: str, taken: bool, said: str
+) -> None:
+    """Поставщик берёт манифест с `badges`; нет и сбои — каждое своим словом (взгляд на #1786)."""
+    tree = supplier_with_badges(tmp_path, manifest)
+    temp = tmp_path / "temp" / "facts"
+    temp.mkdir(parents=True)
+    (temp / "facts.json").write_text('{"schema": "2.1"}', encoding="utf-8")
+    path = os.environ["PATH"]
+    if failing:
+        # Подделка git, отказывающая одной подкоманде: прочие идут настоящим.
+        fake = tmp_path / "bin"
+        fake.mkdir()
+        real = shutil.which("git")
+        (fake / "git").write_text(
+            f'#!/bin/sh\n[ "$1" = "{failing}" ] && exit 1\nexec "{real}" "$@"\n', encoding="utf-8"
+        )
+        (fake / "git").chmod(0o755)
+        path = f"{fake}{os.pathsep}{path}"
+    supplier = "ArtVsMark/Engineering-Pipeline-Mechanisms"
+    env = {
+        **os.environ,
+        "PATH": path,
+        "RUNNER_TEMP": str(tmp_path / "temp"),
+        "GITHUB_REPOSITORY": supplier,
+        "SUPPLIER": supplier,
+    }
+    done = subprocess.run(
+        ["bash", "-e", "-c", facts_to_family_block()],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done
+    assert said in done.stdout, done
+    copied = tree / ".github" / "badges" / "contracts.json"
+    assert copied.is_file() is taken
+    if taken:
+        assert copied.read_text(encoding="utf-8") == '{"release": "v1"}'

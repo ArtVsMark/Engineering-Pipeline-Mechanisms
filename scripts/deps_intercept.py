@@ -146,7 +146,7 @@ def branch_of(dep: str, tag: str) -> str:
 def uses_re(dep: str) -> re.Pattern[str]:
     """Строка `uses:` этого действия: адрес, ссылка и хвост строки."""
     return re.compile(
-        rf"(?P<head>uses:\s*[\"']?{re.escape(dep)}(?:/[^@\s\"']*)?@)"
+        rf"(?P<head>{policy.USES_HEAD}{re.escape(dep)}(?:/[^@\s\"']*)?@)"
         rf"(?P<ref>[^\s\"'#]+)(?P<tail>[\"']?.*)$",
         re.IGNORECASE,
     )

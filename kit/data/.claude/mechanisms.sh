@@ -41,12 +41,17 @@ cd "$root"
 # читателей `floor.sh`: второй разборщик на `sed` разошёлся бы с ними на первой
 # непривычной записи (взгляд на #1777, 214). Планка берётся, только если в ней
 # есть `yaml`: локально она может стоять голой, а рабочий `python3` — с ним
-# (взгляд на #1777, 195). Иначе — `python3`, как прежде.
+# (взгляд на #1777, 195). Иначе — `python3`, как прежде. Планка есть, а
+# `yaml` в ней нет — это сказано: упавший скрипт иначе дал бы прежний
+# `ModuleNotFoundError` без слова о планке (взгляд на #1777, 045).
 if [ -z "${PYTHON:-}" ]; then
   want=$(unset want; . .claude/hooks/floor.sh >/dev/null 2>&1; printf '%s' "${want:-}")
   if [ -n "$want" ] && "python$want" -c 'import yaml' >/dev/null 2>&1; then
     PYTHON="python$want"
   else
+    if [ -n "$want" ] && command -v "python$want" >/dev/null 2>&1; then
+      echo "механизмы: планка python$want найдена, но без yaml — идёт python3; поставьте pyyaml в python$want" >&2
+    fi
     PYTHON=python3
   fi
 fi

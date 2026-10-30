@@ -67,6 +67,10 @@ import yaml
 DEFAULT_PATH: Final = paths.PIPELINE
 WORKFLOWS: Final = paths.WORKFLOWS
 SCHEMA: Final = 4
+#: Начало строки `uses:` — значение в кавычках или без. ОДНО на все разборы
+#: вызовов (взгляд на #1785): форма кавычек была скопирована в шесть
+#: регулярок, и перечень форм между копиями расходился бы молча (090).
+USES_HEAD: Final = r"uses:\s*[\"']?"
 
 REQUIRED: Final = "required"
 ADVISORY: Final = "advisory"
@@ -489,8 +493,9 @@ def running_repo() -> str:
 def foreign(supplier: Path | None) -> bool:
     """Позван ЧУЖОЙ поставщик: выкачка — другой репозиторий, чем тот, где идёт прогон.
 
-    Не узнали одну из сторон — не чужой: так решалось и до проверки, и граница
-    названа в `contract_of`.
+    Не узнали одну из сторон — не чужой: так решалось и до проверки. Что из
+    этого следует для версии контракта, названо в `contract_of` («НЕУЗНАННАЯ
+    СТОРОНА»).
 
     ВНЕ ПЛОЩАДКИ СВОЯ СТОРОНА — `origin` РАБОЧЕГО ДЕРЕВА (взгляд на #1583).
     Локальный заход потребителя (`.claude/preflight.sh`) ставит `$MECHANISMS`,
@@ -540,9 +545,16 @@ def contract_of(tree: Path, supplier: Path | None) -> str | None:
     своим номером, у прочих сверять не с чем — ``None``, а не номер их
     выпусков (взгляд на #1778, 195). Поставщик назван, а версии в нём нет —
     отказ, а не «сверять не с чем» (075).
+
+    НЕУЗНАННАЯ СТОРОНА — НЕ ЧУЖОЙ (взгляд на #1778). Не прочитали свой
+    репозиторий или репозиторий выкачки — `foreign` отвечает «не чужой», и
+    дерево с механизмами сверяется своим номером, а не тегом. Граница: у
+    дерева с механизмами и неузнанной стороной свой номер первее тега и тогда,
+    когда позван на деле чужой поставщик. `foreign(None)` — тоже «не чужой»,
+    отдельной ветки для отсутствующего поставщика нет.
     """
     own = tree / paths.VERSION
-    if own.is_file() and carries_mechanisms(tree) and (supplier is None or not foreign(supplier)):
+    if own.is_file() and carries_mechanisms(tree) and not foreign(supplier):
         return file_text(own, "версия контракта").strip()
     if supplier is None:
         return None
@@ -1187,7 +1199,13 @@ def matrix_axis(path: Path, job: str, axis: str) -> tuple[list[str], str]:
         # Джоб-вызов — телом вызванного шага: образ у него, а матрица у
         # вызывающего (#1556).
         said = resolved_job(path, job)
-        values = [version_text(one, f"{path}:{job}") for one in said["strategy"]["matrix"][axis]]
+        listed = said["strategy"]["matrix"][axis]
+        # ОСЬ — СПИСОК, А НЕ СТРОКА (взгляд на #1786): выражение на самой оси
+        # (`python: ${{ fromJSON(…) }}`) — строка, и обход по ней давал версии
+        # посимвольно.
+        if not isinstance(listed, list):
+            raise BadPolicy(f"ось — не список значений, а «{listed}»")
+        values = [version_text(one, f"{path}:{job}") for one in listed]
         image = str(said["runs-on"])
     except (BadPolicy, KeyError, TypeError) as exc:
         raise BadPolicy(f"{path}: ось «{axis}» джоба «{job}» не прочитана ({exc!r})") from exc
@@ -1206,7 +1224,10 @@ def version_text(value: object, where: str) -> str:
     причиной, а `3.12` числом читается как прежде. Выражение `${{ … }}` —
     не версия, а подстановка площадки: тоже отказ (045).
     """
-    if isinstance(value, float) and len(str(value).split(".")[1]) < 2:
+    # Число без дробной части цифрами (`.inf`, `1e+20`) — тоже отказ, а не
+    # `IndexError` трассой (взгляд на #1786).
+    fraction = str(value).partition(".")[2] if isinstance(value, float) else ""
+    if isinstance(value, float) and (not fraction.isdigit() or len(fraction) < 2):
         raise BadPolicy(
             f"{where}: версия числом «{value}» неоднозначна — YAML теряет нули, пишите строкой"
         )

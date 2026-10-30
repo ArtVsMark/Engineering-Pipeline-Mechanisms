@@ -383,18 +383,56 @@ def steps(path: Path = CI, supplier: Path | None = None, supplier_repo: str = ""
 PYTEST: Final = "pytest "
 
 
-#: Вызов `pytest` словом команды, а не частью имени (`pytest-xdist`).
-PYTEST_CALL: Final = re.compile(r"(?<![\w-])pytest(?![\w-])")
+#: Где в строке оболочки начинается новая команда: после `&&`, `||`, `;`, `|`,
+#: `then`, `do`, `else` (взгляды на #1772, #1779).
+COMMAND_BREAK: Final = re.compile(r"&&|\|\||[;|]|\bthen\b|\bdo\b|\belse\b")
+#: Приставки перед именем команды: `exec`, `time`, `nice`, `timeout <срок>`,
+#: `env` и присваивания окружения `X=1`, исполнители `uv run`, `poetry run`,
+#: `pdm run`, `hatch run`, `pipenv run` (взгляд на #1788: прежний поиск слова
+#: находил `pytest` за ними, и разбор позиции не должен был это сузить).
+COMMAND_PREFIX: Final = re.compile(
+    r"^(?:(?:exec|time|nice|env)\s+|timeout\s+\S+\s+|\w+=\S*\s+"
+    r"|(?:uv|poetry|pdm|hatch|pipenv)\s+run\s+)+"
+)
+#: Вызов модуля интерпретатором: `python -m <модуль>` — и путём
+#: (`.venv/bin/python`), и с версией (`python3.12`), и с ключами до `-m`,
+#: в том числе с доводом (`-W error`) (взгляд на #1788).
+MODULE_CALL: Final = re.compile(
+    r"^(?:\S*/)?python(?:\d+(?:\.\d+)*)?(?:\s+-\w+(?:\s+(?!-)\S+)?)*?\s+-m\s+(?P<tool>[\w.-]+)"
+)
+
+
+def command_starts(line: str) -> list[str]:
+    """Текст каждой команды строки оболочки с её позиции, без приставок.
+
+    РАЗБОР ПОЗИЦИИ ОДИН (взгляды на #1779, 210): «где зовут инструмент» —
+    и для `runs_pytest`, и для сверки прокладок с прогонами в тестах. Прежде
+    `runs_pytest` искал слово в любом месте строки (`cat pytest.ini`,
+    `pip3 install pytest`) и выбрасывал строку целиком за `pip install`
+    (`pip install -e . && pytest`), а тест держал свой, другой разбор.
+    Граница названа: кавычки и подстановки `$(…)` не разбираются — `;`
+    внутри строки в кавычках разрежет её лишний раз; исполнители — только
+    перечисленные в `COMMAND_PREFIX`, ключи у них (`uv run --with x`) не
+    разбираются.
+    """
+    starts = (COMMAND_PREFIX.sub("", part.strip()) for part in COMMAND_BREAK.split(plain(line)))
+    return [one for one in starts if one]
+
+
+def calls_tool(start: str, tool: str) -> bool:
+    """Команда `start` (из `command_starts`) зовёт `tool` — голым словом или `python -m`."""
+    module = MODULE_CALL.match(start)
+    if module:
+        return module["tool"] == tool
+    return start.split()[0].rsplit("/", 1)[-1] == tool
 
 
 def runs_pytest(command: str) -> bool:
-    """Зовёт ли блок шага `pytest`, а не только называет его (взгляд на #1779, 045).
-
-    Строка установки (`pip install pytest…`) прогоном тестов не является.
-    """
+    """Зовёт ли блок шага `pytest` командой, а не только называет его (взгляд на #1779, 045)."""
     return any(
-        PYTEST_CALL.search(line) and "pip install" not in line
-        for line in map(plain, command.splitlines())
+        calls_tool(start, "pytest")
+        for line in command.splitlines()
+        for start in command_starts(line)
     )
 
 

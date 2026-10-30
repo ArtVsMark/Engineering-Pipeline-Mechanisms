@@ -421,3 +421,36 @@ def test_the_manifest_rides_with_the_facts_not_the_picture(stand: dict[str, Path
     assert PUBLISHED_MANIFEST in chosen and PUBLISHED_PICTURE not in chosen
     (stand["tmp"] / "contracts.json").unlink()
     assert PUBLISHED_MANIFEST not in module.targets(stand["source"], archive=False)
+
+
+@pytest.mark.parametrize("own", [True, False], ids=["consumer", "supplier"])
+def test_an_unbuilt_own_manifest_drops_the_old_one(
+    stand: dict[str, Path], capsys: pytest.CaptureFixture[str], own: bool
+) -> None:
+    """Манифест пишет этот вызов и он не собран — прежний снят; у поставщика — остаётся (#1776)."""
+    assert module.publish(stand["source"], stand["tmp"] / "w1", sha="abc")
+    (stand["tmp"] / "contracts.json").unlink()
+    stand["source"].write_text('{"a": 2}\n', encoding="utf-8")
+    assert module.publish(stand["source"], stand["tmp"] / "w2", sha="def", own_manifest=own)
+    if own:
+        with pytest.raises(subprocess.CalledProcessError):
+            on_branch(stand["remote"], PUBLISHED_MANIFEST)
+        assert "прежний манифест снимается" in capsys.readouterr().out
+    else:
+        assert on_branch(stand["remote"], PUBLISHED_MANIFEST) == '{"gives": {}}\n'
+
+
+def test_the_cli_passes_the_manifest_writer(
+    stand: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--own-manifest` доходит до `publish` (#1776)."""
+    seen: dict[str, object] = {}
+
+    def fake(*_: object, **kw: object) -> bool:
+        seen.update(kw)
+        return False
+
+    monkeypatch.setattr(module, "publish", fake)
+    argv = [str(stand["source"]), "--workdir", "w", "--sha", "s", "--repo", "o/r"]
+    assert module.main([*argv, "--own-manifest"]) == module.EXIT_OK
+    assert seen["own_manifest"] is True

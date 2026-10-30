@@ -1851,22 +1851,16 @@ def test_a_bare_tool_in_a_step_runs_on_the_running_interpreter(
     assert done.returncode == 0 and "чужой" not in done.stdout, done
 
 
-#: Где в строке оболочки начинается новая команда.
-COMMAND_BREAK = re.compile(r"&&|\|\||;|\bthen\b|\bdo\b|\belse\b")
-#: Приставки перед именем команды: `exec`, `time`, `timeout <срок>`.
-PREFIX = re.compile(r"^(?:(?:exec|time)\s+|timeout\s+\S+\s+)+")
-
-
 def test_the_command_positions_are_read_past_the_first_word() -> None:
-    """Голый инструмент виден и после `&&`, `then`, `timeout 60` (взгляд на #1772)."""
+    """Голый инструмент виден и после `&&`, `then`, `timeout 60`, `X=1` (взгляд на #1772)."""
     for line, tool in [
         ("timeout 60 pytest -q", "pytest"),
         ("make && ruff check", "ruff"),
         ("if x; then mypy; fi", "mypy"),
+        ("CI=1 pytest -q", "pytest"),
+        ("cat a | ruff check -", "ruff"),
     ]:
-        found = {
-            (PREFIX.sub("", part.strip()).split() or [""])[0] for part in COMMAND_BREAK.split(line)
-        }
+        found = {one.split()[0] for one in preflight.command_starts(line)}
         assert tool in found, (line, found)
 
 
@@ -1897,10 +1891,10 @@ def test_every_bare_tool_of_the_steps_has_a_shim() -> None:
     # приставками `exec`, `time`, `timeout <срок>`.
     for text in texts:
         for line in text.splitlines():
-            for part in COMMAND_BREAK.split(line.strip().removeprefix("run:")):
-                words = PREFIX.sub("", part.strip()).split()[:1]
-                if words and words[0] in installed:
-                    called.add(words[0])
+            for start in preflight.command_starts(line.strip().removeprefix("run:")):
+                word = start.split()[0]
+                if word in installed:
+                    called.add(word)
     assert called, "ни одного голого инструмента не найдено — разбор сломан"
     assert called <= set(preflight.STEP_TOOLS), called - set(preflight.STEP_TOOLS)
 
@@ -1956,9 +1950,50 @@ def test_a_tree_without_its_own_python_still_refuses_a_bounds_dispute(tmp_path: 
         ("python -m pip install pytest-xdist", False),
         ('python -m pip install "pytest>=8"', False),
         ("ruff check", False),
+        ("python -m pip install -e . && pytest -q", True),
+        ("pip3 install pytest", False),
+        ("cat pytest.ini", False),
+        ('echo "skip pytest"', False),
+        ("python -P -m pytest -q", True),
+        ("/usr/bin/pytest -q", True),
+        ("python3.12 -m pytest", True),
+        (".venv/bin/python -m pytest -q", True),
+        ("python -W error -m pytest", True),
+        ("uv run pytest -q", True),
+        ("poetry run pytest", True),
+        ("env CI=1 pytest", True),
+        ("python -m pip install pytest && uv run ruff check", False),
     ],
-    ids=["голый", "через-m", "имя-пакета", "строка-установки", "без-pytest"],
+    ids=[
+        "голый",
+        "через-m",
+        "имя-пакета",
+        "строка-установки",
+        "без-pytest",
+        "после-установки",
+        "pip3-установка",
+        "имя-файла",
+        "в-кавычках-echo",
+        "ключ-до-m",
+        "путём",
+        "python-с-версией",
+        "интерпретатор-путём",
+        "ключ-с-доводом",
+        "uv-run",
+        "poetry-run",
+        "env",
+        "исполнитель-не-pytest",
+    ],
 )
 def test_runs_pytest_reads_a_call_not_a_name(command: str, runs: bool) -> None:
     """«Шаг зовёт `pytest`» — вызов, а не подстрока имени пакета (взгляд на #1779)."""
     assert preflight.runs_pytest(command) is runs
+
+
+def test_calls_tool_reads_a_bare_word_and_a_module_call() -> None:
+    """`calls_tool`: голое слово, путь и `python -m` — вызов; аргумент — нет (взгляд на #1779)."""
+    assert preflight.calls_tool("pytest -q", "pytest")
+    assert preflight.calls_tool("/usr/bin/pytest", "pytest")
+    assert preflight.calls_tool("python3 -m pytest", "pytest")
+    assert not preflight.calls_tool("python -m pip install pytest", "pytest")
+    assert not preflight.calls_tool("cat pytest.ini", "pytest")
