@@ -37,3 +37,15 @@ def test_the_registry_quotes_through_the_package() -> None:
     assert registry.quoted("@сосед") == untrusted.quoted("@сосед")
     assert registry.MARK_OPEN == untrusted.MARK_OPEN
     assert "\\u{200b}" in registry.quoted(f"a{chr(0x200B)}b")
+
+
+def test_the_registry_shows_an_invisible_after_a_line_break() -> None:
+    """Многострочный замер: невидимое после перевода строки — видимой записью (взгляд на #1787).
+
+    `shown` идёт до склейки строк внутри `untrusted.quoted`; поломка этого
+    порядка проходила зелёной на однострочном вводе.
+    """
+    zwsp = chr(0x200B)
+    said = registry.quoted(f"раз\nдва{zwsp}три")
+    assert said == untrusted.quoted("раз два\\u{200b}три")
+    assert zwsp not in said
