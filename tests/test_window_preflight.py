@@ -1963,6 +1963,12 @@ def test_a_tree_without_its_own_python_still_refuses_a_bounds_dispute(tmp_path: 
         ("poetry run pytest", True),
         ("env CI=1 pytest", True),
         ("python -m pip install pytest && uv run ruff check", False),
+        ("coverage run -m pytest", True),
+        ("xvfb-run -a pytest", True),
+        ("nice -n 10 pytest", True),
+        ("env -i PATH=/x pytest", True),
+        ("uv run --with pytest-cov pytest", True),
+        ("poetry add --group dev pytest", False),
     ],
     ids=[
         "голый",
@@ -1983,6 +1989,12 @@ def test_a_tree_without_its_own_python_still_refuses_a_bounds_dispute(tmp_path: 
         "poetry-run",
         "env",
         "исполнитель-не-pytest",
+        "coverage-run",
+        "xvfb-run",
+        "nice-с-ключом",
+        "env-с-ключом",
+        "uv-run-с-ключом",
+        "poetry-add",
     ],
 )
 def test_runs_pytest_reads_a_call_not_a_name(command: str, runs: bool) -> None:
@@ -1990,10 +2002,9 @@ def test_runs_pytest_reads_a_call_not_a_name(command: str, runs: bool) -> None:
     assert preflight.runs_pytest(command) is runs
 
 
-def test_calls_tool_reads_a_bare_word_and_a_module_call() -> None:
-    """`calls_tool`: голое слово, путь и `python -m` — вызов; аргумент — нет (взгляд на #1779)."""
-    assert preflight.calls_tool("pytest -q", "pytest")
-    assert preflight.calls_tool("/usr/bin/pytest", "pytest")
-    assert preflight.calls_tool("python3 -m pytest", "pytest")
-    assert not preflight.calls_tool("python -m pip install pytest", "pytest")
-    assert not preflight.calls_tool("cat pytest.ini", "pytest")
+def test_calls_pytest_reads_a_word_not_a_package_or_a_part() -> None:
+    """`calls_pytest`: слово `pytest` — вызов; пакет после установки и часть слова — нет (#1788)."""
+    assert preflight.calls_pytest("coverage run -m pytest")
+    assert preflight.calls_pytest("/usr/bin/pytest -q")
+    assert not preflight.calls_pytest("uv pip install pytest")
+    assert not preflight.calls_pytest("cat pytest.ini")
