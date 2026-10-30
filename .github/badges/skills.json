@@ -1415,6 +1415,28 @@
    ],
    "invoked": [],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1794,
+   "merged_at": "2026-10-30",
+   "commit": "7d7aba597fbdff4fba7f4feae6e2b070caf53f0b",
+   "touched": [
+    ".github/workflows/step-claude.yml",
+    ".github/workflows/step-review.yml",
+    ".github/workflows/step-task-items.yml",
+    ".rules/vendor-watch.json",
+    "changelog.d/deps-anthropics-claude-code-action-v1.0.264.changed.md"
+   ],
+   "added": [
+    "changelog.d/deps-anthropics-claude-code-action-v1.0.264.changed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "retell-from-the-source"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
