@@ -535,3 +535,12 @@ def test_joins_walks_back_over_the_selector_and_the_skin_tone() -> None:
     assert not module.joins("1\ufe0f\u200d\U0001f4bb", 2)
     assert not module.joins("\U0001f9d1\u200d", 1), "справа ничего — соединять нечего"
     assert not module.joins("\u200d\U0001f4bb", 0), "слева ничего — соединять нечего"
+
+
+def test_hidden_at_gives_the_offset_with_the_line_and_column() -> None:
+    """`hidden_at` — смещение от начала текста рядом со строкой и столбцом (#1789)."""
+    zwsp = chr(0x200B)
+    text = f"аб\nв{zwsp}"
+    assert [(at, line, column) for at, line, column, _ in module.hidden_at(text)] == [(4, 2, 2)]
+    assert text[4] == zwsp
+    assert module.hidden(text) == [(2, 2, module.hidden_at(text)[0][3])]

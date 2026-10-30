@@ -353,6 +353,22 @@ def test_an_invisible_character_after_the_first_line_is_shown_in_place() -> None
     assert not module.check_invisible.hidden(module.quoted(f"раз\nдва{zwsp}три"))
 
 
+@pytest.mark.parametrize(
+    ("text", "expect"),
+    [
+        ("а\n{z}б", "а\n\\u{200b}б"),
+        ("{z}а\nб{z}", "\\u{200b}а\nб\\u{200b}"),
+        ("а\r\nб{z}", "а\r\nб\\u{200b}"),
+        ("а\rб{z}", "а\\u{000d}б\\u{200b}"),
+    ],
+    ids=["начало-строки", "на-разных-строках", "crlf", "одиночный-cr"],
+)
+def test_shown_puts_each_mark_in_its_place(text: str, expect: str) -> None:
+    """Соседние случаи места: начало строки, разные строки, CRLF, одиночный CR (#1789)."""
+    zwsp = chr(0x200B)
+    assert module.shown(text.format(z=zwsp)) == expect
+
+
 def test_a_neighbours_text_carries_no_marker() -> None:
     """Метка живой задачи из чужого текста не складывается подстрокой."""
     said = module.quoted(module.findings.MARKER)
