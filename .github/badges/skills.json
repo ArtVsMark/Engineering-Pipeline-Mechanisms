@@ -1295,6 +1295,60 @@
     "bundle-the-work"
    ],
    "source": "строка «Навык:» тела слитого коммита"
+  },
+  {
+   "pr": 1788,
+   "merged_at": "2026-10-30",
+   "commit": "7add5d89904ecd2a99f17eb0b9986f1ddb0eeec4",
+   "touched": [
+    ".claude/hooks/install_floor.sh",
+    ".claude/hooks/push_guard.sh",
+    ".github/workflows/step-facts.yml",
+    "changelog.d/consumer-manifest-before-the-check.fixed.md",
+    "changelog.d/contract-of-names-the-unknown-side.fixed.md",
+    "changelog.d/facts-and-preflight-review-of-the-wave.fixed.md",
+    "changelog.d/findings-wave-sweep.fixed.md",
+    "changelog.d/kit-launcher-names-a-floor-without-yaml.fixed.md",
+    "changelog.d/preflight-command-positions.fixed.md",
+    "changelog.d/uses-head-is-one.fixed.md",
+    "kit/data/.claude/mechanisms.sh",
+    "scripts/check_agent_silenced.py",
+    "scripts/deps_intercept.py",
+    "scripts/drift.py",
+    "scripts/facts_common.py",
+    "scripts/family_uptake.py",
+    "scripts/pipeline_checks.py",
+    "scripts/preflight.py",
+    "scripts/publish_facts.py",
+    "tests/test_area_paths.py",
+    "tests/test_bindings.py",
+    "tests/test_consumer_preflight.py",
+    "tests/test_facts.py",
+    "tests/test_facts_common.py",
+    "tests/test_family_pinning.py",
+    "tests/test_pipeline_checks.py",
+    "tests/test_publish_facts.py",
+    "tests/test_push_guard.py",
+    "tests/test_reusable_steps.py",
+    "tests/test_window_preflight.py"
+   ],
+   "added": [
+    "changelog.d/consumer-manifest-before-the-check.fixed.md",
+    "changelog.d/contract-of-names-the-unknown-side.fixed.md",
+    "changelog.d/facts-and-preflight-review-of-the-wave.fixed.md",
+    "changelog.d/kit-launcher-names-a-floor-without-yaml.fixed.md",
+    "changelog.d/preflight-command-positions.fixed.md",
+    "changelog.d/uses-head-is-one.fixed.md"
+   ],
+   "expected": [
+    "a-gate-obeys-every-rule",
+    "bundle-the-work",
+    "close-a-finding",
+    "retell-from-the-source",
+    "what-the-graph-misses"
+   ],
+   "invoked": [],
+   "source": "строка «Навык:» тела слитого коммита"
   }
  ]
 }
