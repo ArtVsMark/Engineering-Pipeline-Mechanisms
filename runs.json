@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-11-10T12:19:03+00:00",
+  "updated": "2026-11-11T11:44:41+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -11845,23 +11845,122 @@
     },
     "2026-11-10": {
       "runs": {
-        "task-items": {
+        "hail": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 94,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 181,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "deps-intercept": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 64,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 52,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 85,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 27,
+          "seconds": 59,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "hail": {
-          "runs": 2,
+        "review": {
+          "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 50,
-          "timed": 2,
+          "seconds": 147,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "drift": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 45,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "rules-inbox": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 22,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "runs-series": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 51,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 27,
+          "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -11877,23 +11976,202 @@
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
-        },
-        "main-red": {
+        }
+      },
+      "coverage": 94.5
+    },
+    "2026-11-11": {
+      "runs": {
+        "task-items": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 54,
+          "seconds": 29,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
-        "deps-intercept": {
+        "verify-queue": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 101,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 8,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 379,
+          "timed": 8,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 216,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 3,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 20,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 31,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 5,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 119,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 104,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 3,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 4,
+          "red": 2,
+          "cancelled": 2,
+          "seconds": 1386,
+          "timed": 4,
+          "red_jobs": {
+            "lint / lint": 2,
+            "test": 2,
+            "test-matrix (3.14)": 2,
+            "test-matrix (3.15)": 2
+          },
+          "red_steps": {
+            "lint / lint · линтер": 2,
+            "test · вердикт матрицы": 2,
+            "test-matrix (3.14) · тесты": 2,
+            "test-matrix (3.15) · тесты": 2
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 8
+          }
+        },
+        "ci-complete": {
+          "runs": 4,
+          "red": 2,
+          "cancelled": 2,
+          "seconds": 1418,
+          "timed": 4,
+          "red_jobs": {
+            "ci-complete": 2
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 2
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 2
+          },
+          "red_whose": {
+            "свой": 2
+          }
+        },
+        "Поднят ArtVsMark/Engineering-Incidents-Playbook до v3.0.0 (+1)": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 23,
+          "seconds": 713,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "agent-pr": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 44,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "Поднят ArtVsMark/Engineering-Incidents-Playbook до v2.2.0 (+1)": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 660,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "github_actions in /. - Update #1694729501": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 47,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
