@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-11-14T11:17:45+00:00",
+  "updated": "2026-11-15T11:50:16+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -12790,6 +12790,116 @@
     },
     "2026-11-14": {
       "runs": {
+        "main-red": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 116,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "deps-intercept": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 36,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 123,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 34,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 54,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 79,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 146,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "drift": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 48,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "rules-inbox": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 16,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "runs-series": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 58,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
         "task-items": {
           "runs": 1,
           "red": 0,
@@ -12800,12 +12910,28 @@
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
+        }
+      },
+      "coverage": 94.5
+    },
+    "2026-11-15": {
+      "runs": {
+        "task-items": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 23,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
         },
         "hail": {
           "runs": 2,
           "red": 0,
           "cancelled": 0,
-          "seconds": 69,
+          "seconds": 52,
           "timed": 2,
           "red_jobs": {},
           "red_steps": {},
