@@ -2,7 +2,7 @@
   "_": "Ряд прогонов конвейера: день → прогон → числа. Ведёт scripts/runs_series.py.",
   "window_days": 90,
   "recount_days": 3,
-  "updated": "2026-11-23T14:12:25+00:00",
+  "updated": "2026-11-24T14:39:48+00:00",
   "days": {
     "2026-09-17": {
       "runs": {
@@ -14383,45 +14383,161 @@
     },
     "2026-11-23": {
       "runs": {
-        "task-items": {
-          "runs": 2,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 26,
-          "timed": 2,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
         "hail": {
-          "runs": 5,
+          "runs": 6,
           "red": 0,
           "cancelled": 0,
-          "seconds": 176,
-          "timed": 5,
+          "seconds": 209,
+          "timed": 6,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "verify-queue": {
-          "runs": 3,
+          "runs": 5,
           "red": 0,
           "cancelled": 0,
-          "seconds": 58,
-          "timed": 3,
+          "seconds": 115,
+          "timed": 5,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 7,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 242,
+          "timed": 7,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 275,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "review": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 179,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "drift": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 82,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "skills": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 34,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "rules-inbox": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 26,
+          "timed": 1,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
         },
         "main-red": {
-          "runs": 3,
+          "runs": 6,
           "red": 0,
           "cancelled": 0,
-          "seconds": 3,
-          "timed": 3,
+          "seconds": 222,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "badges": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 746,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "deps-intercept": {
+          "runs": 1,
+          "red": 1,
+          "cancelled": 0,
+          "seconds": 30,
+          "timed": 1,
+          "red_jobs": {
+            "intercept / intercept": 1
+          },
+          "red_steps": {
+            "intercept / intercept · перехватить сигналы бота": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "python-next": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 463,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "runs-series": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 47,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "task-items": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 26,
+          "timed": 2,
           "red_jobs": {},
           "red_steps": {},
           "red_marks": {},
@@ -14460,28 +14576,6 @@
           "red_marks": {},
           "red_whose": {}
         },
-        "automerge": {
-          "runs": 6,
-          "red": 0,
-          "cancelled": 3,
-          "seconds": 182,
-          "timed": 6,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
-        "work-plan": {
-          "runs": 4,
-          "red": 0,
-          "cancelled": 1,
-          "seconds": 174,
-          "timed": 4,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
         "claude": {
           "runs": 2,
           "red": 0,
@@ -14493,11 +14587,11 @@
           "red_marks": {},
           "red_whose": {}
         },
-        "skills": {
+        "build(deps): Bump anthropics/claude-code-action from 1.0.266 to 1.0.284": {
           "runs": 1,
           "red": 0,
           "cancelled": 0,
-          "seconds": 7,
+          "seconds": 14,
           "timed": 1,
           "red_jobs": {},
           "red_steps": {},
@@ -14550,17 +14644,6 @@
             "свой": 1
           }
         },
-        "build(deps): Bump anthropics/claude-code-action from 1.0.266 to 1.0.284": {
-          "runs": 1,
-          "red": 0,
-          "cancelled": 0,
-          "seconds": 14,
-          "timed": 1,
-          "red_jobs": {},
-          "red_steps": {},
-          "red_marks": {},
-          "red_whose": {}
-        },
         "github_actions in /. - Update #1722644182": {
           "runs": 1,
           "red": 0,
@@ -14571,6 +14654,219 @@
           "red_steps": {},
           "red_marks": {},
           "red_whose": {}
+        }
+      },
+      "coverage": 94.5
+    },
+    "2026-11-24": {
+      "runs": {
+        "task-items": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 29,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "hail": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 133,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "verify-queue": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 76,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "schedules-seen": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 10,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "main-red": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 59,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "work-plan": {
+          "runs": 4,
+          "red": 0,
+          "cancelled": 1,
+          "seconds": 176,
+          "timed": 4,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci-complete-wake": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 32,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "stuck": {
+          "runs": 3,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 120,
+          "timed": 3,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "automerge": {
+          "runs": 6,
+          "red": 0,
+          "cancelled": 3,
+          "seconds": 200,
+          "timed": 6,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "claude": {
+          "runs": 2,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 8,
+          "timed": 2,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "skills": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 1,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "ci": {
+          "runs": 3,
+          "red": 1,
+          "cancelled": 2,
+          "seconds": 591,
+          "timed": 3,
+          "red_jobs": {
+            "attribution / attribution": 1,
+            "journal / journal": 1,
+            "lint / lint": 1,
+            "pr-meta / pr-meta": 1,
+            "test": 1,
+            "test-matrix (3.14)": 1,
+            "test-matrix (3.15)": 1
+          },
+          "red_steps": {
+            "attribution / attribution · сверить атрибуцию": 1,
+            "journal / journal · фрагмент журнала": 1,
+            "lint / lint · линтер": 1,
+            "pr-meta / pr-meta · метки и связь с задачей": 1,
+            "test · вердикт матрицы": 1,
+            "test-matrix (3.14) · тесты": 1,
+            "test-matrix (3.15) · тесты": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 7
+          }
+        },
+        "ci-complete": {
+          "runs": 3,
+          "red": 1,
+          "cancelled": 2,
+          "seconds": 600,
+          "timed": 3,
+          "red_jobs": {
+            "ci-complete": 1
+          },
+          "red_steps": {
+            "ci-complete · опросить проверки на голове": 1
+          },
+          "red_marks": {
+            "ci-complete · сводный гейт опросил голову раньше соседей": 1
+          },
+          "red_whose": {
+            "свой": 1
+          }
+        },
+        "build(deps): Bump anthropics/claude-code-action from 1.0.266 to 1.0.286": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 11,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "github_actions in /. - Update #1726490240": {
+          "runs": 1,
+          "red": 0,
+          "cancelled": 0,
+          "seconds": 54,
+          "timed": 1,
+          "red_jobs": {},
+          "red_steps": {},
+          "red_marks": {},
+          "red_whose": {}
+        },
+        "deps-intercept": {
+          "runs": 1,
+          "red": 1,
+          "cancelled": 0,
+          "seconds": 28,
+          "timed": 1,
+          "red_jobs": {
+            "intercept / intercept": 1
+          },
+          "red_steps": {
+            "intercept / intercept · перехватить сигналы бота": 1
+          },
+          "red_marks": {},
+          "red_whose": {
+            "свой": 1
+          }
         }
       },
       "coverage": 94.5
